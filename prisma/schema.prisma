@@ -1,0 +1,389 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum ThemePreference {
+  system
+  light
+  dark
+}
+
+enum GroupRole {
+  owner
+  admin
+  member
+}
+
+enum MessageRequestStatus {
+  pending
+  accepted
+  declined
+}
+
+enum NotificationType {
+  login
+  salute
+  comment
+  reply
+  mention
+  follow
+  message_request
+  group_join
+  group_post
+}
+
+enum GroupVisibility {
+  public
+  private
+}
+
+enum PostReportReason {
+  spam
+  harassment
+  nudity
+  violence
+  other
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  displayName  String?
+  username     String?  @unique
+  bio          String?
+  profileImageUrl String?
+  coverImageUrl   String?
+  verified     Boolean  @default(false)
+  chatPublicKey String?
+  latitude     Float?
+  longitude    Float?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  posts            Post[]
+  comments         Comment[]
+  likes            PostLike[]
+  commentLikes     CommentLike[]
+  savedPosts       PostSave[]
+  reposts          Repost[]
+  hiddenPosts      HiddenPost[]
+  postReports      PostReport[]
+  blocksSent       Block[]       @relation("BlocksSent")
+  blocksReceived   Block[]       @relation("BlocksReceived")
+  notifications    Notification[] @relation("NotificationsReceived")
+  notificationActors Notification[] @relation("NotificationActors")
+  theme            UserTheme?
+  refreshTokens    RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  following        Follow[]       @relation("Following")
+  followers        Follow[]       @relation("Followers")
+  sentMessageRequests     MessageRequest[] @relation("SentMessageRequests")
+  receivedMessageRequests MessageRequest[] @relation("ReceivedMessageRequests")
+  groupMembers     GroupMember[]
+  groupPosts       GroupPost[]
+  sentMessages     Message[]      @relation("SentMessages")
+  receivedMessages Message[]      @relation("ReceivedMessages")
+
+  @@index([latitude, longitude])
+}
+
+model Follow {
+  followerId  String
+  followingId String
+  createdAt   DateTime @default(now())
+  follower    User     @relation("Following", fields: [followerId], references: [id], onDelete: Cascade)
+  following   User     @relation("Followers", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+  @@index([followingId])
+}
+
+model MessageRequest {
+  id          String               @id @default(uuid())
+  senderId    String
+  recipientId String
+  body        String
+  status      MessageRequestStatus @default(pending)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  sender      User                 @relation("SentMessageRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient   User                 @relation("ReceivedMessageRequests", fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, status, createdAt])
+  @@index([senderId, status, createdAt])
+}
+
+model UserTheme {
+  userId    String          @id
+  theme     ThemePreference @default(system)
+  updatedAt DateTime        @updatedAt
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid())
+  tokenHash String
+  userId    String
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  tokenHash String
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Post {
+  id           String   @id @default(uuid())
+  authorId     String
+  groupId      String?
+  text         String?
+  latitude     Float?
+  longitude    Float?
+  viewCount    Int      @default(0)
+  likeCount    Int      @default(0)
+  commentCount Int      @default(0)
+  pinnedAt     DateTime?
+  editedAt     DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  author   User          @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  group    Group?        @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  images   PostImage[]
+  hashtags PostHashtag[]
+  likes    PostLike[]
+  saves    PostSave[]
+  reposts  Repost[]
+  reports  PostReport[]
+  hiddenBy HiddenPost[]
+  comments Comment[]
+
+  @@index([authorId, createdAt])
+  @@index([groupId, createdAt])
+  @@index([createdAt])
+  @@index([latitude, longitude])
+}
+
+model PostImage {
+  id        String  @id @default(uuid())
+  postId    String
+  url       String
+  alt       String?
+  sortOrder Int     @default(0)
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+}
+
+model Hashtag {
+  id    String        @id @default(uuid())
+  name  String        @unique
+  posts PostHashtag[]
+}
+
+model PostHashtag {
+  postId    String
+  hashtagId String
+  post      Post    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  hashtag   Hashtag @relation(fields: [hashtagId], references: [id], onDelete: Cascade)
+
+  @@id([postId, hashtagId])
+}
+
+model PostLike {
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+}
+
+model Comment {
+  id        String    @id @default(uuid())
+  postId    String
+  authorId  String
+  parentId  String?
+  body      String
+  likeCount Int       @default(0)
+  editedAt  DateTime?
+  createdAt DateTime  @default(now())
+  post      Post      @relation(fields: [postId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: Cascade)
+  replies   Comment[] @relation("CommentReplies")
+  likes     CommentLike[]
+
+  @@index([postId, createdAt])
+  @@index([parentId, createdAt])
+}
+
+model Group {
+  id          String        @id @default(uuid())
+  name        String
+  slug        String        @unique
+  description String?
+  visibility  GroupVisibility @default(public)
+  inviteCode  String?         @unique
+  createdAt   DateTime        @default(now())
+  members     GroupMember[]
+  messages    Message[]
+  posts       Post[]
+  legacyPosts GroupPost[]
+}
+
+model GroupMember {
+  groupId  String
+  userId   String
+  role     GroupRole @default(member)
+  joinedAt DateTime  @default(now())
+  group    Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([groupId, userId])
+}
+
+model MessageReaction {
+  id        String   @id @default(uuid())
+  messageId String
+  userId    String
+  emoji     String
+  createdAt DateTime @default(now())
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@index([messageId])
+}
+
+model Message {
+  id          String   @id @default(uuid())
+  senderId    String
+  recipientId String?
+  groupId     String?
+  body        String
+  ciphertext  String?
+  nonce       String?
+  encrypted   Boolean  @default(false)
+  readAt      DateTime?
+  createdAt   DateTime @default(now())
+  sender      User     @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient   User?    @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
+  group       Group?   @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  reactions   MessageReaction[]
+
+  @@index([senderId, recipientId, createdAt])
+  @@index([groupId, createdAt])
+}
+
+
+model CommentLike {
+  commentId String
+  userId    String
+  createdAt DateTime @default(now())
+  comment   Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([commentId, userId])
+}
+
+model PostSave {
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  @@index([userId, createdAt])
+}
+
+model Repost {
+  id        String   @id @default(uuid())
+  postId    String
+  userId    String
+  text      String?
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+  @@index([userId, createdAt])
+}
+
+model HiddenPost {
+  postId    String
+  userId    String
+  createdAt DateTime @default(now())
+  post      Post     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+}
+
+model PostReport {
+  id        String           @id @default(uuid())
+  postId    String
+  userId    String
+  reason    PostReportReason @default(other)
+  note      String?
+  createdAt DateTime         @default(now())
+  post      Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, userId])
+}
+
+model Block {
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+  blocker   User     @relation("BlocksSent", fields: [blockerId], references: [id], onDelete: Cascade)
+  blocked   User     @relation("BlocksReceived", fields: [blockedId], references: [id], onDelete: Cascade)
+
+  @@id([blockerId, blockedId])
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  actorId   String?
+  type      NotificationType
+  entityId  String?
+  message   String
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+  user      User             @relation("NotificationsReceived", fields: [userId], references: [id], onDelete: Cascade)
+  actor     User?            @relation("NotificationActors", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt])
+}
+
+model GroupPost {
+  id        String   @id @default(uuid())
+  groupId   String
+  authorId  String
+  text      String
+  createdAt DateTime @default(now())
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  author    User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([groupId, createdAt])
+  @@index([authorId, createdAt])
+}

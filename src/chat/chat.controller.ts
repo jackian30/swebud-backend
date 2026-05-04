@@ -1,0 +1,24 @@
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt.guard';
+import { CurrentUser, AuthUser } from '../common/current-user.decorator';
+import { ChatService } from './chat.service';
+import { ChatGateway } from './chat.gateway';
+import { MessageReactionDto, RegisterChatKeyDto, SendDirectMessageDto } from './dto';
+
+@UseGuards(JwtAuthGuard)
+@Controller('chat')
+export class ChatController {
+  constructor(private chat: ChatService, private gateway: ChatGateway) {}
+  @Post('keys') registerKey(@CurrentUser() user: AuthUser, @Body() dto: RegisterChatKeyDto) { return this.chat.registerKey(user.id, dto); }
+  @Get('keys/:peerId') peerKey(@Param('peerId') peerId: string) { return this.chat.peerKey(peerId); }
+  @Post('messages') async send(@CurrentUser() user: AuthUser, @Body() dto: SendDirectMessageDto) { const message = await this.chat.send(user.id, dto); this.gateway.emitMessage(dto.recipientId, 'chat:message', message); this.gateway.emitMessage(user.id, 'chat:message', message); return message; }
+  @Post('messages/:id/reactions') async react(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: MessageReactionDto) { const reaction = await this.chat.react(user.id, id, dto); this.gateway.emitMessage(user.id, 'chat:reaction', reaction); return reaction; }
+  @Delete('messages/:id/reactions') unreact(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('emoji') emoji: string) { return this.chat.unreact(user.id, id, emoji); }
+  @Post('requests') async request(@CurrentUser() user: AuthUser, @Body() dto: SendDirectMessageDto) { const request = await this.chat.request(user.id, dto); this.gateway.emitMessage(dto.recipientId, 'chat:request', request); return request; }
+  @Get('requests') requests(@CurrentUser() user: AuthUser) { return this.chat.requests(user.id); }
+  @Patch('requests/:id/accept') async accept(@CurrentUser() user: AuthUser, @Param('id') id: string) { const request = await this.chat.accept(user.id, id); this.gateway.emitMessage(request.senderId, 'chat:request-updated', request); this.gateway.emitMessage(user.id, 'chat:request-updated', request); return request; }
+  @Patch('requests/:id/decline') decline(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.chat.decline(user.id, id); }
+  @Get('conversations/:peerId') conversation(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.conversation(user.id, peerId); }
+  @Get('unread-count') unreadCount(@CurrentUser() user: AuthUser) { return this.chat.unreadCount(user.id); }
+  @Patch('conversations/:peerId/read') markRead(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.markRead(user.id, peerId); }
+}

@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-swebud}
+      POSTGRES_USER: ${POSTGRES_USER:-swebud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swebud}
+    ports:
+      - "5432:5432"
+    volumes:
+      - swebud_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-swebud} -d ${POSTGRES_DB:-swebud}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mailhog:
+    image: mailhog/mailhog:v1.0.1
+    restart: unless-stopped
+    ports:
+      - "${MAILHOG_SMTP_PORT:-1026}:1025"
+      - "${MAILHOG_UI_PORT:-8026}:8025"
+
+  backend:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mailhog:
+        condition: service_started
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: ${DATABASE_URL:-postgresql://swebud:swebud@postgres:5432/swebud?schema=public}
+      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-change-me-too}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:9000}
+      SMTP_HOST: ${SMTP_HOST:-mailhog}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      MAIL_FROM: ${MAIL_FROM:-SweBud <no-reply@swebud.loc>}
+    command: sh -c "npx prisma db push --skip-generate && node dist/src/main.js"
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+
+  frontend:
+    build:
+      context: ../../swebud-frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${API_BASE_URL:-/api}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      API_BASE_URL: ${API_BASE_URL:-/api}
+      BACKEND_UPSTREAM: ${BACKEND_UPSTREAM:-http://backend:3000}
+    ports:
+      - "${FRONTEND_PORT:-9000}:80"
+
+volumes:
+  swebud_postgres_data:
