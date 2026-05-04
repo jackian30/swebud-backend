@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBud** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.1.0 beta**
+Current release: **0.1.1 beta**
 
 ## Stack
 
