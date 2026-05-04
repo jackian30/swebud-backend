@@ -1,0 +1,11 @@
+{
+  "name": "swebud-backend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SweBud backend service scaffold",
+  "scripts": {
+    "dev": "echo \"Implement backend dev command\"",
+    "build": "echo \"Implement backend build command\"",
+    "test": "echo \"Implement backend tests\""
+  }
+}
