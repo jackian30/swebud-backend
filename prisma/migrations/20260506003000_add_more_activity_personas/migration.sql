@@ -1,0 +1,10 @@
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'hiker';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'climber';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'martial_artist';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'dancer';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'pilates';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'calisthenics';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'rower';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'triathlete';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'soccer_player';
+ALTER TYPE "activity_persona" ADD VALUE IF NOT EXISTS 'basketball_player';

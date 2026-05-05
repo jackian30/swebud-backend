@@ -1,0 +1,10 @@
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'hiking';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'climbing';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'martial_arts';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'dance';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'pilates';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'calisthenics';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'rowing';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'triathlon';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'soccer';
+ALTER TYPE "buddy_activity" ADD VALUE IF NOT EXISTS 'basketball';

@@ -82,6 +82,16 @@ enum ActivityPersona {
   powerlifter
   crossfitter
   walker
+  hiker
+  climber
+  martial_artist
+  dancer
+  pilates
+  calisthenics
+  rower
+  triathlete
+  soccer_player
+  basketball_player
   other
 
   @@map("activity_persona")
@@ -94,6 +104,16 @@ enum BuddyActivity {
   yoga
   walking
   swimming
+  hiking
+  climbing
+  martial_arts
+  dance
+  pilates
+  calisthenics
+  rowing
+  triathlon
+  soccer
+  basketball
   sports
   other
 

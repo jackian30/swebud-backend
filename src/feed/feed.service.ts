@@ -357,6 +357,16 @@ export class FeedService {
       powerlifter: ['powerlifting', 'lifting', 'squat', 'bench', 'deadlift', 'gym'],
       crossfitter: ['crossfit', 'hiit', 'functional', 'gym'],
       walker: ['walking', 'walk', 'steps'],
+      hiker: ['hiking', 'hike', 'trail', 'outdoors'],
+      climber: ['climbing', 'climb', 'bouldering'],
+      martial_artist: ['martialarts', 'boxing', 'muaythai', 'bjj', 'mma', 'karate', 'taekwondo'],
+      dancer: ['dance', 'dancing', 'zumba'],
+      pilates: ['pilates', 'core', 'mobility'],
+      calisthenics: ['calisthenics', 'bodyweight', 'pullups', 'pushups'],
+      rower: ['rowing', 'row', 'erg'],
+      triathlete: ['triathlon', 'swim', 'bike', 'run', 'running', 'cycling', 'swimming'],
+      soccer_player: ['soccer', 'football', 'futbol'],
+      basketball_player: ['basketball', 'hoops'],
       other: [],
     };
     return new Set(tags[activityPersona] ?? []);
