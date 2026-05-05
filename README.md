@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBud** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.1.1 beta**
+Current release: **0.1.2 beta**
 
 ## Stack
 
@@ -16,7 +16,7 @@ Current release: **0.1.1 beta**
 
 ## Main features
 
-- Auth: register, login, refresh, logout, forgot/reset password
+- Auth: register, login, Google login scaffold, Cloudflare Turnstile checks, refresh, logout, forgot/reset password
 - Sliding sessions: authenticated API activity extends session validity up to 7 days from last activity
 - Posts: text/images, edit/delete owner-only, save, hide, report, repost
 - Salutes: post/comment salute interactions
@@ -67,6 +67,13 @@ Important variables:
 - `BACKEND_PORT`
 - `SMTP_HOST`
 - `SMTP_PORT`
+- `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` / `GOOGLE_OAUTH_REDIRECT_URI` — Google auth placeholders; `POST /auth/google` verifies Google ID tokens and returns onboarding status
+- `CLOUDFLARE_TURNSTILE_SITE_KEY` / `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY`, `CLOUDFLARE_TURNSTILE_SECRET_KEY` — Turnstile captcha config; backend skips verification in local dev when the secret is empty
+- `TENOR_API_KEY`, `TENOR_CLIENT_KEY` — GIF search/provider placeholders
+- `APP_VERSION`, `LEGAL_TERMS_URL`, `LEGAL_PRIVACY_URL` — release/legal metadata passed through the local Docker stack
+- `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` — reserved for Strava OAuth/webhook integration
+- `GARMIN_CONSUMER_KEY`, `GARMIN_CONSUMER_SECRET` — reserved for Garmin OAuth integration
+- `MAP_STYLE_URL` — frontend MapLibre/OpenFreeMap style URL used by the Docker stack
 
 Do not commit real `.env` files.
 
@@ -116,6 +123,16 @@ Stop/pause local stack:
 ```bash
 swebud-down
 ```
+
+Backend code is baked into the Docker image. After backend code or dependency changes, rebuild the image instead of only restarting the container:
+
+```bash
+./deployment/deploy.sh
+# or
+docker compose --env-file deployment/.env -f deployment/docker-compose.yml up -d --build backend
+```
+
+Database schema changes still need Prisma migrations (`npm run prisma:migrate` locally, `npm run prisma:deploy` for deploy flows).
 
 ## Seed data
 
@@ -168,7 +185,9 @@ Base path when proxied locally: `/api`
 Key endpoints:
 
 - `POST /auth/register`
-- `POST /auth/login`
+- `POST /auth/login` — accepts optional `captchaToken`; required when Turnstile secret is configured
+- `POST /auth/google` — accepts Google `idToken`, creates/links an incomplete Google user if needed, returns `requiresOnboarding` + `onboardingMissing`
+- `POST /auth/onboarding/complete` — completes username/date-of-birth/legal+data consent and optional multiple activity personas
 - `POST /auth/refresh`
 - `POST /auth/logout`
 - `POST /auth/forgot-password`
@@ -215,6 +234,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 - JWTs include a session id (`sid`) checked against `RefreshToken` rows.
 - Session expiry is sliding: authenticated API calls extend expiry to 7 days from that activity.
 - Refresh token rotation revokes the old stored token.
+- Google-created users do not bypass onboarding: auth responses include `requiresOnboarding` and `onboardingMissing` until username, date of birth, legal consent, and data consent are completed.
+- Turnstile is enforced on register/login when `CLOUDFLARE_TURNSTILE_SECRET_KEY` is set; with no secret it returns a local-dev skip and does not block.
 - E2EE chat support is currently a foundation only, not a production-audited Signal-grade implementation.
 
 ## Beta caveats

@@ -3,28 +3,82 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
+import { ActivityPersona } from '@prisma/client';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
-import { LoginDto, RegisterDto } from './dto';
+import { CompleteOnboardingDto, GoogleLoginDto, LoginDto, RegisterDto } from './dto';
+import { TurnstileService } from './turnstile.service';
 
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MS = 1000 * 60 * 30;
 
+type SafeUser = {
+  id: string;
+  email: string;
+  displayName?: string | null;
+  username: string;
+  usernameFinalized: boolean;
+  bio?: string | null;
+  profileImageUrl?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  gender?: string | null;
+  dateOfBirth?: Date | null;
+  activityPersona?: string | null;
+  activityPersonas?: ActivityPersona[];
+  legalConsentAt?: Date | null;
+  dataConsentAt?: Date | null;
+  googleId?: string | null;
+  googleEmailVerified?: boolean;
+};
+
+type GoogleTokenInfo = {
+  sub: string;
+  email: string;
+  email_verified?: boolean | string;
+  name?: string;
+  picture?: string;
+  aud?: string;
+};
+
 @Injectable()
 export class AuthService {
-  constructor(private prisma: PrismaService, private jwt: JwtService, private config: ConfigService, private mail: MailService, private notifications: NotificationsService) {}
+  constructor(
+    private prisma: PrismaService,
+    private jwt: JwtService,
+    private config: ConfigService,
+    private mail: MailService,
+    private notifications: NotificationsService,
+    private turnstile: TurnstileService,
+  ) {}
 
-  async register(dto: RegisterDto) {
+  async register(dto: RegisterDto, remoteIp?: string) {
+    await this.turnstile.verify(dto.captchaToken, remoteIp);
+    if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
+    if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
+
     const email = dto.email.toLowerCase().trim();
-    const existing = await this.prisma.user.findUnique({ where: { email } });
-    if (existing) throw new BadRequestException('Email already registered');
+    const username = this.normalizeUsername(dto.username);
+    if (!username) throw new BadRequestException('Username is required');
+    const existing = await this.prisma.user.findFirst({ where: { OR: [{ email }, { username }] } });
+    if (existing?.email === email) throw new BadRequestException('Email already registered');
+    if (existing?.username === username) throw new BadRequestException('Username already taken');
 
+    const now = new Date();
     const user = await this.prisma.user.create({
       data: {
         email,
+        username,
+        usernameFinalized: true,
         passwordHash: await bcrypt.hash(dto.password, 12),
-        displayName: dto.displayName?.trim(),
+        displayName: dto.displayName?.trim() || null,
+        gender: dto.gender,
+        dateOfBirth: dto.dateOfBirth,
+        activityPersona: dto.activityPersonas?.[0] ?? dto.activityPersona,
+        activityPersonas: dto.activityPersonas?.length ? dto.activityPersonas : (dto.activityPersona ? [dto.activityPersona] : []),
+        legalConsentAt: now,
+        dataConsentAt: now,
         theme: { create: { theme: 'system' } },
       },
       select: this.safeUserSelect(),
@@ -34,21 +88,79 @@ export class AuthService {
     return this.issueTokens(user);
   }
 
-  async login(dto: LoginDto) {
+  async login(dto: LoginDto, remoteIp?: string) {
+    await this.turnstile.verify(dto.captchaToken, remoteIp);
     const identifier = dto.email.toLowerCase().trim();
     const user = await this.prisma.user.findFirst({
       where: {
         OR: [
           { email: identifier },
-          { displayName: { equals: dto.email.trim(), mode: 'insensitive' } },
+          { username: identifier.replace(/^@/, '') },
         ],
       },
+      select: { ...this.safeUserSelect(), passwordHash: true },
     });
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) throw new UnauthorizedException('Invalid credentials');
     const activeSessions = await this.prisma.refreshToken.count({ where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } } });
-    const tokens = await this.issueTokens({ id: user.id, email: user.email, displayName: user.displayName, bio: user.bio, latitude: user.latitude, longitude: user.longitude });
+    const safeUser = Object.fromEntries(Object.entries(user).filter(([key]) => key !== 'passwordHash')) as SafeUser;
+    const tokens = await this.issueTokens(safeUser);
     if (activeSessions > 0) void this.notifications.create({ userId: user.id, actorId: user.id, type: 'login', message: 'New login detected on another device.' } as any);
     return tokens;
+  }
+
+  async googleLogin(dto: GoogleLoginDto) {
+    const profile = await this.verifyGoogleIdToken(dto.idToken);
+    const email = profile.email.toLowerCase().trim();
+    const googleEmailVerified = profile.email_verified === true || profile.email_verified === 'true';
+    const existing = await this.prisma.user.findFirst({ where: { OR: [{ googleId: profile.sub }, { email }] }, select: this.safeUserSelect() });
+
+    const user = existing
+      ? await this.prisma.user.update({
+        where: { id: existing.id },
+        data: { googleId: profile.sub, googleEmailVerified, verified: googleEmailVerified || undefined, displayName: existing.displayName ?? profile.name ?? null, profileImageUrl: profile.picture ?? undefined },
+        select: this.safeUserSelect(),
+      })
+      : await this.prisma.user.create({
+        data: {
+          email,
+          googleId: profile.sub,
+          googleEmailVerified,
+          verified: googleEmailVerified,
+          passwordHash: await bcrypt.hash(randomBytes(32).toString('hex'), 12),
+          displayName: profile.name ?? email.split('@')[0],
+          username: await this.googlePlaceholderUsername(),
+          usernameFinalized: false,
+          profileImageUrl: profile.picture,
+          theme: { create: { theme: 'system' } },
+        },
+        select: this.safeUserSelect(),
+      });
+
+    return this.issueTokens(user);
+  }
+
+  async completeOnboarding(userId: string, dto: CompleteOnboardingDto) {
+    if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
+    const username = this.normalizeUsername(dto.username);
+    if (!username) throw new BadRequestException('Username is required');
+    const existing = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
+    if (existing && existing.id !== userId) throw new BadRequestException('Username already taken');
+    const now = new Date();
+    const activityPersonas = dto.activityPersonas ?? [];
+    const user = await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        username,
+        usernameFinalized: true,
+        dateOfBirth: dto.dateOfBirth,
+        legalConsentAt: now,
+        dataConsentAt: now,
+        activityPersonas,
+        activityPersona: activityPersonas[0] ?? undefined,
+      },
+      select: this.safeUserSelect(),
+    });
+    return this.issueTokens(user);
   }
 
   async refresh(refreshToken: string) {
@@ -110,14 +222,44 @@ export class AuthService {
     if (match) await this.prisma.refreshToken.update({ where: { id: match.id }, data: { revokedAt: new Date() } });
   }
 
-  private async issueTokens(user: { id: string; email: string; displayName?: string | null; bio?: string | null; latitude?: number | null; longitude?: number | null }) {
+  private async issueTokens(user: SafeUser) {
+    const onboarding = this.onboardingStatus(user);
     const sessionId = randomBytes(16).toString('hex');
-    const accessToken = await this.jwt.signAsync({ sub: user.id, email: user.email, sid: sessionId }, { secret: this.accessSecret(), expiresIn: '30d' });
-    const refreshToken = await this.jwt.signAsync({ sub: user.id, email: user.email, sid: sessionId }, { secret: this.refreshSecret(), expiresIn: '30d' });
+    const accessToken = await this.jwt.signAsync({ sub: user.id, email: user.email, sid: sessionId, onboarded: !onboarding.requiresOnboarding }, { secret: this.accessSecret(), expiresIn: '30d' });
+    const refreshToken = await this.jwt.signAsync({ sub: user.id, email: user.email, sid: sessionId, onboarded: !onboarding.requiresOnboarding }, { secret: this.refreshSecret(), expiresIn: '30d' });
     await this.prisma.refreshToken.create({
       data: { id: sessionId, userId: user.id, tokenHash: await bcrypt.hash(refreshToken, 12), expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
     });
-    return { user, accessToken, refreshToken };
+    return { user: { ...user, ...onboarding }, accessToken, refreshToken, ...onboarding };
+  }
+
+  private onboardingStatus(user: SafeUser) {
+    const onboardingMissing = [
+      !user.usernameFinalized ? 'username' : null,
+      !user.dateOfBirth ? 'dateOfBirth' : null,
+      !user.legalConsentAt ? 'legalConsent' : null,
+      !user.dataConsentAt ? 'dataConsent' : null,
+    ].filter(Boolean) as string[];
+    return { requiresOnboarding: onboardingMissing.length > 0, onboardingMissing };
+  }
+
+  private async verifyGoogleIdToken(idToken: string): Promise<GoogleTokenInfo> {
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`).catch(() => null);
+    if (!response?.ok) throw new UnauthorizedException('Invalid Google token');
+    const profile = await response.json() as GoogleTokenInfo;
+    if (!profile.sub || !profile.email) throw new UnauthorizedException('Invalid Google token');
+    const clientId = this.config.get<string>('GOOGLE_CLIENT_ID')?.trim();
+    if (clientId && profile.aud !== clientId) throw new UnauthorizedException('Google token audience mismatch');
+    return profile;
+  }
+
+  private async googlePlaceholderUsername() {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const username = `google_${randomBytes(5).toString('hex')}`;
+      const existing = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
+      if (!existing) return username;
+    }
+    return `google_${Date.now()}_${randomBytes(3).toString('hex')}`;
   }
 
   private async findMatchingToken<T extends { id: string; tokenHash: string }>(tokens: T[], token: string): Promise<T | null> {
@@ -127,5 +269,6 @@ export class AuthService {
 
   private accessSecret() { return this.config.get<string>('JWT_SECRET') ?? 'dev-secret'; }
   private refreshSecret() { return this.config.get<string>('JWT_REFRESH_SECRET') ?? 'dev-refresh-secret'; }
-  private safeUserSelect() { return { id: true, email: true, displayName: true, bio: true, latitude: true, longitude: true } as const; }
+  private normalizeUsername(username?: string) { return username?.toLowerCase().replace(/^@/, '').trim().replace(/[^a-z0-9._-]/g, '') ?? ''; }
+  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersona: true, activityPersonas: true, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true } as const; }
 }

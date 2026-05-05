@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { FeedService } from './feed.service';
@@ -11,6 +11,10 @@ export class FeedController {
   @Get('trending-hashtags') trendingHashtags() { return this.feedService.trendingHashtags(); }
   @Get('suggested-users') suggestedUsers(@CurrentUser() user: AuthUser) { return this.feedService.suggestedUsers(user.id); }
   @Get('suggested-groups') suggestedGroups(@CurrentUser() user: AuthUser) { return this.feedService.suggestedGroups(user.id); }
+  @Post('viewed') viewed(@CurrentUser() user: AuthUser, @Body('postIds') postIds: string[] = []) {
+    return this.feedService.markViewed(user.id, Array.isArray(postIds) ? postIds : []);
+  }
+
   @Get() feed(
     @CurrentUser() user: AuthUser,
     @Query('take') take?: string,
@@ -19,6 +23,7 @@ export class FeedController {
     @Query('sort') sort?: 'relevance' | 'latest' | 'trending' | 'unseen' | 'time',
     @Query('followingOnly') followingOnly?: string,
     @Query('tab') tab?: 'for-you' | 'following' | 'saved',
+    @Query('timezone') timezone?: string,
   ) {
     const parsedTake = take ? Number.parseInt(take, 10) : undefined;
     const parsedCursor = cursor ? Number.parseInt(cursor, 10) : undefined;
@@ -29,6 +34,7 @@ export class FeedController {
       sort,
       followingOnly: followingOnly === 'true' || tab === 'following',
       savedOnly: tab === 'saved',
+      timezone,
     });
   }
 }

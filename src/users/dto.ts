@@ -1,4 +1,6 @@
-import { IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { ActivityPersona, ProfileVisibility, UserGender } from '@prisma/client';
+import { IsArray, IsBoolean, IsDate, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
 
 export class UpdateMeDto {
   @IsOptional() @IsString() displayName?: string;
@@ -6,6 +8,29 @@ export class UpdateMeDto {
   @IsOptional() @IsString() bio?: string;
   @IsOptional() @IsString() profileImageUrl?: string;
   @IsOptional() @IsString() coverImageUrl?: string;
+  @IsOptional() @IsEnum(UserGender) gender?: UserGender;
+  @IsOptional() @Type(() => Date) @IsDate() dateOfBirth?: Date;
+  @IsOptional() @IsEnum(ActivityPersona) activityPersona?: ActivityPersona;
+  @IsOptional() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
+  @IsOptional() @IsEnum(ProfileVisibility) profileVisibility?: ProfileVisibility;
   @IsOptional() @IsNumber() @Min(-90) @Max(90) latitude?: number;
   @IsOptional() @IsNumber() @Min(-180) @Max(180) longitude?: number;
+}
+
+export class CompleteUserOnboardingDto {
+  @IsString() @MinLength(3) username!: string;
+  @Type(() => Date) @IsDate() dateOfBirth!: Date;
+  @IsBoolean() legalConsent!: boolean;
+  @IsBoolean() dataConsent!: boolean;
+  @IsOptional() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
+}
+
+export class UpdateAccountDto {
+  @IsEmail() email!: string;
+  @IsString() currentPassword!: string;
+}
+
+export class UpdatePasswordDto {
+  @IsString() currentPassword!: string;
+  @IsString() @MinLength(8) newPassword!: string;
 }

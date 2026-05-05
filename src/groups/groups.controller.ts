@@ -22,6 +22,7 @@ export class GroupsController {
     @Query('mine') mine?: string,
     @Query('take') take?: string,
     @Query('cursor') cursor?: string,
+    @Query('timezone') timezone?: string,
   ) {
     const parsedTake = take ? Number.parseInt(take, 10) : undefined;
     const parsedCursor = cursor ? Number.parseInt(cursor, 10) : undefined;
@@ -32,6 +33,7 @@ export class GroupsController {
       mine: mine === 'true',
       take: Number.isFinite(parsedTake) ? parsedTake : undefined,
       cursor: Number.isFinite(parsedCursor) ? parsedCursor : undefined,
+      timezone,
     });
   }
   @Post(':id/posts') createPost(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: GroupPostDto) { return this.groups.createPost(user.id, id, dto); }

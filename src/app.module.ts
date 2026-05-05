@@ -11,6 +11,10 @@ import { ThemeModule } from './theme/theme.module';
 import { UsersModule } from './users/users.module';
 import { UploadsModule } from './uploads/uploads.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { BuddyModule } from './buddy/buddy.module';
+import { IntegrationsModule } from './integrations/integrations.module';
+import { ActivitiesModule } from './activities/activities.module';
+import { TenorModule } from './tenor/tenor.module';
 
-@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, MailModule, AuthModule, UsersModule, FeedModule, PostsModule, GroupsModule, ChatModule, ThemeModule, UploadsModule, NotificationsModule] })
+@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, MailModule, AuthModule, UsersModule, FeedModule, PostsModule, GroupsModule, ChatModule, ThemeModule, UploadsModule, NotificationsModule, BuddyModule, IntegrationsModule, ActivitiesModule, TenorModule] })
 export class AppModule {}

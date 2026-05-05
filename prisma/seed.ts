@@ -34,9 +34,11 @@ async function main() {
     const first = faker.person.firstName();
     const last = faker.person.lastName();
     const loc = nearManila();
+    const username = `seed${first}${last}${i + 1}`.toLowerCase().replace(/[^a-z0-9._-]/g, '');
     users.push(await prisma.user.upsert({
       where: { email: `seed.user.${i + 1}@swebud.loc` },
       update: {
+        username,
         displayName: `${first} ${last}`,
         bio: faker.helpers.arrayElement([
           `Training for ${faker.helpers.arrayElement(['a 10K', 'hyrox', 'stronger legs', 'better endurance'])}.`,
@@ -48,6 +50,7 @@ async function main() {
       },
       create: {
         email: `seed.user.${i + 1}@swebud.loc`,
+        username,
         passwordHash,
         displayName: `${first} ${last}`,
         bio: `${faker.helpers.arrayElement(['Runner', 'Lifter', 'Cyclist', 'Yoga enjoyer'])}. ${faker.lorem.sentence()}`,
