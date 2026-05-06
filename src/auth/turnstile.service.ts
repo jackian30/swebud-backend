@@ -18,10 +18,20 @@ export class TurnstileService {
     return Boolean(this.secretKey());
   }
 
-  async verify(token?: string, remoteIp?: string) {
+  async verify(token?: string, remoteIp?: string, expectedAction?: string) {
     const secret = this.secretKey();
-    if (!secret) return { skipped: true, reason: 'CLOUDFLARE_TURNSTILE_SECRET_KEY is not configured' };
-    if (!token) throw new BadRequestException('Captcha token is required');
+    if (!secret) {
+      if (!this.canSkipMissingSecret()) {
+        throw new ServiceUnavailableException('Security check is not configured');
+      }
+      return { skipped: true, reason: 'CLOUDFLARE_TURNSTILE_SECRET_KEY is not configured' };
+    }
+    if (!token) {
+      if (this.canSkipLocalDev()) {
+        return { skipped: true, reason: 'Local dev security check skipped' };
+      }
+      throw new BadRequestException('Please complete the security check before continuing.');
+    }
 
     const body = new URLSearchParams({ secret, response: token });
     if (remoteIp) body.set('remoteip', remoteIp);
@@ -39,12 +49,27 @@ export class TurnstileService {
     }
 
     if (!payload.success) {
-      throw new BadRequestException({ message: 'Captcha verification failed', codes: payload['error-codes'] ?? [] });
+      throw new BadRequestException({ message: 'Security check failed. Please try again.', codes: payload['error-codes'] ?? [] });
+    }
+    if (expectedAction && payload.action && payload.action !== expectedAction) {
+      throw new BadRequestException('Security check action mismatch. Please try again.');
     }
     return { skipped: false, hostname: payload.hostname, action: payload.action };
   }
 
   private secretKey() {
-    return this.config.get<string>('CLOUDFLARE_TURNSTILE_SECRET_KEY')?.trim();
+    const value = this.config.get<string>('CLOUDFLARE_TURNSTILE_SECRET_KEY')?.trim();
+    return value && value !== '***' ? value : '';
+  }
+
+  private canSkipMissingSecret() {
+    if (this.canSkipLocalDev()) return true;
+    return false;
+  }
+
+  private canSkipLocalDev() {
+    if (process.env.NODE_ENV !== 'production') return true;
+    const frontendOrigin = this.config.get<string>('FRONTEND_ORIGIN')?.trim() ?? '';
+    return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(frontendOrigin);
   }
 }

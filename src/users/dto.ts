@@ -1,10 +1,10 @@
 import { Type } from 'class-transformer';
 import { ActivityPersona, ProfileVisibility, UserGender } from '@prisma/client';
-import { IsArray, IsBoolean, IsDate, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Max, Min, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsDate, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class UpdateMeDto {
   @IsOptional() @IsString() displayName?: string;
-  @IsOptional() @IsString() username?: string;
+  @IsOptional() @IsString() @MinLength(3) @MaxLength(32) username?: string;
   @IsOptional() @IsString() bio?: string;
   @IsOptional() @IsString() profileImageUrl?: string;
   @IsOptional() @IsString() coverImageUrl?: string;

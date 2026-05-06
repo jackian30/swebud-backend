@@ -4,11 +4,12 @@ import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { SESSION_TTL_MS } from './auth.service';
+import { requiredSecret } from '../common/security';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(config: ConfigService, private prisma: PrismaService) {
-    super({ jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(), ignoreExpiration: false, secretOrKey: config.get<string>('JWT_SECRET') ?? 'dev-secret' });
+    super({ jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(), ignoreExpiration: false, secretOrKey: requiredSecret(config, 'JWT_SECRET', 'dev-secret') });
   }
 
   async validate(payload: { sub: string; email: string; sid?: string }) {

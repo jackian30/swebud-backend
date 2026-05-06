@@ -15,6 +15,7 @@ mkdirSync(videoDir, { recursive: true });
 
 const maxImageBytes = 15 * 1024 * 1024;
 const maxVideoBytes = 100 * 1024 * 1024;
+const maxBatchBytes = 120 * 1024 * 1024;
 
 const allowedImageTypes = new Map([
   ['image/jpeg', '.jpg'],
@@ -67,9 +68,28 @@ async function persistUpload(file?: Express.Multer.File): Promise<UploadResponse
   if (!file) throw new BadRequestException('Attach a multipart file using the field name "file"');
   const kind = kindForMime(file.mimetype);
   if (!kind) throw new BadRequestException(`Unsupported media type: ${file.mimetype || 'unknown'}`);
+  assertMagicBytes(file);
 
   if (kind === 'image') return persistOptimizedImage(file);
   return persistVideo(file);
+}
+
+function assertMagicBytes(file: Express.Multer.File) {
+  const b = file.buffer;
+  const isJpeg = b.length > 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+  const isPng = b.length > 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47 && b[4] === 0x0d && b[5] === 0x0a && b[6] === 0x1a && b[7] === 0x0a;
+  const isWebp = b.length > 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WEBP';
+  const isGif = b.length > 6 && (b.toString('ascii', 0, 6) === 'GIF87a' || b.toString('ascii', 0, 6) === 'GIF89a');
+  const isMp4Like = b.length > 12 && b.toString('ascii', 4, 8) === 'ftyp';
+  const isWebm = b.length > 4 && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3;
+  const allowed =
+    (file.mimetype === 'image/jpeg' && isJpeg) ||
+    (file.mimetype === 'image/png' && isPng) ||
+    (file.mimetype === 'image/webp' && isWebp) ||
+    (file.mimetype === 'image/gif' && isGif) ||
+    ((file.mimetype === 'video/mp4' || file.mimetype === 'video/quicktime') && isMp4Like) ||
+    (file.mimetype === 'video/webm' && isWebm);
+  if (!allowed) throw new BadRequestException('Uploaded file content does not match its media type.');
 }
 
 async function persistOptimizedImage(file: Express.Multer.File): Promise<UploadResponse> {
@@ -162,13 +182,15 @@ export class UploadsController {
   }
 
   @Post('media/batch')
-  @UseInterceptors(FilesInterceptor('files', 10, {
+  @UseInterceptors(FilesInterceptor('files', 6, {
     storage: memoryStorage(),
     fileFilter: filterFor('media'),
-    limits: { fileSize: maxVideoBytes, files: 10 },
+    limits: { fileSize: maxVideoBytes, files: 6 },
   }))
   async mediaBatch(@UploadedFiles() files: Express.Multer.File[]) {
     if (!files?.length) throw new BadRequestException('Attach multipart files using the field name "files"');
+    const totalSize = files.reduce((sum, file) => sum + file.size, 0);
+    if (totalSize > maxBatchBytes) throw new BadRequestException('Batch upload is too large. Maximum total upload is 120MB.');
     return { files: await Promise.all(files.map(persistUpload)) };
   }
 }

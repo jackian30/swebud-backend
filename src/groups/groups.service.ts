@@ -1,9 +1,11 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateGroupDto, GroupMessageDto, GroupPostDto } from './dto';
+import { CreateGroupChannelDto, CreateGroupDto, GroupMessageDto, GroupPostDto, UpdateGroupSettingsDto } from './dto';
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
+const DEFAULT_GROUP_CHANNEL_NAME = 'main';
+const DEFAULT_GROUP_CHANNEL_DESCRIPTION = 'Main channel';
 
 @Injectable()
 export class GroupsService {
@@ -18,6 +20,7 @@ export class GroupsService {
         visibility: dto.visibility ?? 'public',
         inviteCode: randomBytes(6).toString('hex'),
         members: { create: { userId, role: 'owner' } },
+        chatChannels: { create: { name: DEFAULT_GROUP_CHANNEL_NAME, description: DEFAULT_GROUP_CHANNEL_DESCRIPTION, creatorId: userId } },
       },
       include: this.include(),
     });
@@ -36,11 +39,28 @@ export class GroupsService {
     }));
   }
 
+  async mine(userId: string) {
+    const groups = await this.prisma.group.findMany({
+      where: { members: { some: { userId } } },
+      orderBy: { createdAt: 'desc' },
+      include: this.include(true),
+    });
+    return groups.map((group) => {
+      const role = group.members.find((member) => member.userId === userId)?.role;
+      return {
+        ...group,
+        isMember: true,
+        capabilities: this.capabilities(role),
+        members: undefined,
+      };
+    });
+  }
+
   async get(userId: string, slug: string) {
     const group = await this.prisma.group.findUniqueOrThrow({ where: { slug }, include: this.include(true) });
     const isMember = group.members.some((member) => member.userId === userId);
     if (group.visibility === 'private' && !isMember) throw new ForbiddenException('Join this private group by invite first');
-    return { ...group, isMember };
+    return { ...group, isMember, capabilities: this.capabilities(group.members.find((member) => member.userId === userId)?.role) };
   }
 
   async join(userId: string, groupId: string) {
@@ -53,6 +73,34 @@ export class GroupsService {
     const group = await this.prisma.group.findUniqueOrThrow({ where: { inviteCode } });
     await this.join(userId, group.id);
     return this.get(userId, group.slug);
+  }
+
+
+  async updateSettings(userId: string, groupId: string, dto: UpdateGroupSettingsDto) {
+    const role = await this.memberRole(userId, groupId);
+    if (!this.canManage(role)) throw new ForbiddenException('Only group owners and admins can update settings');
+    const group = await this.prisma.group.update({
+      where: { id: groupId },
+      data: {
+        ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+        ...(dto.description !== undefined ? { description: dto.description.trim() } : {}),
+        ...(dto.profileImageUrl !== undefined ? { profileImageUrl: dto.profileImageUrl.trim() || null } : {}),
+        ...(dto.visibility !== undefined ? { visibility: dto.visibility } : {}),
+        ...(dto.allowAnonymousPosts !== undefined ? { allowAnonymousPosts: dto.allowAnonymousPosts } : {}),
+      },
+      include: this.include(true),
+    });
+    return { ...group, isMember: true, capabilities: this.capabilities(role) };
+  }
+
+  async updateRole(userId: string, groupId: string, memberId: string, nextRole: 'owner' | 'admin' | 'moderator' | 'member') {
+    const role = await this.memberRole(userId, groupId);
+    if (!this.canManage(role)) throw new ForbiddenException('Only group owners and admins can update roles');
+    if ((nextRole === 'owner' || role === 'admin') && role !== 'owner') throw new ForbiddenException('Only owners can assign owners or change admin roles');
+    if (memberId === userId && role === 'owner' && nextRole !== 'owner') throw new ForbiddenException('Owners cannot demote themselves');
+    await this.prisma.groupMember.update({ where: { groupId_userId: { groupId, userId: memberId } }, data: { role: nextRole } });
+    const group = await this.prisma.group.findUniqueOrThrow({ where: { id: groupId }, include: this.include(true) });
+    return { ...group, isMember: true, capabilities: this.capabilities(role) };
   }
 
   async posts(userId: string, groupId: string, filters: { sort?: 'latest' | 'trending' | 'most-commented' | 'oldest'; hashtag?: string; q?: string; mine?: boolean; take?: number; cursor?: number; timezone?: string } = {}) {
@@ -72,47 +120,119 @@ export class GroupsService {
       const stats = await this.trendingStats(posts.map((post) => post.id), filters.timezone);
       return posts
         .sort((a, b) => this.trendingScore(b, stats.get(b.id)) - this.trendingScore(a, stats.get(a.id)) || b.createdAt.getTime() - a.createdAt.getTime())
-        .slice(cursor, cursor + take);
+        .slice(cursor, cursor + take)
+        .map((post) => this.presentPost(post));
     }
-    return this.prisma.post.findMany({
+    const posts = await this.prisma.post.findMany({
       skip: cursor,
       take,
       where,
       orderBy: this.postOrderBy(filters.sort),
       include: this.postInclude(),
     });
+    return posts.map((post) => this.presentPost(post));
   }
 
   async createPost(userId: string, groupId: string, dto: GroupPostDto) {
     await this.ensureMember(userId, groupId);
-    return this.prisma.post.create({
+    const group = await this.prisma.group.findUniqueOrThrow({ where: { id: groupId }, select: { allowAnonymousPosts: true } });
+    const isAnonymous = Boolean(dto.anonymous && group.allowAnonymousPosts);
+    const post = await this.prisma.post.create({
       data: {
         groupId,
         authorId: userId,
+        isAnonymous,
         text: dto.text.trim(),
         hashtags: { create: this.extractHashtags(dto.text).map((name) => ({ hashtag: { connectOrCreate: { where: { name }, create: { name } } } })) },
       },
       include: this.postInclude(),
     });
+    return this.presentPost(post);
   }
 
   async removePost(userId: string, groupId: string, postId: string) {
     const post = await this.prisma.post.findUniqueOrThrow({ where: { id: postId }, select: { authorId: true, groupId: true } });
     if (post.groupId !== groupId) throw new ForbiddenException();
-    if (post.authorId !== userId) throw new ForbiddenException('Only the author can delete this group post');
+    const role = await this.memberRole(userId, groupId);
+    if (post.authorId !== userId && !this.canModerate(role)) throw new ForbiddenException('Only the author or group moderators can delete this group post');
     await this.prisma.post.delete({ where: { id: postId } });
   }
 
-  async messages(userId: string, groupId: string) {
-    await this.ensureCanView(userId, groupId);
-    return this.prisma.message.findMany({ where: { groupId }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+  async channels(userId: string, groupId: string) {
+    await this.ensureMember(userId, groupId);
+    await this.ensureDefaultChannel(groupId, userId);
+    const role = await this.memberRole(userId, groupId);
+    return this.prisma.groupChatChannel.findMany({
+      where: {
+        groupId,
+        OR: [
+          { visibility: 'public' },
+          ...(this.canManage(role) ? [{ visibility: 'private' as const }] : []),
+          { allowedUsers: { some: { userId } } },
+        ],
+      },
+      orderBy: [{ name: 'asc' }],
+      include: this.channelInclude(),
+    }).then((channels) => this.sortDefaultChannelFirst(channels));
   }
 
-  async sendMessage(userId: string, groupId: string, dto: GroupMessageDto) {
+  async createChannel(userId: string, groupId: string, dto: CreateGroupChannelDto) {
+    const role = await this.memberRole(userId, groupId);
+    if (!this.canModerate(role)) throw new ForbiddenException('Only group owners, admins, and moderators can create chat channels');
+    const name = this.normalizeChannelName(dto.name);
+    const visibility = dto.visibility ?? 'public';
+    const memberIds = visibility === 'private' ? await this.validGroupMemberIds(groupId, [...(dto.memberIds ?? []), userId]) : [];
+    return this.prisma.groupChatChannel.create({
+      data: {
+        groupId,
+        creatorId: userId,
+        name,
+        description: dto.description?.trim() || null,
+        visibility,
+        messagePolicy: dto.messagePolicy ?? 'everyone',
+        ...(memberIds.length ? { allowedUsers: { create: memberIds.map((memberId) => ({ userId: memberId })) } } : {}),
+      },
+      include: this.channelInclude(),
+    });
+  }
+
+  async messages(userId: string, groupId: string, channelId?: string) {
     await this.ensureMember(userId, groupId);
+    const channel = channelId ? await this.ensureChannelAccess(userId, groupId, channelId) : await this.defaultChannel(groupId, userId);
+    return this.prisma.message.findMany({ where: { groupId, channelId: channel.id }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+  }
+
+  async sendMessage(userId: string, groupId: string, channelId: string | undefined, dto: GroupMessageDto) {
+    await this.ensureMember(userId, groupId);
+    const channel = channelId ? await this.ensureChannelAccess(userId, groupId, channelId) : await this.defaultChannel(groupId, userId);
+    if (channel.messagePolicy === 'admins') {
+      const role = await this.memberRole(userId, groupId);
+      if (!this.canManage(role)) throw new ForbiddenException('Only group owners and admins can post in this channel');
+    }
     const body = dto.body.trim();
     if (!body) throw new BadRequestException('Message cannot be empty');
-    return this.prisma.message.create({ data: { senderId: userId, groupId, body }, include: this.messageInclude() });
+    return this.prisma.message.create({ data: { senderId: userId, groupId, channelId: channel.id, body }, include: this.messageInclude() });
+  }
+
+  private async memberRole(userId: string, groupId: string) {
+    return (await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { role: true } }))?.role;
+  }
+
+  private canManage(role?: string) { return role === 'owner' || role === 'admin'; }
+  private canModerate(role?: string) { return role === 'owner' || role === 'admin' || role === 'moderator'; }
+  private capabilities(role?: string) {
+    return {
+      manageSettings: this.canManage(role),
+      manageRoles: this.canManage(role),
+      moderatePosts: this.canModerate(role),
+      createChannels: this.canModerate(role),
+      createPosts: Boolean(role),
+    };
+  }
+
+  private presentPost(post: any) {
+    if (!post?.isAnonymous) return post;
+    return { ...post, author: null, anonymous: true };
   }
 
   private async ensureCanView(userId: string, groupId: string) {
@@ -125,8 +245,80 @@ export class GroupsService {
     if (!member) throw new ForbiddenException('Join the group first');
   }
 
+  private normalizeChannelName(name: string) {
+    const normalized = name.trim().toLowerCase().replace(/\s+/g, '-');
+    if (!normalized) throw new BadRequestException('Channel name is required');
+    return normalized;
+  }
+
+  private async defaultChannel(groupId: string, userId: string) {
+    const [channel] = await this.ensureDefaultChannel(groupId, userId);
+    return channel;
+  }
+
+  private sortDefaultChannelFirst<T extends { id: string; name: string; createdAt: Date }>(channels: T[]) {
+    return [...channels].sort((a, b) => {
+      if (a.name === DEFAULT_GROUP_CHANNEL_NAME) return -1;
+      if (b.name === DEFAULT_GROUP_CHANNEL_NAME) return 1;
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    });
+  }
+
+  private async ensureDefaultChannel(groupId: string, userId: string) {
+    const channels = await this.prisma.groupChatChannel.findMany({
+      where: { groupId },
+      orderBy: { createdAt: 'asc' },
+      include: this.channelInclude(),
+    });
+    const mainChannel = channels.find((channel) => channel.name === DEFAULT_GROUP_CHANNEL_NAME);
+    if (mainChannel) return this.sortDefaultChannelFirst(channels);
+    const legacyDefault = channels.find((channel) => channel.name === 'general');
+    if (legacyDefault) {
+      const channel = await this.prisma.groupChatChannel.update({
+        where: { id: legacyDefault.id },
+        data: { name: DEFAULT_GROUP_CHANNEL_NAME, description: legacyDefault.description || DEFAULT_GROUP_CHANNEL_DESCRIPTION },
+        include: this.channelInclude(),
+      });
+      return [channel, ...channels.filter((item) => item.id !== legacyDefault.id)];
+    }
+    if (channels.length) return channels;
+    const channel = await this.prisma.groupChatChannel.create({
+      data: { groupId, creatorId: userId, name: DEFAULT_GROUP_CHANNEL_NAME, description: DEFAULT_GROUP_CHANNEL_DESCRIPTION },
+      include: this.channelInclude(),
+    });
+    await this.prisma.message.updateMany({ where: { groupId, channelId: null }, data: { channelId: channel.id } });
+    return [channel];
+  }
+
+  private async ensureChannelAccess(userId: string, groupId: string, channelId: string) {
+    const channel = await this.prisma.groupChatChannel.findUniqueOrThrow({
+      where: { id: channelId },
+      select: { id: true, groupId: true, visibility: true, messagePolicy: true, allowedUsers: { where: { userId }, select: { userId: true } } },
+    });
+    if (channel.groupId !== groupId) throw new ForbiddenException();
+    if (channel.visibility === 'private') {
+      const role = await this.memberRole(userId, groupId);
+      if (!this.canManage(role) && channel.allowedUsers.length === 0) throw new ForbiddenException('This private channel is invite-only');
+    }
+    return channel;
+  }
+
+  private async validGroupMemberIds(groupId: string, memberIds: string[]) {
+    const uniqueIds = [...new Set(memberIds.filter(Boolean))];
+    if (!uniqueIds.length) return [];
+    const members = await this.prisma.groupMember.findMany({
+      where: { groupId, userId: { in: uniqueIds } },
+      select: { userId: true },
+    });
+    return members.map((member) => member.userId);
+  }
+
   private messageInclude() {
-    return { sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } } as const;
+    return { sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, channel: true, reactions: true } as const;
+  }
+
+  private channelInclude() {
+    return { creator: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, allowedUsers: { select: { userId: true } }, _count: { select: { messages: true } } } as const;
   }
 
 
@@ -204,9 +396,10 @@ export class GroupsService {
 
   private include(withMembers = false) {
     return {
-      _count: { select: { members: true, messages: true, posts: true } },
+      _count: { select: { members: true, messages: true, posts: true, chatChannels: true } },
+      chatChannels: { orderBy: { createdAt: 'asc' as const }, include: this.channelInclude() },
       posts: { take: 3, orderBy: { createdAt: 'desc' as const }, include: this.postInclude() },
-      ...(withMembers ? { members: { include: { user: { select: { id: true, displayName: true, profileImageUrl: true } } } } } : {}),
+      ...(withMembers ? { members: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } } } } : {}),
     } as const;
   }
 

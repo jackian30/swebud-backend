@@ -18,7 +18,7 @@ export class MailService {
   }
 
   async sendWelcomeEmail(input: { to: string; displayName?: string | null }) {
-    const from = this.config.get<string>('MAIL_FROM') ?? 'SweBud <no-reply@swebud.local>';
+    const from = this.config.get<string>('MAIL_FROM') ?? 'SweBud <no-reply@localhost>';
     const name = input.displayName || input.to.split('@')[0];
 
     try {
@@ -34,7 +34,7 @@ export class MailService {
     }
   }
   async sendPasswordResetEmail(input: { to: string; resetUrl: string }) {
-    const from = this.config.get<string>('MAIL_FROM') ?? 'SweBud <no-reply@swebud.loc>';
+    const from = this.config.get<string>('MAIL_FROM') ?? 'SweBud <no-reply@localhost>';
 
     try {
       await this.transporter.sendMail({

@@ -14,6 +14,7 @@ export class PostsService {
     if (profileOwnerId && profileOwnerId !== authorId) await this.ensureCanPostOnProfile(authorId, profileOwnerId);
     const hashtags = [...new Set((dto.hashtags ?? this.extractHashtags(dto.text)).map((t) => t.toLowerCase().replace(/^#/, '').trim()).filter(Boolean))];
     const taggedUserIds = await this.validateTaggedUsers(authorId, this.taggedUserIds(dto));
+    if (dto.activityId) await this.ensureOwnsActivity(authorId, dto.activityId);
     const text = dto.text?.trim();
     const post = await this.prisma.post.create({
       data: {
@@ -78,6 +79,7 @@ export class PostsService {
     const nextImages = dto.images;
     const finalImageCount = nextImages === undefined ? post.images.length : nextImages.length;
     if (!finalText && finalImageCount === 0) throw new BadRequestException('Post needs text or at least one image');
+    if (dto.activityId) await this.ensureOwnsActivity(userId, dto.activityId);
     return this.prisma.$transaction(async (tx) => {
       if (dto.text !== undefined && (post.text ?? '') !== (newText ?? '')) {
         await tx.postEditHistory.create({ data: { postId: id, editorId: userId, oldText: post.text, newText } });
@@ -372,6 +374,11 @@ export class PostsService {
     return uniqueIds;
   }
 
+  private async ensureOwnsActivity(userId: string, activityId: string) {
+    const activity = await this.prisma.activity.findFirst({ where: { id: activityId, userId }, select: { id: true } });
+    if (!activity) throw new BadRequestException('Activity cannot be attached to this post');
+  }
+
   private notifyTaggedUsers(actorId: string, postId: string, taggedUserIds: string[]) {
     for (const userId of taggedUserIds) void this.notifications.create({ userId, actorId, type: 'mention', entityId: postId, message: 'tagged you in a post.' });
   }
@@ -380,7 +387,7 @@ export class PostsService {
     return {
       author: { select: { id: true, displayName: true, username: true, profileImageUrl: true, latitude: true, longitude: true } },
       profileOwner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
-      activity: true,
+      activity: { select: this.activitySelect() },
       group: { select: { id: true, name: true, slug: true, visibility: true } },
       images: { orderBy: { sortOrder: 'asc' as const } },
       hashtags: { include: { hashtag: true } },
@@ -388,5 +395,23 @@ export class PostsService {
       comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const }, include: this.commentInclude(1, viewerId) },
       ...(viewerId ? { saves: { where: { userId: viewerId }, select: { userId: true } } } : {}),
     };
+  }
+
+  private activitySelect() {
+    return {
+      id: true,
+      source: true,
+      type: true,
+      title: true,
+      startedAt: true,
+      durationSeconds: true,
+      distanceMeters: true,
+      elevationGainMeters: true,
+      calories: true,
+      averageHeartRate: true,
+      maxHeartRate: true,
+      averagePaceSecondsKm: true,
+      averageSpeedMetersSec: true,
+    } as const;
   }
 }

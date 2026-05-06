@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CompleteOnboardingDto, GoogleLoginDto, LoginDto, RegisterDto } from './dto';
 import { TurnstileService } from './turnstile.service';
+import { requiredSecret } from '../common/security';
 
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MS = 1000 * 60 * 30;
@@ -54,7 +55,7 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto, remoteIp?: string) {
-    await this.turnstile.verify(dto.captchaToken, remoteIp);
+    await this.turnstile.verify(dto.captchaToken, remoteIp, 'signup');
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
     if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
 
@@ -89,7 +90,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, remoteIp?: string) {
-    await this.turnstile.verify(dto.captchaToken, remoteIp);
+    await this.turnstile.verify(dto.captchaToken, remoteIp, 'login');
     const identifier = dto.email.toLowerCase().trim();
     const user = await this.prisma.user.findFirst({
       where: {
@@ -112,6 +113,7 @@ export class AuthService {
     const profile = await this.verifyGoogleIdToken(dto.idToken);
     const email = profile.email.toLowerCase().trim();
     const googleEmailVerified = profile.email_verified === true || profile.email_verified === 'true';
+    if (!googleEmailVerified) throw new UnauthorizedException('Google email is not verified');
     const existing = await this.prisma.user.findFirst({ where: { OR: [{ googleId: profile.sub }, { email }] }, select: this.safeUserSelect() });
 
     const user = existing
@@ -186,11 +188,15 @@ export class AuthService {
     if (!user) return { ok: true };
 
     const token = randomBytes(32).toString('hex');
+    await this.prisma.passwordResetToken.updateMany({
+      where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() },
+    });
     await this.prisma.passwordResetToken.create({
       data: { userId: user.id, tokenHash: await bcrypt.hash(token, 12), expiresAt: new Date(Date.now() + RESET_TTL_MS) },
     });
 
-    const origin = this.config.get<string>('FRONTEND_ORIGIN') ?? 'http://swebud.loc';
+    const origin = this.config.get<string>('FRONTEND_ORIGIN') ?? 'http://localhost:9000';
     await this.mail.sendPasswordResetEmail({ to: user.email, resetUrl: `${origin}/auth?mode=reset&token=${token}` });
     return { ok: true };
   }
@@ -249,6 +255,7 @@ export class AuthService {
     const profile = await response.json() as GoogleTokenInfo;
     if (!profile.sub || !profile.email) throw new UnauthorizedException('Invalid Google token');
     const clientId = this.config.get<string>('GOOGLE_CLIENT_ID')?.trim();
+    if (process.env.NODE_ENV === 'production' && !clientId) throw new UnauthorizedException('Google sign-in is not configured');
     if (clientId && profile.aud !== clientId) throw new UnauthorizedException('Google token audience mismatch');
     return profile;
   }
@@ -267,8 +274,8 @@ export class AuthService {
     return null;
   }
 
-  private accessSecret() { return this.config.get<string>('JWT_SECRET') ?? 'dev-secret'; }
-  private refreshSecret() { return this.config.get<string>('JWT_REFRESH_SECRET') ?? 'dev-refresh-secret'; }
+  private accessSecret() { return requiredSecret(this.config, 'JWT_SECRET', 'dev-secret'); }
+  private refreshSecret() { return requiredSecret(this.config, 'JWT_REFRESH_SECRET', 'dev-refresh-secret'); }
   private normalizeUsername(username?: string) { return username?.toLowerCase().replace(/^@/, '').trim().replace(/[^a-z0-9._-]/g, '') ?? ''; }
   private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersona: true, activityPersonas: true, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true } as const; }
 }

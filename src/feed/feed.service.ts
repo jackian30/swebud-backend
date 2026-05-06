@@ -175,13 +175,31 @@ export class FeedService {
     return {
       author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       profileOwner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
-      activity: true,
+      activity: { select: this.activitySelect() },
       group: { select: { id: true, name: true, slug: true, visibility: true } },
       images: { orderBy: { sortOrder: 'asc' as const } },
       hashtags: { include: { hashtag: true } },
       taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' as const } },
       saves: { where: { userId }, select: { userId: true } },
       comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const }, include: { author: { select: { id: true, displayName: true, username: true } } } },
+    } as const;
+  }
+
+  private activitySelect() {
+    return {
+      id: true,
+      source: true,
+      type: true,
+      title: true,
+      startedAt: true,
+      durationSeconds: true,
+      distanceMeters: true,
+      elevationGainMeters: true,
+      calories: true,
+      averageHeartRate: true,
+      maxHeartRate: true,
+      averagePaceSecondsKm: true,
+      averageSpeedMetersSec: true,
     } as const;
   }
 

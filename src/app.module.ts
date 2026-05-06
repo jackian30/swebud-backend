@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AuthModule } from './auth/auth.module';
 import { ChatModule } from './chat/chat.module';
@@ -14,7 +14,12 @@ import { NotificationsModule } from './notifications/notifications.module';
 import { BuddyModule } from './buddy/buddy.module';
 import { IntegrationsModule } from './integrations/integrations.module';
 import { ActivitiesModule } from './activities/activities.module';
-import { TenorModule } from './tenor/tenor.module';
+import { KlipyModule } from './klipy/klipy.module';
+import { RateLimitMiddleware } from './common/security';
 
-@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, MailModule, AuthModule, UsersModule, FeedModule, PostsModule, GroupsModule, ChatModule, ThemeModule, UploadsModule, NotificationsModule, BuddyModule, IntegrationsModule, ActivitiesModule, TenorModule] })
-export class AppModule {}
+@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, MailModule, AuthModule, UsersModule, FeedModule, PostsModule, GroupsModule, ChatModule, ThemeModule, UploadsModule, NotificationsModule, BuddyModule, IntegrationsModule, ActivitiesModule, KlipyModule] })
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(RateLimitMiddleware).forRoutes('*');
+  }
+}

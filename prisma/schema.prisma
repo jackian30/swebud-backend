@@ -18,9 +18,24 @@ enum ThemePreference {
 enum GroupRole {
   owner
   admin
+  moderator
   member
 
   @@map("group_role")
+}
+
+enum GroupChatChannelVisibility {
+  public
+  private
+
+  @@map("group_chat_channel_visibility")
+}
+
+enum GroupChatChannelMessagePolicy {
+  everyone
+  admins
+
+  @@map("group_chat_channel_message_policy")
 }
 
 enum MessageRequestStatus {
@@ -120,6 +135,20 @@ enum BuddyActivity {
   @@map("buddy_activity")
 }
 
+enum BuddySessionScope {
+  public
+  group
+
+  @@map("buddy_session_scope")
+}
+
+enum BuddySessionVisibility {
+  public
+  private
+
+  @@map("buddy_session_visibility")
+}
+
 enum PostReportReason {
   spam
   harassment
@@ -135,6 +164,7 @@ enum PostVisibility {
   followers
   mutuals
   close_buddies
+  only_me
 
   @@map("post_visibility")
 }
@@ -174,9 +204,9 @@ enum ActivitySource {
 }
 
 model User {
-  id                String            @id @default(uuid())
-  email             String            @unique
-  passwordHash      String            @map("password_hash")
+  id                  String            @id @default(uuid())
+  email               String            @unique
+  passwordHash        String            @map("password_hash")
   displayName         String?           @map("display_name")
   username            String            @unique
   usernameFinalized   Boolean           @default(true) @map("username_finalized")
@@ -194,10 +224,10 @@ model User {
   legalConsentAt      DateTime?         @map("legal_consent_at")
   dataConsentAt       DateTime?         @map("data_consent_at")
   chatPublicKey       String?           @map("chat_public_key")
-  latitude          Float?
-  longitude         Float?
-  createdAt         DateTime          @default(now()) @map("created_at")
-  updatedAt         DateTime          @updatedAt @map("updated_at")
+  latitude            Float?
+  longitude           Float?
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
 
   posts                   Post[]
   wallPosts               Post[]                @relation("ProfileWallPosts")
@@ -224,11 +254,16 @@ model User {
   receivedFollowRequests  FollowRequest[]       @relation("ReceivedFollowRequests")
   sentMessageRequests     MessageRequest[]      @relation("SentMessageRequests")
   receivedMessageRequests MessageRequest[]      @relation("ReceivedMessageRequests")
+  chatProfileOverrides    ChatProfileOverride[] @relation("ChatProfileOverrideOwners")
+  chatProfileOverridePeers ChatProfileOverride[] @relation("ChatProfileOverridePeers")
   groupMembers            GroupMember[]
+  createdGroupChannels    GroupChatChannel[]    @relation("GroupChatChannelCreators")
+  groupChannelMemberships GroupChatChannelMember[]
   groupPosts              GroupPost[]
   sentMessages            Message[]             @relation("SentMessages")
   receivedMessages        Message[]             @relation("ReceivedMessages")
   buddySession            BuddySession?
+  createdBuddyRooms       BuddyRoom[]           @relation("BuddyRoomCreators")
   closeBuddies            CloseBuddy[]          @relation("CloseBuddyOwners")
   closeBuddyOf            CloseBuddy[]          @relation("CloseBuddyMembers")
   externalIntegrations    ExternalIntegration[]
@@ -239,20 +274,45 @@ model User {
 }
 
 model BuddySession {
-  id          String        @id @default(uuid())
-  userId      String        @unique @map("user_id")
+  id          String         @id @default(uuid())
+  userId      String         @unique @map("user_id")
+  roomId      String?        @map("room_id")
   activity    BuddyActivity?
-  subActivity String?       @map("sub_activity")
+  subActivity String?        @map("sub_activity")
   latitude    Float
   longitude   Float
-  expiresAt   DateTime      @map("expires_at")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
-  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt   DateTime       @map("expires_at")
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room        BuddyRoom?     @relation(fields: [roomId], references: [id], onDelete: SetNull)
 
+  @@index([roomId, expiresAt])
   @@index([activity, expiresAt])
   @@index([latitude, longitude])
   @@map("buddy_sessions")
+}
+
+model BuddyRoom {
+  id          String                 @id @default(uuid())
+  name        String
+  scope       BuddySessionScope      @default(public)
+  visibility  BuddySessionVisibility @default(public)
+  code        String                 @unique
+  groupId     String?                @map("group_id")
+  creatorId   String                 @map("creator_id")
+  activity    BuddyActivity?
+  subActivity String?                @map("sub_activity")
+  expiresAt   DateTime               @map("expires_at")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+  group       Group?                 @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator     User                   @relation("BuddyRoomCreators", fields: [creatorId], references: [id], onDelete: Cascade)
+  sessions    BuddySession[]
+
+  @@index([scope, visibility, expiresAt])
+  @@index([groupId, expiresAt])
+  @@map("buddy_rooms")
 }
 
 model Follow {
@@ -297,6 +357,22 @@ model MessageRequest {
   @@index([recipientId, status, createdAt])
   @@index([senderId, status, createdAt])
   @@map("message_requests")
+}
+
+model ChatProfileOverride {
+  id              String   @id @default(uuid())
+  ownerId         String   @map("owner_id")
+  peerId          String   @map("peer_id")
+  displayName     String?  @map("display_name")
+  profileImageUrl String?  @map("profile_image_url")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  owner           User     @relation("ChatProfileOverrideOwners", fields: [ownerId], references: [id], onDelete: Cascade)
+  peer            User     @relation("ChatProfileOverridePeers", fields: [peerId], references: [id], onDelete: Cascade)
+
+  @@unique([ownerId, peerId])
+  @@index([peerId])
+  @@map("chat_profile_overrides")
 }
 
 model UserTheme {
@@ -347,6 +423,7 @@ model Post {
   commentCount   Int            @default(0) @map("comment_count")
   pinnedAt       DateTime?      @map("pinned_at")
   visibility     PostVisibility @default(public)
+  isAnonymous    Boolean        @default(false) @map("is_anonymous")
   activityId     String?        @map("activity_id")
   editedAt       DateTime?      @map("edited_at")
   createdAt      DateTime       @default(now()) @map("created_at")
@@ -459,17 +536,21 @@ model Comment {
 }
 
 model Group {
-  id          String          @id @default(uuid())
-  name        String
-  slug        String          @unique
-  description String?
-  visibility  GroupVisibility @default(public)
-  inviteCode  String?         @unique @map("invite_code")
-  createdAt   DateTime        @default(now()) @map("created_at")
-  members     GroupMember[]
-  messages    Message[]
-  posts       Post[]
-  legacyPosts GroupPost[]
+  id                  String             @id @default(uuid())
+  name                String
+  slug                String             @unique
+  description         String?
+  profileImageUrl     String?            @map("profile_image_url")
+  visibility          GroupVisibility    @default(public)
+  inviteCode          String?            @unique @map("invite_code")
+  allowAnonymousPosts Boolean            @default(false) @map("allow_anonymous_posts")
+  createdAt           DateTime           @default(now()) @map("created_at")
+  members             GroupMember[]
+  chatChannels        GroupChatChannel[]
+  messages            Message[]
+  posts               Post[]
+  legacyPosts         GroupPost[]
+  buddyRooms          BuddyRoom[]
 
   @@map("groups")
 }
@@ -486,6 +567,37 @@ model GroupMember {
   @@map("group_members")
 }
 
+model GroupChatChannel {
+  id            String                        @id @default(uuid())
+  groupId       String                        @map("group_id")
+  creatorId     String                        @map("creator_id")
+  name          String
+  description   String?
+  visibility    GroupChatChannelVisibility    @default(public)
+  messagePolicy GroupChatChannelMessagePolicy @default(everyone) @map("message_policy")
+  createdAt     DateTime                      @default(now()) @map("created_at")
+  group         Group                         @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator       User                          @relation("GroupChatChannelCreators", fields: [creatorId], references: [id], onDelete: Cascade)
+  allowedUsers  GroupChatChannelMember[]
+  messages      Message[]
+
+  @@unique([groupId, name])
+  @@index([groupId, createdAt])
+  @@map("group_chat_channels")
+}
+
+model GroupChatChannelMember {
+  channelId String           @map("channel_id")
+  userId    String           @map("user_id")
+  createdAt DateTime         @default(now()) @map("created_at")
+  channel   GroupChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([channelId, userId])
+  @@index([userId])
+  @@map("group_chat_channel_members")
+}
+
 model MessageReaction {
   id        String   @id @default(uuid())
   messageId String   @map("message_id")
@@ -495,6 +607,7 @@ model MessageReaction {
   message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId, emoji])
+  @@unique([messageId, userId])
   @@index([messageId])
   @@map("message_reactions")
 }
@@ -504,6 +617,7 @@ model Message {
   senderId    String            @map("sender_id")
   recipientId String?           @map("recipient_id")
   groupId     String?           @map("group_id")
+  channelId   String?           @map("channel_id")
   body        String
   ciphertext  String?
   nonce       String?
@@ -513,10 +627,12 @@ model Message {
   sender      User              @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
   recipient   User?             @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
   group       Group?            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  channel     GroupChatChannel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
   reactions   MessageReaction[]
 
   @@index([senderId, recipientId, createdAt])
   @@index([groupId, createdAt])
+  @@index([channelId, createdAt])
   @@map("messages")
 }
 

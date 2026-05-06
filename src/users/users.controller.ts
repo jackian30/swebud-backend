@@ -27,6 +27,8 @@ export class UsersController {
   @Get() search(@Query('q') q?: string) { return this.users.search(q); }
   @Post(':id/close-buddy') addCloseBuddy(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.addCloseBuddy(user.id, id); }
   @Delete(':id/close-buddy') removeCloseBuddy(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.removeCloseBuddy(user.id, id); }
+  @Get(':id/followers') profileFollowers(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.profileFollowers(id, user.id); }
+  @Get(':id/following') profileFollowing(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.profileFollowing(id, user.id); }
   @Post(':id/follow') follow(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.follow(user.id, id); }
   @Delete(':id/follow') unfollow(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.unfollow(user.id, id); }
   @Post(':id/block') block(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.block(user.id, id); }

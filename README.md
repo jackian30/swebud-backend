@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBud** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.1.2 beta**
+Current release: **0.1.3 beta**
 
 ## Stack
 
@@ -23,7 +23,7 @@ Current release: **0.1.2 beta**
 - Comments: nested replies, edit/delete owner-only, mentions
 - Feed: relevance/latest/trending/unseen, infinite-scroll pagination, hashtag filtering
 - Hashtags: search endpoint with post counts for composer suggestions
-- Profiles/social graph: username, bio, avatar/cover, follow/unfollow, followers/following/mutual/non-followback
+- Profiles/social graph: username, bio, avatar/cover, follow/unfollow, searchable profile followers/following, mutual/non-followback
 - Groups: public/private groups, membership, group posts as regular posts, group feed filtering/pagination
 - Chat: message requests, direct/group chat, typing/unread/reactions, E2EE foundation fields
 - Notifications: login, salute, comment, reply, mention, follow, message request
@@ -69,7 +69,7 @@ Important variables:
 - `SMTP_PORT`
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` / `GOOGLE_OAUTH_REDIRECT_URI` — Google auth placeholders; `POST /auth/google` verifies Google ID tokens and returns onboarding status
 - `CLOUDFLARE_TURNSTILE_SITE_KEY` / `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY`, `CLOUDFLARE_TURNSTILE_SECRET_KEY` — Turnstile captcha config; backend skips verification in local dev when the secret is empty
-- `TENOR_API_KEY`, `TENOR_CLIENT_KEY` — GIF search/provider placeholders
+- `KLIPY_API_KEY`, `KLIPY_CLIENT_KEY` — GIF search/provider placeholders
 - `APP_VERSION`, `LEGAL_TERMS_URL`, `LEGAL_PRIVACY_URL` — release/legal metadata passed through the local Docker stack
 - `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` — reserved for Strava OAuth/webhook integration
 - `GARMIN_CONSUMER_KEY`, `GARMIN_CONSUMER_SECRET` — reserved for Garmin OAuth integration
@@ -133,6 +133,24 @@ docker compose --env-file deployment/.env -f deployment/docker-compose.yml up -d
 ```
 
 Database schema changes still need Prisma migrations (`npm run prisma:migrate` locally, `npm run prisma:deploy` for deploy flows).
+
+## Production subdomains
+
+Use separate public hosts for the portal and API:
+
+- Portal: `https://asdasd.com`
+- API: `https://api.asdasd.com`
+
+Deployment env should use:
+
+```text
+FRONTEND_ORIGIN=https://asdasd.com
+API_BASE_URL=https://api.asdasd.com
+GOOGLE_CALLBACK_URL=https://api.asdasd.com/auth/google/callback
+GOOGLE_OAUTH_REDIRECT_URI=https://asdasd.com/auth/google/callback
+```
+
+The frontend container serves the SPA on `FRONTEND_PORT`; the backend container serves the API on `BACKEND_PORT`. Put a host-level reverse proxy in front of both ports. A starting nginx config is available at `deployment/reverse-proxy.nginx.conf.example`.
 
 ## Seed data
 
