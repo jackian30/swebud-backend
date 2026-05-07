@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
     ports:
       - "${MAILHOG_SMTP_PORT:-1026}:1025"
-      - "${MAILHOG_UI_PORT:-8026}:8025"
+      - "${MAILHOG_UI_PORT:-8126}:8025"
 
   backend:
     build:
@@ -51,15 +51,21 @@ services:
       CLOUDFLARE_TURNSTILE_SITE_KEY: ${CLOUDFLARE_TURNSTILE_SITE_KEY:-}
       KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
-      APP_VERSION: ${APP_VERSION:-0.1.3-beta}
+      APP_VERSION: ${APP_VERSION:-0.1.4-beta}
       LEGAL_TERMS_URL: ${LEGAL_TERMS_URL:-}
       LEGAL_PRIVACY_URL: ${LEGAL_PRIVACY_URL:-}
+      MEDIA_STORAGE_DRIVER: ${MEDIA_STORAGE_DRIVER:-local}
+      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-}
+      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
+      AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
       STRAVA_WEBHOOK_VERIFY_TOKEN: ${STRAVA_WEBHOOK_VERIFY_TOKEN:-}
       GARMIN_CONSUMER_KEY: ${GARMIN_CONSUMER_KEY:-}
       GARMIN_CONSUMER_SECRET: ${GARMIN_CONSUMER_SECRET:-}
-    command: sh -c "node dist/src/main.js"
+    command: sh -c "mkdir -p uploads/profile-photos uploads/cover-photos uploads/group-photos uploads/chat-photos uploads/actsnaps uploads/posts uploads/comments uploads/images uploads/videos uploads/media && chown -R node:node uploads && exec su-exec node node dist/src/main.js"
     ports:
       - "${BACKEND_PORT:-3000}:3000"
     volumes:
@@ -75,7 +81,7 @@ services:
         VITE_CLOUDFLARE_TURNSTILE_SITE_KEY: ${VITE_CLOUDFLARE_TURNSTILE_SITE_KEY:-${CLOUDFLARE_TURNSTILE_SITE_KEY:-}}
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
         VITE_KLIPY_API_KEY: ${KLIPY_API_KEY:-}
-        VITE_APP_VERSION: ${APP_VERSION:-0.1.3-beta}
+        VITE_APP_VERSION: ${APP_VERSION:-0.1.4-beta}
     restart: unless-stopped
     depends_on:
       - backend
@@ -87,11 +93,12 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
-      APP_VERSION: ${APP_VERSION:-0.1.3-beta}
+      APP_VERSION: ${APP_VERSION:-0.1.4-beta}
       LEGAL_TERMS_URL: ${LEGAL_TERMS_URL:-}
       LEGAL_PRIVACY_URL: ${LEGAL_PRIVACY_URL:-}
     ports:
       - "${FRONTEND_PORT:-9000}:80"
+      - "${FRONTEND_HTTPS_PORT:-9443}:443"
 
   frontend-dev:
     image: node:22-alpine
@@ -108,7 +115,7 @@ services:
       VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       VITE_KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       VITE_KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
-      VITE_APP_VERSION: ${APP_VERSION:-0.1.3-beta}
+      VITE_APP_VERSION: ${APP_VERSION:-0.1.4-beta}
       VITE_LEGAL_TERMS_URL: ${LEGAL_TERMS_URL:-}
       VITE_LEGAL_PRIVACY_URL: ${LEGAL_PRIVACY_URL:-}
       BACKEND_UPSTREAM: http://backend:3000

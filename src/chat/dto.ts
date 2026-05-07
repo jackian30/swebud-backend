@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class SendDirectMessageDto {
   @IsUUID() recipientId!: string;
@@ -6,6 +6,11 @@ export class SendDirectMessageDto {
   @IsOptional() @IsString() @MaxLength(12000) ciphertext?: string;
   @IsOptional() @IsString() @MaxLength(512) nonce?: string;
   @IsOptional() @IsBoolean() encrypted?: boolean;
+  @IsOptional() @IsIn(['actsnap']) referenceType?: 'actsnap';
+  @IsOptional() @IsString() @MaxLength(120) referenceId?: string;
+  @IsOptional() @IsString() @MaxLength(12000) referenceMediaUrl?: string;
+  @IsOptional() @IsString() @MaxLength(500) referenceText?: string;
+  @IsOptional() @IsString() @MaxLength(120) referenceAuthorName?: string;
 }
 
 export class RegisterChatKeyDto { @IsString() @MaxLength(4096) publicKey!: string; }

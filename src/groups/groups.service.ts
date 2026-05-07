@@ -32,11 +32,14 @@ export class GroupsService {
       orderBy: { createdAt: 'desc' },
       include: this.include(Boolean(userId)),
     });
-    return groups.map((group) => ({
-      ...group,
-      isMember: userId ? group.members.some((member) => member.userId === userId) : false,
-      members: undefined,
-    }));
+    return groups.map((group) => {
+      const { members, messages, ...summary } = group;
+      return {
+        ...summary,
+        isMember: userId ? members.some((member) => member.userId === userId) : false,
+        lastMessage: messages[0] ?? null,
+      };
+    });
   }
 
   async mine(userId: string) {
@@ -46,12 +49,13 @@ export class GroupsService {
       include: this.include(true),
     });
     return groups.map((group) => {
-      const role = group.members.find((member) => member.userId === userId)?.role;
+      const { members, messages, ...summary } = group;
+      const role = members.find((member) => member.userId === userId)?.role;
       return {
-        ...group,
+        ...summary,
         isMember: true,
         capabilities: this.capabilities(role),
-        members: undefined,
+        lastMessage: messages[0] ?? null,
       };
     });
   }
@@ -135,6 +139,9 @@ export class GroupsService {
 
   async createPost(userId: string, groupId: string, dto: GroupPostDto) {
     await this.ensureMember(userId, groupId);
+    const text = dto.text?.trim() ?? '';
+    const images = dto.images ?? [];
+    if (!text && !images.length) throw new BadRequestException('Post needs text or at least one image');
     const group = await this.prisma.group.findUniqueOrThrow({ where: { id: groupId }, select: { allowAnonymousPosts: true } });
     const isAnonymous = Boolean(dto.anonymous && group.allowAnonymousPosts);
     const post = await this.prisma.post.create({
@@ -142,8 +149,19 @@ export class GroupsService {
         groupId,
         authorId: userId,
         isAnonymous,
-        text: dto.text.trim(),
-        hashtags: { create: this.extractHashtags(dto.text).map((name) => ({ hashtag: { connectOrCreate: { where: { name }, create: { name } } } })) },
+        text: text || null,
+        images: { create: images.map((image, sortOrder) => ({
+          url: image.url,
+          alt: image.alt,
+          filename: image.filename,
+          mediaType: image.mediaType ?? image.type ?? 'image',
+          mimeType: image.mimeType,
+          size: image.size ? Math.round(image.size) : undefined,
+          width: image.width ? Math.round(image.width) : undefined,
+          height: image.height ? Math.round(image.height) : undefined,
+          sortOrder,
+        })) },
+        hashtags: { create: this.extractHashtags(text).map((name) => ({ hashtag: { connectOrCreate: { where: { name }, create: { name } } } })) },
       },
       include: this.postInclude(),
     });
@@ -231,8 +249,10 @@ export class GroupsService {
   }
 
   private presentPost(post: any) {
-    if (!post?.isAnonymous) return post;
-    return { ...post, author: null, anonymous: true };
+    const { _count, ...presented } = post ?? {};
+    const withRepostCount = { ...presented, repostCount: _count?.reposts ?? 0 };
+    if (!withRepostCount?.isAnonymous) return withRepostCount;
+    return { ...withRepostCount, author: null, anonymous: true };
   }
 
   private async ensureCanView(userId: string, groupId: string) {
@@ -391,12 +411,14 @@ export class GroupsService {
       images: { orderBy: { sortOrder: 'asc' as const } },
       hashtags: { include: { hashtag: true } },
       comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const }, include: { author: { select: { id: true, displayName: true, username: true } } } },
+      _count: { select: { reposts: true } },
     } as const;
   }
 
   private include(withMembers = false) {
     return {
       _count: { select: { members: true, messages: true, posts: true, chatChannels: true } },
+      messages: { take: 1, orderBy: { createdAt: 'desc' as const }, include: this.messageInclude() },
       chatChannels: { orderBy: { createdAt: 'asc' as const }, include: this.channelInclude() },
       posts: { take: 3, orderBy: { createdAt: 'desc' as const }, include: this.postInclude() },
       ...(withMembers ? { members: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } } } } : {}),

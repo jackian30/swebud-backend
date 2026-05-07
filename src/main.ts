@@ -25,8 +25,12 @@ async function bootstrap() {
       res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
     },
   };
-  app.use('/uploads', express.static(uploadsPath, staticOptions));
-  app.use('/api/uploads', express.static(uploadsPath, staticOptions));
+  const serveUploadedFile: express.RequestHandler = (req, res, next) => {
+    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
+    return express.static(uploadsPath, staticOptions)(req, res, next);
+  };
+  app.use('/uploads', serveUploadedFile);
+  app.use('/api/uploads', serveUploadedFile);
   app.enableCors({ origin: corsOrigin(config), credentials: true });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   await app.listen(config.get<number>('PORT') ?? 3000);

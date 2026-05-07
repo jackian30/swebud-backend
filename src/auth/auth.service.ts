@@ -9,7 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { CompleteOnboardingDto, GoogleLoginDto, LoginDto, RegisterDto } from './dto';
 import { TurnstileService } from './turnstile.service';
-import { requiredSecret } from '../common/security';
+import { allowedOrigins, requiredSecret } from '../common/security';
 
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MS = 1000 * 60 * 30;
@@ -196,7 +196,7 @@ export class AuthService {
       data: { userId: user.id, tokenHash: await bcrypt.hash(token, 12), expiresAt: new Date(Date.now() + RESET_TTL_MS) },
     });
 
-    const origin = this.config.get<string>('FRONTEND_ORIGIN') ?? 'http://localhost:9000';
+    const origin = allowedOrigins(this.config)[0] ?? 'http://localhost:9000';
     await this.mail.sendPasswordResetEmail({ to: user.email, resetUrl: `${origin}/auth?mode=reset&token=${token}` });
     return { ok: true };
   }

@@ -64,6 +64,32 @@ export function visiblePostWhere(viewerId: string): Prisma.PostWhereInput {
   };
 }
 
+export function visibleStoryWhere(viewerId: string, now = new Date()): Prisma.StoryWhereInput {
+  return {
+    AND: [
+      { expiresAt: { gt: now } },
+      { author: visibleAuthorWhere(viewerId) },
+      {
+        OR: [
+          { authorId: viewerId },
+          { visibility: PostVisibility.public },
+          { visibility: PostVisibility.followers, author: { followers: { some: { followerId: viewerId } } } },
+          {
+            visibility: PostVisibility.mutuals,
+            author: {
+              AND: [
+                { followers: { some: { followerId: viewerId } } },
+                { following: { some: { followingId: viewerId } } },
+              ],
+            },
+          },
+          { visibility: PostVisibility.close_buddies, author: { closeBuddies: { some: { buddyId: viewerId } } } },
+        ],
+      },
+    ],
+  };
+}
+
 export async function assertCanViewPost(prisma: PrismaService, viewerId: string, postId: string) {
   const post = await prisma.post.findFirst({ where: { id: postId, ...visiblePostWhere(viewerId) }, select: { id: true } });
   if (!post) throw new ForbiddenException('You cannot view this post');

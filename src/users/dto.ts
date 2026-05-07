@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ActivityPersona, ProfileVisibility, UserGender } from '@prisma/client';
+import { ActivityPersona, PostVisibility, ProfileVisibility, UserGender, UserReportReason } from '@prisma/client';
 import { IsArray, IsBoolean, IsDate, IsEmail, IsEnum, IsNumber, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class UpdateMeDto {
@@ -13,6 +13,7 @@ export class UpdateMeDto {
   @IsOptional() @IsEnum(ActivityPersona) activityPersona?: ActivityPersona;
   @IsOptional() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
   @IsOptional() @IsEnum(ProfileVisibility) profileVisibility?: ProfileVisibility;
+  @IsOptional() @IsEnum(PostVisibility) defaultPostVisibility?: PostVisibility;
   @IsOptional() @IsNumber() @Min(-90) @Max(90) latitude?: number;
   @IsOptional() @IsNumber() @Min(-180) @Max(180) longitude?: number;
 }
@@ -33,4 +34,9 @@ export class UpdateAccountDto {
 export class UpdatePasswordDto {
   @IsString() currentPassword!: string;
   @IsString() @MinLength(8) newPassword!: string;
+}
+
+export class ReportUserDto {
+  @IsOptional() @IsEnum(UserReportReason) reason?: UserReportReason;
+  @IsOptional() @IsString() @MaxLength(1000) note?: string;
 }

@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
-import { CompleteUserOnboardingDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
+import { CompleteUserOnboardingDto, ReportUserDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { visibleAuthorWhere, visiblePostWhere } from '../privacy/privacy';
 
@@ -94,7 +94,7 @@ export class UsersService {
     const profile = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
       select: {
-        ...this.select(),
+        ...this.publicSelect(),
         reposts: {
           where: { post: visiblePostWhere(viewerId) },
           orderBy: { createdAt: 'desc' },
@@ -217,11 +217,22 @@ export class UsersService {
     const targetId = await this.resolveUserId(identifier);
     return this.prisma.block.delete({ where: { blockerId_blockedId: { blockerId: userId, blockedId: targetId } } }).catch(() => null).then(() => ({ blocked: false }));
   }
+  async report(userId: string, identifier: string, dto: ReportUserDto) {
+    const targetId = await this.resolveUserId(identifier);
+    if (userId === targetId) throw new BadRequestException('Cannot report yourself');
+    const note = dto.note?.trim();
+    await this.prisma.userReport.upsert({
+      where: { reportedId_reporterId: { reportedId: targetId, reporterId: userId } },
+      create: { reportedId: targetId, reporterId: userId, reason: dto.reason ?? 'other', note: note || null },
+      update: { reason: dto.reason ?? 'other', note: note || null },
+    });
+    return { ok: true };
+  }
 
   private withOnboarding<T extends { usernameFinalized?: boolean | null; dateOfBirth?: Date | string | null; legalConsentAt?: Date | string | null; dataConsentAt?: Date | string | null }>(user: T) {
     return { ...user, onboardingComplete: Boolean(user.usernameFinalized && user.dateOfBirth && user.legalConsentAt && user.dataConsentAt) };
   }
-  private select() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, gender: true, dateOfBirth: true, activityPersona: true, activityPersonas: true, legalConsentAt: true, dataConsentAt: true, profileVisibility: true, verified: true, latitude: true, longitude: true, theme: true, chatPublicKey: true, createdAt: true, _count: { select: { followers: true, following: true } } } as const; }
+  private select() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, gender: true, dateOfBirth: true, activityPersona: true, activityPersonas: true, legalConsentAt: true, dataConsentAt: true, profileVisibility: true, defaultPostVisibility: true, verified: true, latitude: true, longitude: true, theme: true, chatPublicKey: true, createdAt: true, _count: { select: { followers: true, following: true } } } as const; }
   private publicSelect() { return { id: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, activityPersona: true, activityPersonas: true, profileVisibility: true, verified: true, chatPublicKey: true, createdAt: true } as const; }
   private async resolveUserId(identifier: string) {
     const normalized = identifier.toLowerCase().replace(/^@/, '').trim();

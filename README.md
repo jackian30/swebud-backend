@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBud** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.1.3 beta**
+Current release: **0.1.4 beta**
 
 ## Stack
 
@@ -18,25 +18,27 @@ Current release: **0.1.3 beta**
 
 - Auth: register, login, Google login scaffold, Cloudflare Turnstile checks, refresh, logout, forgot/reset password
 - Sliding sessions: authenticated API activity extends session validity up to 7 days from last activity
-- Posts: text/images, edit/delete owner-only, save, hide, report, repost
+- Posts: text/images/video, edit/delete owner-only, save, hide, report, repost, default privacy
+- ActSnaps: 24-hour disappearing image/video moments with privacy, views, reactions, replies, and chat reference previews
 - Salutes: post/comment salute interactions
 - Comments: nested replies, edit/delete owner-only, mentions
 - Feed: relevance/latest/trending/unseen, infinite-scroll pagination, hashtag filtering
 - Hashtags: search endpoint with post counts for composer suggestions
 - Profiles/social graph: username, bio, avatar/cover, follow/unfollow, searchable profile followers/following, mutual/non-followback
 - Groups: public/private groups, membership, group posts as regular posts, group feed filtering/pagination
-- Chat: message requests, direct/group chat, typing/unread/reactions, E2EE foundation fields
+- Chat: message requests, direct/group chat, typing/unread/reactions, validated ActSnap reply references, E2EE foundation fields
 - Notifications: login, salute, comment, reply, mention, follow, message request
-- Uploads: local upload endpoint for dev
+- Uploads: MediaLibrary-style collections with local storage by default and S3-ready driver config
 
 ## Local URLs
 
 When using the full local Docker stack:
 
-- Frontend: `http://swebud.loc`
-- Backend through frontend proxy: `http://swebud.loc/api`
+- Frontend: `http://swebud.loc` or `https://localhost:9443`
+- Phone/LAN HTTPS frontend: `https://192.168.18.50:9443`
+- Backend through frontend proxy: `http://swebud.loc/api` or `https://localhost:9443/api`
 - Backend direct host port: `http://localhost:3002`
-- MailHog UI: `http://localhost:8026`
+- MailHog UI: `http://localhost:8126`
 
 Make sure `/etc/hosts` contains:
 
@@ -71,6 +73,7 @@ Important variables:
 - `CLOUDFLARE_TURNSTILE_SITE_KEY` / `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY`, `CLOUDFLARE_TURNSTILE_SECRET_KEY` — Turnstile captcha config; backend skips verification in local dev when the secret is empty
 - `KLIPY_API_KEY`, `KLIPY_CLIENT_KEY` — GIF search/provider placeholders
 - `APP_VERSION`, `LEGAL_TERMS_URL`, `LEGAL_PRIVACY_URL` — release/legal metadata passed through the local Docker stack
+- `MEDIA_STORAGE_DRIVER=local|s3`, `MEDIA_S3_BUCKET`, `MEDIA_PUBLIC_BASE_URL`, `AWS_REGION`, `AWS_S3_ENDPOINT`, `AWS_S3_FORCE_PATH_STYLE` — media storage driver and S3-compatible storage config
 - `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` — reserved for Strava OAuth/webhook integration
 - `GARMIN_CONSUMER_KEY`, `GARMIN_CONSUMER_SECRET` — reserved for Garmin OAuth integration
 - `MAP_STYLE_URL` — frontend MapLibre/OpenFreeMap style URL used by the Docker stack
@@ -213,6 +216,10 @@ Key endpoints:
 - `GET /feed`
 - `GET /feed/hashtags?q=run`
 - `GET /feed/trending-hashtags`
+- `GET /actsnaps`
+- `POST /actsnaps`
+- `POST /actsnaps/:id/view`
+- `POST /actsnaps/:id/reply`
 - `GET /posts/:id`
 - `POST /posts`
 - `PATCH /posts/:id`
@@ -232,6 +239,11 @@ Key endpoints:
 - `GET /chat/requests`
 - `POST /chat/messages`
 - `GET /notifications`
+- `POST /uploads/profile-photo`
+- `POST /uploads/cover-photo`
+- `POST /uploads/actsnap-media`
+- `POST /uploads/post-media`
+- `POST /uploads/comment-media`
 
 ## Release gate
 
@@ -241,6 +253,9 @@ Before pushing a beta release, run:
 npm run build
 npm test -- --runInBand
 npm run lint
+npm audit
+npx prisma validate
+npx prisma migrate status
 ```
 
 Then run the full Docker stack and API smokes from the workspace if available.
@@ -252,13 +267,15 @@ Then run the full Docker stack and API smokes from the workspace if available.
 - JWTs include a session id (`sid`) checked against `RefreshToken` rows.
 - Session expiry is sliding: authenticated API calls extend expiry to 7 days from that activity.
 - Refresh token rotation revokes the old stored token.
+- Public profile and post responses strip private account fields and exact user coordinates.
+- ActSnap reference context is only accepted from trusted ActSnap reply flows; generic chat sends ignore client-supplied ActSnap reference fields.
 - Google-created users do not bypass onboarding: auth responses include `requiresOnboarding` and `onboardingMissing` until username, date of birth, legal consent, and data consent are completed.
 - Turnstile is enforced on register/login when `CLOUDFLARE_TURNSTILE_SECRET_KEY` is set; with no secret it returns a local-dev skip and does not block.
 - E2EE chat support is currently a foundation only, not a production-audited Signal-grade implementation.
 
 ## Beta caveats
 
-- Local uploads are dev-oriented.
+- Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- More automated backend tests are needed before production release.
+- Backend unit/API coverage is in place for current 0.1.4-beta flows, but production release still needs broader end-to-end coverage.

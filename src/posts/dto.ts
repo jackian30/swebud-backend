@@ -21,6 +21,7 @@ export class PostImageDto {
 export class CreatePostDto {
   @IsOptional() @IsString() @MaxLength(1000) text?: string;
   @IsOptional() @IsEnum(PostVisibility) visibility?: PostVisibility;
+  @IsOptional() @IsEnum(PostVisibility) privacy?: PostVisibility;
   @IsOptional() @IsString() profileOwnerId?: string;
   @IsOptional() @IsString() targetUserId?: string;
   @IsOptional() @IsString() profileUserId?: string;
@@ -47,6 +48,7 @@ export class ReportPostDto {
 export class UpdatePostDto {
   @IsOptional() @IsString() @MaxLength(1000) text?: string;
   @IsOptional() @IsEnum(PostVisibility) visibility?: PostVisibility;
+  @IsOptional() @IsEnum(PostVisibility) privacy?: PostVisibility;
   @IsOptional() @IsString() activityId?: string;
   @IsOptional() @IsArray() @ArrayMaxSize(10) @ValidateNested({ each: true }) @Type(() => PostImageDto) images?: PostImageDto[];
   @IsOptional() @Transform(normalizeTaggedUsers) @IsArray() @ArrayMaxSize(50) @IsString({ each: true }) taggedUserIds?: string[];

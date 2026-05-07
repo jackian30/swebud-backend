@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt.guard';
-import { CompleteUserOnboardingDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
+import { CompleteUserOnboardingDto, ReportUserDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
 import { UsersService } from './users.service';
 
 @UseGuards(JwtAuthGuard)
@@ -33,5 +33,6 @@ export class UsersController {
   @Delete(':id/follow') unfollow(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.unfollow(user.id, id); }
   @Post(':id/block') block(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.block(user.id, id); }
   @Delete(':id/block') unblock(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.unblock(user.id, id); }
+  @Post(':id/report') report(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ReportUserDto) { return this.users.report(user.id, id, dto); }
   @Get(':id') profile(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.profile(user.id, id); }
 }

@@ -10,6 +10,7 @@ export class PostsService {
 
   async create(authorId: string, dto: CreatePostDto) {
     if (!dto.text?.trim() && !dto.images?.length) throw new BadRequestException('Post needs text or at least one image');
+    const author = await this.prisma.user.findUniqueOrThrow({ where: { id: authorId }, select: { defaultPostVisibility: true } });
     const profileOwnerId = (dto.profileOwnerId ?? dto.targetUserId ?? dto.profileUserId)?.trim() || null;
     if (profileOwnerId && profileOwnerId !== authorId) await this.ensureCanPostOnProfile(authorId, profileOwnerId);
     const hashtags = [...new Set((dto.hashtags ?? this.extractHashtags(dto.text)).map((t) => t.toLowerCase().replace(/^#/, '').trim()).filter(Boolean))];
@@ -21,7 +22,7 @@ export class PostsService {
         authorId,
         profileOwnerId: profileOwnerId || undefined,
         text,
-        visibility: dto.visibility ?? 'public',
+        visibility: dto.visibility ?? dto.privacy ?? author.defaultPostVisibility,
         activityId: dto.activityId,
         latitude: dto.latitude,
         longitude: dto.longitude,
@@ -43,7 +44,7 @@ export class PostsService {
     });
     this.notifyTaggedUsers(authorId, post.id, taggedUserIds);
     await this.notifyMentionedUsers(authorId, post.id, text ?? '', 'Someone mentioned you in a post.');
-    return post;
+    return this.presentPost(post);
   }
 
   list(viewerId: string, take = 20, cursor?: string) {
@@ -53,13 +54,13 @@ export class PostsService {
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       orderBy: { createdAt: 'desc' },
       include: this.include(),
-    });
+    }).then((posts) => posts.map((post) => this.presentPost(post)));
   }
 
   async get(id: string, viewerId?: string) {
     if (viewerId) await this.ensureCanViewPost(viewerId, id);
     await this.prisma.post.update({ where: { id }, data: { viewCount: { increment: 1 } } }).catch(() => null);
-    return this.prisma.post.findUniqueOrThrow({ where: { id }, include: this.include(viewerId) });
+    return this.prisma.post.findUniqueOrThrow({ where: { id }, include: this.include(viewerId) }).then((post) => this.presentPost(post));
   }
 
   async remove(userId: string, id: string) {
@@ -105,11 +106,11 @@ export class PostsService {
         await tx.postTag.deleteMany({ where: { postId: id } });
         if (taggedUserIds.length) await tx.postTag.createMany({ data: taggedUserIds.map((taggedUserId) => ({ postId: id, userId: taggedUserId })), skipDuplicates: true });
       }
-      const updated = await tx.post.update({ where: { id }, data: { text: newText, visibility: dto.visibility, activityId: dto.activityId, editedAt: new Date() }, include: this.include() });
+      const updated = await tx.post.update({ where: { id }, data: { text: newText, visibility: dto.visibility ?? dto.privacy, activityId: dto.activityId, editedAt: new Date() }, include: this.include() });
       return updated;
     }).then((updated) => {
       if (taggedUserIds !== undefined) this.notifyTaggedUsers(userId, id, taggedUserIds.filter((taggedUserId) => !post.taggedUsers.some((tag) => tag.userId === taggedUserId)));
-      return updated;
+      return this.presentPost(updated);
     });
   }
 
@@ -162,13 +163,13 @@ export class PostsService {
   async pin(userId: string, id: string) {
     const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true } });
     if (post.authorId !== userId) throw new ForbiddenException('Only the author can pin this post');
-    return this.prisma.post.update({ where: { id }, data: { pinnedAt: new Date() }, include: this.include() });
+    return this.prisma.post.update({ where: { id }, data: { pinnedAt: new Date() }, include: this.include() }).then((post) => this.presentPost(post));
   }
 
   async unpin(userId: string, id: string) {
     const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true } });
     if (post.authorId !== userId) throw new ForbiddenException('Only the author can unpin this post');
-    return this.prisma.post.update({ where: { id }, data: { pinnedAt: null }, include: this.include() });
+    return this.prisma.post.update({ where: { id }, data: { pinnedAt: null }, include: this.include() }).then((post) => this.presentPost(post));
   }
 
   async report(userId: string, postId: string, dto: ReportPostDto) {
@@ -319,7 +320,7 @@ export class PostsService {
   private commentInclude(replyTake?: number, viewerId?: string) {
     const viewerLikes = viewerId ? { likes: { where: { userId: viewerId }, select: { userId: true } } } : {};
     return {
-      author: { select: { id: true, displayName: true, username: true } },
+      author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       images: { orderBy: { sortOrder: 'asc' as const } },
       ...viewerLikes,
       replies: {
@@ -327,7 +328,7 @@ export class PostsService {
         where: { parentId: { not: null } },
         orderBy: { createdAt: 'asc' as const },
         include: {
-          author: { select: { id: true, displayName: true, username: true } },
+          author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
           images: { orderBy: { sortOrder: 'asc' as const } },
           ...viewerLikes,
         },
@@ -383,9 +384,25 @@ export class PostsService {
     for (const userId of taggedUserIds) void this.notifications.create({ userId, actorId, type: 'mention', entityId: postId, message: 'tagged you in a post.' });
   }
 
+  private presentPost<T extends { _count?: { reposts?: number } | null; author?: Record<string, unknown> | null }>(post: T) {
+    const { _count, ...rest } = { ...post } as T & { latitude?: unknown; longitude?: unknown };
+    delete rest.latitude;
+    delete rest.longitude;
+    const author = rest.author ? { ...rest.author } : rest.author;
+    if (author) {
+      delete author.latitude;
+      delete author.longitude;
+    }
+    return {
+      ...rest,
+      author,
+      repostCount: _count?.reposts ?? 0,
+    };
+  }
+
   private include(viewerId?: string) {
     return {
-      author: { select: { id: true, displayName: true, username: true, profileImageUrl: true, latitude: true, longitude: true } },
+      author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       profileOwner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       activity: { select: this.activitySelect() },
       group: { select: { id: true, name: true, slug: true, visibility: true } },
@@ -393,6 +410,7 @@ export class PostsService {
       hashtags: { include: { hashtag: true } },
       taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' as const } },
       comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const }, include: this.commentInclude(1, viewerId) },
+      _count: { select: { reposts: true } },
       ...(viewerId ? { saves: { where: { userId: viewerId }, select: { userId: true } } } : {}),
     };
   }
