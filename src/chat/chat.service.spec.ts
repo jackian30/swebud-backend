@@ -353,7 +353,7 @@ describe('ChatService', () => {
     expect(prisma.message.update).not.toHaveBeenCalled();
   });
 
-  it('blocks direct-chat deletion for group messages', async () => {
+  it('allows deleting a group message sent by the current user', async () => {
     prisma.message.findUniqueOrThrow.mockResolvedValueOnce({
       id: 'message-1',
       senderId: userId,
@@ -362,7 +362,11 @@ describe('ChatService', () => {
     });
     prisma.groupMember.findUnique.mockResolvedValueOnce({ userId });
 
-    await expect(service.deleteMessage(userId, 'message-1')).rejects.toBeInstanceOf(ForbiddenException);
-    expect(prisma.message.update).not.toHaveBeenCalled();
+    await service.deleteMessage(userId, 'message-1');
+
+    expect(prisma.message.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'message-1' },
+      data: expect.objectContaining({ body: '', deletedById: userId }),
+    }));
   });
 });

@@ -5,7 +5,7 @@ import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
 import { isAllowedOrigin, requiredSecret } from '../common/security';
 
-@WebSocketGateway({ namespace: '/notifications', cors: { origin: true, credentials: true } })
+@WebSocketGateway({ namespace: '/notifications' })
 export class NotificationsGateway implements OnGatewayConnection {
   @WebSocketServer() server!: Server;
   constructor(private jwt: JwtService, private config: ConfigService, private prisma: PrismaService) {}

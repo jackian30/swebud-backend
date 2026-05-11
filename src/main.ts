@@ -6,11 +6,14 @@ import helmet from 'helmet';
 import * as express from 'express';
 import { join } from 'path';
 import { AppModule } from './app.module';
-import { corsOrigin } from './common/security';
+import { OriginCheckedSocketIoAdapter } from './common/origin-checked-socket-io.adapter';
+import { assertProductionConfig, bearerCorsOptions } from './common/security';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const config = app.get(ConfigService);
+  assertProductionConfig(config);
+  app.useWebSocketAdapter(new OriginCheckedSocketIoAdapter(app, config));
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -31,7 +34,7 @@ async function bootstrap() {
   };
   app.use('/uploads', serveUploadedFile);
   app.use('/api/uploads', serveUploadedFile);
-  app.enableCors({ origin: corsOrigin(config), credentials: true });
+  app.enableCors(bearerCorsOptions(config));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
   await app.listen(config.get<number>('PORT') ?? 3000);
 }

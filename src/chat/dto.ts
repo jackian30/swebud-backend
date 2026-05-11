@@ -1,4 +1,4 @@
-import { IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class SendDirectMessageDto {
   @IsUUID() recipientId!: string;
@@ -19,4 +19,18 @@ export class TypingDto { @IsUUID() recipientId!: string; }
 export class UpdateChatProfileDto {
   @IsOptional() @IsString() @MaxLength(120) displayName?: string;
   @IsOptional() @IsString() @MaxLength(12000) profileImageUrl?: string;
+}
+
+export class CreateBuddyGroupChatDto {
+  @IsString() @MaxLength(80) name!: string;
+  @IsOptional() @IsString() @MaxLength(240) description?: string;
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @IsUUID(undefined, { each: true }) participantIds!: string[];
+}
+
+export class AddBuddyGroupParticipantsDto {
+  @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @IsUUID(undefined, { each: true }) participantIds!: string[];
+}
+
+export class SendBuddyGroupMessageDto {
+  @IsString() @MaxLength(4000) body!: string;
 }

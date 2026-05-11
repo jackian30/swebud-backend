@@ -101,19 +101,18 @@ describe('StoriesService', () => {
     expect(groups[1].stories.map((story: { id: string }) => story.id)).toEqual(['a-old', 'a-new']);
   });
 
-  it('lists every active ActSnap the viewer is allowed to see', async () => {
+  it('lists active ActSnaps from self and followed authors only', async () => {
     await service.list(viewerId);
 
     expect(prisma.story.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ AND: expect.any(Array) }),
+      where: expect.objectContaining({
+        AND: expect.any(Array),
+        OR: [
+          { authorId: viewerId },
+          { author: { followers: { some: { followerId: viewerId } } } },
+        ],
+      }),
     }));
-    const where = prisma.story.findMany.mock.calls[0][0].where;
-    expect(where.AND).not.toContainEqual({
-      OR: [
-        { authorId: viewerId },
-        { author: { followers: { some: { followerId: viewerId } } } },
-      ],
-    });
   });
 
   it('returns visible active ActSnap authors for requested feed users', async () => {
@@ -132,6 +131,10 @@ describe('StoriesService', () => {
       where: expect.objectContaining({
         authorId: { in: ['author-a', 'author-b'] },
         AND: expect.any(Array),
+        OR: [
+          { authorId: viewerId },
+          { author: { followers: { some: { followerId: viewerId } } } },
+        ],
       }),
       select: { id: true, authorId: true },
       orderBy: { createdAt: 'asc' },

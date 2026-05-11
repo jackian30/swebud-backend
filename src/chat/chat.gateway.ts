@@ -6,7 +6,7 @@ import { ChatService } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { isAllowedOrigin, requiredSecret } from '../common/security';
 
-@WebSocketGateway({ namespace: '/chat', cors: { origin: true, credentials: true } })
+@WebSocketGateway({ namespace: '/chat' })
 export class ChatGateway implements OnGatewayConnection {
   @WebSocketServer() server!: Server;
   private eventBuckets = new Map<string, { count: number; resetAt: number }>();

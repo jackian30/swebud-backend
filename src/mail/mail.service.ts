@@ -9,12 +9,35 @@ export class MailService {
   private readonly transporter: Transporter;
 
   constructor(private readonly config: ConfigService) {
-    this.transporter = nodemailer.createTransport({
-      host: this.config.get<string>('SMTP_HOST') ?? 'mailhog',
-      port: this.config.get<number>('SMTP_PORT') ?? 1025,
-      secure: false,
-      ignoreTLS: true,
-    });
+    this.transporter = nodemailer.createTransport(this.smtpOptions());
+  }
+
+  private smtpOptions() {
+    const host = this.config.get<string>('SMTP_HOST') ?? 'mailhog';
+    const port = Number(this.config.get<string | number>('SMTP_PORT') ?? 1025);
+    const localHost = ['mailhog', 'localhost', '127.0.0.1'].includes(host.toLowerCase());
+    const secure = this.booleanConfig('SMTP_SECURE', port === 465 && !localHost);
+    const ignoreTLS = this.booleanConfig('SMTP_IGNORE_TLS', localHost);
+    const requireTLS = this.booleanConfig('SMTP_REQUIRE_TLS', false);
+    const rejectUnauthorized = this.booleanConfig('SMTP_TLS_REJECT_UNAUTHORIZED', true);
+    const user = this.config.get<string>('SMTP_USER');
+    const pass = this.config.get<string>('SMTP_PASS');
+    const options: Record<string, unknown> = {
+      host,
+      port,
+      secure,
+      ignoreTLS,
+      requireTLS,
+      tls: { rejectUnauthorized },
+    };
+    if (user || pass) options.auth = { user, pass };
+    return options;
+  }
+
+  private booleanConfig(key: string, fallback: boolean) {
+    const raw = this.config.get<string>(key);
+    if (raw == null || raw === '') return fallback;
+    return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
   }
 
   async sendWelcomeEmail(input: { to: string; displayName?: string | null }) {

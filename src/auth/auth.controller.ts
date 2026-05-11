@@ -11,6 +11,7 @@ export class AuthController {
 
   @Post('register') register(@Body() dto: RegisterDto, @Req() req: Request) { return this.auth.register(dto, req.ip); }
   @Post('login') @HttpCode(200) login(@Body() dto: LoginDto, @Req() req: Request) { return this.auth.login(dto, req.ip); }
+  @Post('admin-login') @HttpCode(200) adminLogin(@Body() dto: LoginDto) { return this.auth.adminLogin(dto); }
   @Post('google') @HttpCode(200) google(@Body() dto: GoogleLoginDto) { return this.auth.googleLogin(dto); }
   @UseGuards(JwtAuthGuard)
   @Post('onboarding/complete') @HttpCode(200) completeOnboarding(@CurrentUser() user: AuthUser, @Body() dto: CompleteOnboardingDto) { return this.auth.completeOnboarding(user.id, dto); }

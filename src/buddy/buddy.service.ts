@@ -3,6 +3,7 @@ import { randomBytes } from 'crypto';
 import { BuddyActivity, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { BuddyRoomQueryDto, CreateBuddyRoomDto, JoinBuddyRoomDto, NearbyBuddyQueryDto, UpsertBuddySessionDto } from './dto';
+import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/activity-personas';
 
 const DEFAULT_TTL_MINUTES = 60;
 const DEFAULT_ROOM_TTL_MINUTES = 120;
@@ -173,7 +174,7 @@ export class BuddyService {
       expiresAt: session.expiresAt,
       updatedAt: session.updatedAt,
       distanceKm: this.distanceKm(lat, lng, session.latitude, session.longitude),
-      user: { ...session.user, dateOfBirth: undefined, age },
+      user: { ...exposeActivityPersonas(session.user), dateOfBirth: undefined, age },
     };
   }
 
@@ -227,6 +228,6 @@ export class BuddyService {
   }
 
   private userSelect() {
-    return { id: true, displayName: true, username: true, profileImageUrl: true, gender: true, dateOfBirth: true, activityPersona: true } as const;
+    return { id: true, displayName: true, username: true, profileImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect } as const;
   }
 }

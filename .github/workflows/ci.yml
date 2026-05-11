@@ -1,0 +1,41 @@
+name: Backend CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: swebud
+          POSTGRES_USER: swebud
+          POSTGRES_PASSWORD: swebud
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U swebud -d swebud"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://swebud:swebud@localhost:5432/swebud?schema=public
+      JWT_SECRET: ci-jwt-secret-ci-jwt-secret-ci-jwt-secret
+      JWT_REFRESH_SECRET: ci-refresh-secret-ci-refresh-secret-ci-refresh-secret
+      FRONTEND_ORIGIN: http://localhost:9000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npx prisma validate
+      - run: npm test -- --runInBand
+      - run: npm run lint
+      - run: npm run build

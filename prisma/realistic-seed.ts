@@ -1,4 +1,4 @@
-import { PrismaClient } from '@prisma/client';
+import { ActivityPersona, PrismaClient, ThemePreference } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 
 if (!process.env.DATABASE_URL) {
@@ -8,7 +8,7 @@ if (!process.env.DATABASE_URL) {
 
 const prisma = new PrismaClient();
 
-const PASSWORD = 'password123';
+const PASSWORD = 'password';
 const RUN_ID = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 12);
 const MANILA = { lat: 14.5995, lng: 120.9842 };
 
@@ -25,8 +25,37 @@ const comments = [
   'I need to stop skipping this.', 'Saved this for later.', 'Let’s run this route soon.', 'The caption is too real.', 'Big salute energy.',
 ];
 const repostNotes = ['Need to try this.', 'This is the route.', 'Saving for Saturday crew.', 'Mood.', 'Everyone in the group should see this.', 'Clean session.', 'Stealing this workout.', 'No excuses after seeing this.'];
+const devAccounts = [
+  {
+    email: 'christopher.ian30.cir@gmail.com',
+    username: 'christopherian30cir',
+    displayName: 'Christopher Ian',
+    profileImageUrl: 'https://i.pravatar.cc/160?u=swebud-admin-christopher',
+    coverImageUrl: 'https://picsum.photos/seed/swebud-admin-cover/1200/420',
+    bio: 'Default SweBud administrator account.',
+    storyText: 'Admin QA ActSnap.',
+    roles: ['admin', 'user'],
+  },
+  {
+    email: 'topher@swebud.loc',
+    username: 'tophers',
+    displayName: 'Topher',
+    profileImageUrl: 'https://i.pravatar.cc/160?u=swebud-topher',
+    coverImageUrl: 'https://picsum.photos/seed/swebud-topher-cover/1200/420',
+    bio: 'Local seeded account for repeatable SweBud QA.',
+    storyText: 'Seeded ActSnap for avatar and feed QA.',
+    roles: ['user'],
+  },
+];
+const devActivityPersonas: ActivityPersona[] = [ActivityPersona.runner, ActivityPersona.bodybuilder];
 
 function rand(max: number) { return Math.floor(Math.random() * max); }
+function activityPersonaLinks(personas: ActivityPersona[]) {
+  return { deleteMany: {}, create: [...new Set(personas)].map((persona, sortOrder) => ({ persona, sortOrder })) };
+}
+function createActivityPersonaLinks(personas: ActivityPersona[]) {
+  return { create: [...new Set(personas)].map((persona, sortOrder) => ({ persona, sortOrder })) };
+}
 function one<T>(arr: T[]) { return arr[rand(arr.length)]; }
 function many<T>(arr: T[], min: number, max: number) {
   const count = min + rand(max - min + 1);
@@ -61,6 +90,16 @@ async function main() {
 
   console.log(`realistic-seed-start run=${RUN_ID}`);
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
+  await prisma.role.upsert({
+    where: { key: 'admin' },
+    update: { name: 'Admin', description: 'Full administrative access.' },
+    create: { key: 'admin', name: 'Admin', description: 'Full administrative access.' },
+  });
+  await prisma.role.upsert({
+    where: { key: 'user' },
+    update: { name: 'Users', description: 'Default application user access.' },
+    create: { key: 'user', name: 'Users', description: 'Default application user access.' },
+  });
 
   const users: { id: string; username: string | null }[] = [];
   for (let i = 0; i < userCount; i += 1) {
@@ -76,6 +115,7 @@ async function main() {
         profileImageUrl: `https://i.pravatar.cc/160?img=${(i % 70) + 1}`,
         coverImageUrl: `https://picsum.photos/seed/swebud-cover-${i}/1200/420`,
         ...nearManila(),
+        roles: { deleteMany: {}, create: { role: { connect: { key: 'user' } } } },
       },
       create: {
         email: `real.user.${i + 1}@swebud.loc`,
@@ -86,9 +126,59 @@ async function main() {
         profileImageUrl: `https://i.pravatar.cc/160?img=${(i % 70) + 1}`,
         coverImageUrl: `https://picsum.photos/seed/swebud-cover-${i}/1200/420`,
         ...nearManila(),
+        roles: { create: { role: { connect: { key: 'user' } } } },
         theme: { create: { theme: one(['system', 'light', 'dark']) } },
       },
       select: { id: true, username: true },
+    });
+    users.push(user);
+  }
+
+  for (const account of devAccounts) {
+    const user = await prisma.user.upsert({
+      where: { email: account.email },
+      update: {
+        username: account.username,
+        displayName: account.displayName,
+        bio: account.bio,
+        profileImageUrl: account.profileImageUrl,
+        coverImageUrl: account.coverImageUrl,
+        dateOfBirth: new Date('1995-05-11T00:00:00.000Z'),
+        legalConsentAt: new Date(),
+        dataConsentAt: new Date(),
+        activityPersonas: activityPersonaLinks(devActivityPersonas),
+        roles: { deleteMany: {}, create: account.roles.map((key) => ({ role: { connect: { key } } })) },
+        ...nearManila(),
+      },
+      create: {
+        email: account.email,
+        username: account.username,
+        passwordHash,
+        displayName: account.displayName,
+        bio: account.bio,
+        profileImageUrl: account.profileImageUrl,
+        coverImageUrl: account.coverImageUrl,
+        dateOfBirth: new Date('1995-05-11T00:00:00.000Z'),
+        legalConsentAt: new Date(),
+        dataConsentAt: new Date(),
+        activityPersonas: createActivityPersonaLinks(devActivityPersonas),
+        roles: { create: account.roles.map((key) => ({ role: { connect: { key } } })) },
+        ...nearManila(),
+        theme: { create: { theme: ThemePreference.dark } },
+      },
+      select: { id: true, username: true },
+    });
+    await prisma.story.deleteMany({ where: { authorId: user.id, text: { startsWith: 'Seeded ActSnap' } } });
+    await prisma.story.create({
+      data: {
+        authorId: user.id,
+        text: account.storyText,
+        textPlacement: 'caption',
+        mediaUrl: 'https://picsum.photos/seed/swebud-topher-actsnap/900/1600',
+        mediaType: 'image',
+        visibility: 'public',
+        expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+      },
     });
     users.push(user);
   }
@@ -190,7 +280,8 @@ async function main() {
 
   const total = posts.length + commentCount + saluteCount + repostCount;
   console.log(`realistic-seed-ok users=${users.length} groups=${groups.length} posts=${posts.length} comments=${commentCount} salutes=${saluteCount} reposts=${repostCount} totalActivities=${total}`);
-  console.log('sample-login real.user.1@swebud.loc / password123');
+  console.log(`sample-login real.user.1@swebud.loc / ${PASSWORD}`);
+  console.log(`sample-login tophers / ${PASSWORD}`);
 }
 
 main().catch((err) => {

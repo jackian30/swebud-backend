@@ -18,6 +18,9 @@ describe('PostsService', () => {
       post: {
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'post-1', ...data })),
       },
+      comment: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
     notifications = { create: jest.fn().mockResolvedValue({}) };
     service = new PostsService(prisma, notifications);
@@ -149,6 +152,40 @@ describe('PostsService', () => {
       displayName: true,
       username: true,
       profileImageUrl: true,
+    }));
+  });
+
+  it('sorts top comments by salute count, reply count, then newest fallback', async () => {
+    await service.comments('post-1', { sort: 'top', take: 10, cursor: 0 });
+
+    expect(prisma.comment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { postId: 'post-1', parentId: null },
+      orderBy: [{ likeCount: 'desc' }, { replies: { _count: 'desc' } }, { createdAt: 'desc' }],
+      skip: 0,
+      take: 11,
+    }));
+  });
+
+  it('returns a limited comment page with a next cursor', async () => {
+    prisma.comment.findMany.mockResolvedValueOnce([
+      { id: 'comment-1', authorId },
+      { id: 'comment-2', authorId },
+      { id: 'comment-3', authorId },
+    ]);
+
+    const page = await service.comments('post-1', { sort: 'newest', take: 2, cursor: 4 });
+
+    expect(page).toEqual({
+      items: [
+        expect.objectContaining({ id: 'comment-1', viewerCanManage: false }),
+        expect.objectContaining({ id: 'comment-2', viewerCanManage: false }),
+      ],
+      nextCursor: 6,
+    });
+    expect(prisma.comment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      orderBy: [{ createdAt: 'desc' }],
+      skip: 4,
+      take: 3,
     }));
   });
 });

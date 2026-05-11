@@ -89,6 +89,7 @@ export class GroupsService {
         ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
         ...(dto.description !== undefined ? { description: dto.description.trim() } : {}),
         ...(dto.profileImageUrl !== undefined ? { profileImageUrl: dto.profileImageUrl.trim() || null } : {}),
+        ...(dto.coverImageUrl !== undefined ? { coverImageUrl: dto.coverImageUrl.trim() || null } : {}),
         ...(dto.visibility !== undefined ? { visibility: dto.visibility } : {}),
         ...(dto.allowAnonymousPosts !== undefined ? { allowAnonymousPosts: dto.allowAnonymousPosts } : {}),
       },

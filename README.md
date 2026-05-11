@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBud** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.1.4 beta**
+Current release: **0.1.5 beta**
 
 ## Stack
 
@@ -29,6 +29,28 @@ Current release: **0.1.4 beta**
 - Chat: message requests, direct/group chat, typing/unread/reactions, validated ActSnap reply references, E2EE foundation fields
 - Notifications: login, salute, comment, reply, mention, follow, message request
 - Uploads: MediaLibrary-style collections with local storage by default and S3-ready driver config
+
+## Tags and discovery
+
+SweBud supports two post-level tagging systems:
+
+- Hashtags are parsed from post text, normalized to lowercase, stored in `hashtags` + `post_hashtags`, and returned on feed/post responses.
+- People tags are explicit selected user ids, stored in `post_tagged_users`, returned as `taggedUsers`, and notify tagged users with a mention notification.
+
+Discovery endpoints:
+
+- `GET /feed/hashtags?q=run` returns matching hashtag suggestions with post counts for the composer.
+- `GET /feed/trending-hashtags` returns the top current tags.
+- `GET /feed?hashtag=run` filters the main feed by tag.
+- `GET /groups/:id/posts?hashtag=run` filters group posts by tag.
+
+The feed relevance ranker also uses the current user's recent preferred hashtags and activity personas as affinity signals.
+
+## Chat documentation
+
+Detailed chat behavior, data flow, realtime events, and the current end-to-end encryption foundation are documented in:
+
+- [`docs/chats-and-e2ee.md`](docs/chats-and-e2ee.md)
 
 ## Local URLs
 
@@ -66,9 +88,9 @@ Important variables:
 - `JWT_SECRET`
 - `JWT_REFRESH_SECRET`
 - `FRONTEND_ORIGIN`
+- `ALLOW_LOCAL_ORIGINS` — set to `true` only for local/LAN deployments that need `localhost` or private IP browser origins in addition to `FRONTEND_ORIGIN`
 - `BACKEND_PORT`
-- `SMTP_HOST`
-- `SMTP_PORT`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_IGNORE_TLS`, `SMTP_REQUIRE_TLS`, `SMTP_TLS_REJECT_UNAUTHORIZED`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` — SMTP delivery and TLS/auth settings; MailHog local dev uses plaintext, production SMTP should set TLS/auth explicitly
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` / `GOOGLE_OAUTH_REDIRECT_URI` — Google auth placeholders; `POST /auth/google` verifies Google ID tokens and returns onboarding status
 - `CLOUDFLARE_TURNSTILE_SITE_KEY` / `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY`, `CLOUDFLARE_TURNSTILE_SECRET_KEY` — Turnstile captcha config; backend skips verification in local dev when the secret is empty
 - `KLIPY_API_KEY`, `KLIPY_CLIENT_KEY` — GIF search/provider placeholders
@@ -137,6 +159,15 @@ docker compose --env-file deployment/.env -f deployment/docker-compose.yml up -d
 
 Database schema changes still need Prisma migrations (`npm run prisma:migrate` locally, `npm run prisma:deploy` for deploy flows).
 
+The deployment compose file includes a one-shot `migrate` service that runs `npx prisma migrate deploy` before the backend starts. The backend also exposes:
+
+```text
+GET /health/live
+GET /health/ready
+```
+
+`/health/ready` verifies database connectivity and is used by the Docker healthcheck.
+
 ## Production subdomains
 
 Use separate public hosts for the portal and API:
@@ -153,7 +184,26 @@ GOOGLE_CALLBACK_URL=https://api.asdasd.com/auth/google/callback
 GOOGLE_OAUTH_REDIRECT_URI=https://asdasd.com/auth/google/callback
 ```
 
+For a Netlify-hosted frontend, set `FRONTEND_ORIGIN` to the Netlify production URL and any preview URLs that should be allowed, separated by commas. Set the frontend's `VITE_API_BASE_URL` to this API origin.
+
+For future iOS/Android clients, keep the same bearer-token API contract and use an absolute HTTPS API origin. Production media should use `MEDIA_STORAGE_DRIVER=s3` plus `MEDIA_PUBLIC_BASE_URL` so native clients receive stable absolute media URLs.
+
+The backend CORS and Socket.IO handshake checks are bearer-token oriented and do not enable browser credential/cookie CORS. Browser and native clients should send `Authorization: Bearer <token>` for HTTP and the Socket.IO `auth.token` value for realtime namespaces.
+
 The frontend container serves the SPA on `FRONTEND_PORT`; the backend container serves the API on `BACKEND_PORT`. Put a host-level reverse proxy in front of both ports. A starting nginx config is available at `deployment/reverse-proxy.nginx.conf.example`.
+
+## Deployment readiness checks
+
+Before shipping a backend change, run:
+
+```bash
+npm run build
+npm run lint
+npm test -- --runInBand
+npx prisma validate
+```
+
+Production startup validates strong, distinct JWT secrets, required database/frontend origin env, HTTPS-or-local frontend origins, SMTP port shape, and S3 media requirements when `MEDIA_STORAGE_DRIVER=s3`.
 
 ## Seed data
 
@@ -175,7 +225,7 @@ Default sample login:
 
 ```text
 real.user.1@swebud.loc
-password123
+password
 ```
 
 If `DATABASE_URL` is not set, `seed:realistic` defaults to the local Docker Postgres URL:
@@ -237,7 +287,25 @@ Key endpoints:
 - `GET /groups/:id/posts`
 - `POST /groups/:id/posts`
 - `GET /chat/requests`
+- `POST /chat/requests`
+- `PATCH /chat/requests/:id/accept`
+- `PATCH /chat/requests/:id/decline`
+- `GET /chat/conversations`
+- `GET /chat/conversations/:peerId`
+- `PATCH /chat/conversations/:peerId/read`
+- `GET /chat/keys/:peerId`
+- `POST /chat/keys`
 - `POST /chat/messages`
+- `POST /chat/messages/:id/reactions`
+- `DELETE /chat/messages/:id/reactions`
+- `DELETE /chat/messages/:id`
+- `GET /chat/buddy-groups`
+- `POST /chat/buddy-groups`
+- `GET /chat/buddy-groups/:id`
+- `POST /chat/buddy-groups/:id/participants`
+- `GET /chat/buddy-groups/:id/messages`
+- `POST /chat/buddy-groups/:id/messages`
+- `GET /chat/unread-count`
 - `GET /notifications`
 - `POST /uploads/profile-photo`
 - `POST /uploads/cover-photo`
@@ -273,9 +341,18 @@ Then run the full Docker stack and API smokes from the workspace if available.
 - Turnstile is enforced on register/login when `CLOUDFLARE_TURNSTILE_SECRET_KEY` is set; with no secret it returns a local-dev skip and does not block.
 - E2EE chat support is currently a foundation only, not a production-audited Signal-grade implementation.
 
+## Release tags
+
+The local beta release tags currently exist through `v0.1.5-beta`. Create the next tag only after committing the matching version bump and release changes:
+
+```bash
+git tag -a v0.1.6-beta -m "v0.1.6-beta"
+git push origin v0.1.6-beta
+```
+
 ## Beta caveats
 
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.1.4-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.1.5-beta flows, but production release still needs broader end-to-end coverage.

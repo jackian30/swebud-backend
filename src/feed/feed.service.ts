@@ -1,10 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { visiblePostWhere } from '../privacy/privacy';
+import { activityPersonaLinkSelect } from '../common/activity-personas';
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
 type FeedRankingContext = {
-  user: { latitude: number | null; longitude: number | null; activityPersona: string | null } | null;
+  user: { latitude: number | null; longitude: number | null; activityPersonas: Array<{ persona: string }> } | null;
   followingIds: Set<string>;
   preferredHashtags: Set<string>;
 };
@@ -21,7 +22,7 @@ export class FeedService {
     const needsRelevanceContext = sort === 'relevance';
     const [user, followingRows, preferredHashtags] = await Promise.all([
       needsRelevanceContext
-        ? this.prisma.user.findUnique({ where: { id: userId }, select: { latitude: true, longitude: true, activityPersona: true } })
+        ? this.prisma.user.findUnique({ where: { id: userId }, select: { latitude: true, longitude: true, activityPersonas: activityPersonaLinkSelect } })
         : Promise.resolve(null),
       this.prisma.follow.findMany({ where: { followerId: userId }, select: { followingId: true } }),
       needsRelevanceContext ? this.userPreferredHashtags(userId) : Promise.resolve(new Set<string>()),
@@ -354,7 +355,7 @@ export class FeedService {
     const engagement = Math.log1p(post.likeCount * 2 + post.commentCount * 4) * 12;
     const following = context.followingIds.has(post.authorId) ? 20 : 0;
     const hashtagAffinity = this.hashtagAffinity(post, context.preferredHashtags) * 100;
-    const activityAffinity = this.activityAffinity(post, context.user?.activityPersona) * 85;
+    const activityAffinity = this.activityAffinity(post, context.user?.activityPersonas.map((item) => item.persona) ?? []) * 85;
     const proximity = this.proximityScore(post, context.user);
     const exploration = this.randomDiscoveryScore(post.id, index) * 280;
     return following + hashtagAffinity + activityAffinity + proximity + freshness + engagement + exploration;
@@ -365,9 +366,9 @@ export class FeedService {
     return Math.min(post.hashtags.filter((tag) => preferredHashtags.has(tag.hashtag?.name ?? '')).length, 3);
   }
 
-  private activityAffinity(post: { hashtags?: { hashtag?: { name: string } | null }[] }, activityPersona?: string | null) {
-    if (!activityPersona || !post.hashtags?.length) return 0;
-    const activityTags = this.activityHashtags(activityPersona);
+  private activityAffinity(post: { hashtags?: { hashtag?: { name: string } | null }[] }, activityPersonas: string[]) {
+    if (!activityPersonas.length || !post.hashtags?.length) return 0;
+    const activityTags = new Set(activityPersonas.flatMap((activityPersona) => [...this.activityHashtags(activityPersona)]));
     return post.hashtags.some((tag) => activityTags.has(tag.hashtag?.name ?? '')) ? 1 : 0;
   }
 

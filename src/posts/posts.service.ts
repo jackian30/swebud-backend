@@ -199,14 +199,22 @@ export class PostsService {
     return { liked: false };
   }
 
-  async comments(postId: string, sort: 'top' | 'newest' | 'oldest' = 'top', viewerId?: string) {
+  async comments(postId: string, filters: { sort?: 'top' | 'newest' | 'oldest'; take?: number; cursor?: number } = {}, viewerId?: string) {
     if (viewerId) await this.ensureCanViewPost(viewerId, postId);
+    const take = Math.min(Math.max(filters.take ?? 10, 1), 50);
+    const cursor = Math.max(filters.cursor ?? 0, 0);
     const comments = await this.prisma.comment.findMany({
       where: { postId, parentId: null },
-      orderBy: sort === 'oldest' ? { createdAt: 'asc' } : { createdAt: 'desc' },
+      orderBy: this.commentOrderBy(filters.sort),
       include: this.commentInclude(undefined, viewerId),
+      skip: cursor,
+      take: take + 1,
     });
-    return this.decorateCommentOwnership(comments, viewerId);
+    const items = comments.slice(0, take);
+    return {
+      items: this.decorateCommentOwnership(items, viewerId),
+      nextCursor: comments.length > take ? cursor + take : null,
+    };
   }
 
   async comment(userId: string, postId: string, dto: CommentDto) {
@@ -334,6 +342,12 @@ export class PostsService {
         },
       },
     };
+  }
+
+  private commentOrderBy(sort: 'top' | 'newest' | 'oldest' = 'top') {
+    if (sort === 'oldest') return [{ createdAt: 'asc' as const }];
+    if (sort === 'newest') return [{ createdAt: 'desc' as const }];
+    return [{ likeCount: 'desc' as const }, { replies: { _count: 'desc' as const } }, { createdAt: 'desc' as const }];
   }
 
   private decorateCommentOwnership<T extends { authorId: string; replies?: Array<{ authorId: string }> }>(comments: T[], viewerId?: string): (T & { viewerCanManage: boolean })[] {

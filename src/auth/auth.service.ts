@@ -10,6 +10,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { CompleteOnboardingDto, GoogleLoginDto, LoginDto, RegisterDto } from './dto';
 import { TurnstileService } from './turnstile.service';
 import { allowedOrigins, requiredSecret } from '../common/security';
+import { activityPersonaLinkSelect, createActivityPersonaLinks, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
 
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MS = 1000 * 60 * 30;
@@ -27,17 +28,20 @@ type SafeUser = {
   gender?: string | null;
   dateOfBirth?: Date | null;
   activityPersona?: string | null;
-  activityPersonas?: ActivityPersona[];
+  activityPersonas?: Array<ActivityPersona | { persona: ActivityPersona }>;
   legalConsentAt?: Date | null;
   dataConsentAt?: Date | null;
   googleId?: string | null;
   googleEmailVerified?: boolean;
+  roles?: Array<{ role: { key: string; name: string } }>;
 };
 
 type GoogleTokenInfo = {
   sub: string;
   email: string;
   email_verified?: boolean | string;
+  given_name?: string;
+  family_name?: string;
   name?: string;
   picture?: string;
   aud?: string;
@@ -76,10 +80,10 @@ export class AuthService {
         displayName: dto.displayName?.trim() || null,
         gender: dto.gender,
         dateOfBirth: dto.dateOfBirth,
-        activityPersona: dto.activityPersonas?.[0] ?? dto.activityPersona,
-        activityPersonas: dto.activityPersonas?.length ? dto.activityPersonas : (dto.activityPersona ? [dto.activityPersona] : []),
+        activityPersonas: { create: createActivityPersonaLinks(dto.activityPersonas?.length ? dto.activityPersonas : (dto.activityPersona ? [dto.activityPersona] : [])) },
         legalConsentAt: now,
         dataConsentAt: now,
+        roles: { create: { role: { connectOrCreate: { where: { key: 'user' }, create: { key: 'user', name: 'Users', description: 'Default application user access.' } } } } },
         theme: { create: { theme: 'system' } },
       },
       select: this.safeUserSelect(),
@@ -103,10 +107,26 @@ export class AuthService {
     });
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) throw new UnauthorizedException('Invalid credentials');
     const activeSessions = await this.prisma.refreshToken.count({ where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } } });
-    const safeUser = Object.fromEntries(Object.entries(user).filter(([key]) => key !== 'passwordHash')) as SafeUser;
+    const safeUser = Object.fromEntries(Object.entries(user).filter(([key]) => key !== 'passwordHash')) as unknown as SafeUser;
     const tokens = await this.issueTokens(safeUser);
     if (activeSessions > 0) void this.notifications.create({ userId: user.id, actorId: user.id, type: 'login', message: 'New login detected on another device.' } as any);
     return tokens;
+  }
+
+  async adminLogin(dto: LoginDto) {
+    const identifier = dto.email.toLowerCase().trim();
+    const user = await this.prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: identifier },
+          { username: identifier.replace(/^@/, '') },
+        ],
+      },
+      select: { ...this.safeUserSelect(), passwordHash: true },
+    });
+    if (!user || !this.hasRole(user, 'admin') || !(await bcrypt.compare(dto.password, user.passwordHash))) throw new UnauthorizedException('Invalid admin credentials');
+    const safeUser = Object.fromEntries(Object.entries(user).filter(([key]) => key !== 'passwordHash')) as unknown as SafeUser;
+    return this.issueTokens(safeUser);
   }
 
   async googleLogin(dto: GoogleLoginDto) {
@@ -130,9 +150,10 @@ export class AuthService {
           verified: googleEmailVerified,
           passwordHash: await bcrypt.hash(randomBytes(32).toString('hex'), 12),
           displayName: profile.name ?? email.split('@')[0],
-          username: await this.googlePlaceholderUsername(),
+          username: await this.googleDefaultUsername(profile),
           usernameFinalized: false,
           profileImageUrl: profile.picture,
+          roles: { create: { role: { connectOrCreate: { where: { key: 'user' }, create: { key: 'user', name: 'Users', description: 'Default application user access.' } } } } },
           theme: { create: { theme: 'system' } },
         },
         select: this.safeUserSelect(),
@@ -157,8 +178,7 @@ export class AuthService {
         dateOfBirth: dto.dateOfBirth,
         legalConsentAt: now,
         dataConsentAt: now,
-        activityPersonas,
-        activityPersona: activityPersonas[0] ?? undefined,
+        activityPersonas: replaceActivityPersonaLinks(activityPersonas),
       },
       select: this.safeUserSelect(),
     });
@@ -236,7 +256,9 @@ export class AuthService {
     await this.prisma.refreshToken.create({
       data: { id: sessionId, userId: user.id, tokenHash: await bcrypt.hash(refreshToken, 12), expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
     });
-    return { user: { ...user, ...onboarding }, accessToken, refreshToken, ...onboarding };
+    const normalizedUser = exposeActivityPersonas(user);
+    const roleKeys = Array.isArray(user.roles) ? user.roles.map((item) => item.role.key) : [];
+    return { user: { ...normalizedUser, roleKeys, isAdmin: roleKeys.includes('admin'), ...onboarding }, accessToken, refreshToken, ...onboarding };
   }
 
   private onboardingStatus(user: SafeUser) {
@@ -260,13 +282,18 @@ export class AuthService {
     return profile;
   }
 
-  private async googlePlaceholderUsername() {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const username = `google_${randomBytes(5).toString('hex')}`;
+  private async googleDefaultUsername(profile: Pick<GoogleTokenInfo, 'email' | 'given_name' | 'family_name' | 'name'>) {
+    const nameBase = [profile.given_name, profile.family_name].filter(Boolean).join('');
+    const fallbackName = profile.name?.replace(/\s+/g, '') || profile.email.split('@')[0];
+    const base = this.normalizeUsername(nameBase || fallbackName).replace(/[._-]/g, '') || 'googleuser';
+    const normalizedBase = base.slice(0, 24);
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const suffix = attempt === 0 ? '' : String(attempt + 1);
+      const username = `${normalizedBase}${suffix}`.slice(0, 32);
       const existing = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
       if (!existing) return username;
     }
-    return `google_${Date.now()}_${randomBytes(3).toString('hex')}`;
+    return `${normalizedBase}${randomBytes(3).toString('hex')}`.slice(0, 32);
   }
 
   private async findMatchingToken<T extends { id: string; tokenHash: string }>(tokens: T[], token: string): Promise<T | null> {
@@ -277,5 +304,6 @@ export class AuthService {
   private accessSecret() { return requiredSecret(this.config, 'JWT_SECRET', 'dev-secret'); }
   private refreshSecret() { return requiredSecret(this.config, 'JWT_REFRESH_SECRET', 'dev-refresh-secret'); }
   private normalizeUsername(username?: string) { return username?.toLowerCase().replace(/^@/, '').trim().replace(/[^a-z0-9._-]/g, '') ?? ''; }
-  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersona: true, activityPersonas: true, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true } as const; }
+  private hasRole(user: SafeUser, roleKey: string) { return user.roles?.some((item) => item.role.key === roleKey) ?? false; }
+  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true, roles: { include: { role: true } } } as const; }
 }

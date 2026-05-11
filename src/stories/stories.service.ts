@@ -33,7 +33,7 @@ export class StoriesService {
 
   async list(viewerId: string) {
     const stories = await this.prisma.story.findMany({
-      where: visibleStoryWhere(viewerId),
+      where: this.followedVisibleStoryWhere(viewerId),
       take: 120,
       orderBy: [{ authorId: 'asc' }, { createdAt: 'asc' }],
       include: this.include(viewerId),
@@ -61,7 +61,7 @@ export class StoriesService {
     const stories = await this.prisma.story.findMany({
       where: {
         authorId: { in: uniqueUserIds },
-        ...visibleStoryWhere(viewerId),
+        ...this.followedVisibleStoryWhere(viewerId),
       },
       select: { id: true, authorId: true },
       orderBy: { createdAt: 'asc' },
@@ -157,6 +157,16 @@ export class StoriesService {
       views: { where: { userId: viewerId }, select: { userId: true, viewedAt: true } },
       reactions: { select: { userId: true, emoji: true, createdAt: true } },
     } as const;
+  }
+
+  private followedVisibleStoryWhere(viewerId: string) {
+    return {
+      ...visibleStoryWhere(viewerId),
+      OR: [
+        { authorId: viewerId },
+        { author: { followers: { some: { followerId: viewerId } } } },
+      ],
+    };
   }
 
   private presentStory<T extends { authorId: string }>(story: T, viewerId: string) {

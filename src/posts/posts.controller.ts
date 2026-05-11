@@ -25,7 +25,16 @@ export class PostsController {
   @Post(':id/report') report(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ReportPostDto) { return this.posts.report(user.id, id, dto); }
   @Post(':id/like') like(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.posts.like(user.id, id); }
   @Delete(':id/like') unlike(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.posts.unlike(user.id, id); }
-  @Get(':id/comments') comments(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('sort') sort?: 'top' | 'newest' | 'oldest') { return this.posts.comments(id, sort, user.id); }
+  @Get(':id/comments')
+  comments(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Query('sort') sort?: 'top' | 'newest' | 'oldest',
+    @Query('take', new ParseIntPipe({ optional: true })) take?: number,
+    @Query('cursor', new ParseIntPipe({ optional: true })) cursor?: number,
+  ) {
+    return this.posts.comments(id, { sort, take, cursor }, user.id);
+  }
   @Post(':id/comments') comment(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: CommentDto) { return this.posts.comment(user.id, id, dto); }
   @Patch(':postId/comments/:commentId') updateComment(@CurrentUser() user: AuthUser, @Param('postId') postId: string, @Param('commentId') commentId: string, @Body() dto: UpdateCommentDto) { return this.posts.updateComment(user.id, postId, commentId, dto); }
   @Get(':postId/comments/:commentId/history') commentHistory(@CurrentUser() user: AuthUser, @Param('postId') postId: string, @Param('commentId') commentId: string) { return this.posts.commentHistory(user.id, postId, commentId); }

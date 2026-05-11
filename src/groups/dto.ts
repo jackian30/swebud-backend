@@ -12,6 +12,7 @@ export class UpdateGroupSettingsDto {
   @IsOptional() @IsString() @MaxLength(120) name?: string;
   @IsOptional() @IsString() @MaxLength(500) description?: string;
   @IsOptional() @IsString() profileImageUrl?: string;
+  @IsOptional() @IsString() coverImageUrl?: string;
   @IsOptional() @IsIn(['public', 'private']) visibility?: 'public' | 'private';
   @IsOptional() @IsBoolean() allowAnonymousPosts?: boolean;
 }

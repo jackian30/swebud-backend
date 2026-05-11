@@ -3,13 +3,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENV_FILE="$SCRIPT_DIR/.env"
+PROJECT="${COMPOSE_PROJECT_NAME:-swebud}"
 
 if [[ ! -f "$ENV_FILE" ]]; then
   cp "$SCRIPT_DIR/.env.example" "$ENV_FILE"
   echo "Created $ENV_FILE. Review secrets before production use."
 fi
 
-docker compose --env-file "$ENV_FILE" -f "$SCRIPT_DIR/docker-compose.yml" up -d --build postgres mailhog backend frontend
+docker compose -p "$PROJECT" --env-file "$ENV_FILE" -f "$SCRIPT_DIR/docker-compose.yml" up -d --build --remove-orphans postgres mailhog migrate backend frontend
 
 env_value() {
   local key="$1"
