@@ -1,4 +1,4 @@
-# SweBud NestJS backend.
+# SweBudd NestJS backend.
 FROM node:22-alpine AS build
 WORKDIR /app
 

@@ -33,7 +33,6 @@ type SafeUser = {
   dataConsentAt?: Date | null;
   googleId?: string | null;
   googleEmailVerified?: boolean;
-  roles?: Array<{ role: { key: string; name: string } }>;
 };
 
 type GoogleTokenInfo = {
@@ -83,7 +82,6 @@ export class AuthService {
         activityPersonas: { create: createActivityPersonaLinks(dto.activityPersonas?.length ? dto.activityPersonas : (dto.activityPersona ? [dto.activityPersona] : [])) },
         legalConsentAt: now,
         dataConsentAt: now,
-        roles: { create: { role: { connectOrCreate: { where: { key: 'user' }, create: { key: 'user', name: 'Users', description: 'Default application user access.' } } } } },
         theme: { create: { theme: 'system' } },
       },
       select: this.safeUserSelect(),
@@ -113,22 +111,6 @@ export class AuthService {
     return tokens;
   }
 
-  async adminLogin(dto: LoginDto) {
-    const identifier = dto.email.toLowerCase().trim();
-    const user = await this.prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: identifier },
-          { username: identifier.replace(/^@/, '') },
-        ],
-      },
-      select: { ...this.safeUserSelect(), passwordHash: true },
-    });
-    if (!user || !this.hasRole(user, 'admin') || !(await bcrypt.compare(dto.password, user.passwordHash))) throw new UnauthorizedException('Invalid admin credentials');
-    const safeUser = Object.fromEntries(Object.entries(user).filter(([key]) => key !== 'passwordHash')) as unknown as SafeUser;
-    return this.issueTokens(safeUser);
-  }
-
   async googleLogin(dto: GoogleLoginDto) {
     const profile = await this.verifyGoogleIdToken(dto.idToken);
     const email = profile.email.toLowerCase().trim();
@@ -153,7 +135,6 @@ export class AuthService {
           username: await this.googleDefaultUsername(profile),
           usernameFinalized: false,
           profileImageUrl: profile.picture,
-          roles: { create: { role: { connectOrCreate: { where: { key: 'user' }, create: { key: 'user', name: 'Users', description: 'Default application user access.' } } } } },
           theme: { create: { theme: 'system' } },
         },
         select: this.safeUserSelect(),
@@ -257,8 +238,7 @@ export class AuthService {
       data: { id: sessionId, userId: user.id, tokenHash: await bcrypt.hash(refreshToken, 12), expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
     });
     const normalizedUser = exposeActivityPersonas(user);
-    const roleKeys = Array.isArray(user.roles) ? user.roles.map((item) => item.role.key) : [];
-    return { user: { ...normalizedUser, roleKeys, isAdmin: roleKeys.includes('admin'), ...onboarding }, accessToken, refreshToken, ...onboarding };
+    return { user: { ...normalizedUser, ...onboarding }, accessToken, refreshToken, ...onboarding };
   }
 
   private onboardingStatus(user: SafeUser) {
@@ -304,6 +284,5 @@ export class AuthService {
   private accessSecret() { return requiredSecret(this.config, 'JWT_SECRET', 'dev-secret'); }
   private refreshSecret() { return requiredSecret(this.config, 'JWT_REFRESH_SECRET', 'dev-refresh-secret'); }
   private normalizeUsername(username?: string) { return username?.toLowerCase().replace(/^@/, '').trim().replace(/[^a-z0-9._-]/g, '') ?? ''; }
-  private hasRole(user: SafeUser, roleKey: string) { return user.roles?.some((item) => item.role.key === roleKey) ?? false; }
-  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true, roles: { include: { role: true } } } as const; }
+  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true } as const; }
 }

@@ -32,14 +32,14 @@ describe('PostsService', () => {
   });
 
   it('creates text posts using the user default post visibility', async () => {
-    await service.create(authorId, { text: ' Hello #SweBud ' });
+    await service.create(authorId, { text: ' Hello #SweBudd ' });
 
     expect(prisma.post.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         authorId,
-        text: 'Hello #SweBud',
+        text: 'Hello #SweBudd',
         visibility: PostVisibility.followers,
-        hashtags: { create: [{ hashtag: { connectOrCreate: { where: { name: 'swebud' }, create: { name: 'swebud' } } } }] },
+        hashtags: { create: [{ hashtag: { connectOrCreate: { where: { name: 'swebudd' }, create: { name: 'swebudd' } } } }] },
       }),
     }));
   });

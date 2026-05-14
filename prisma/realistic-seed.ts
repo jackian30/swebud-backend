@@ -32,9 +32,8 @@ const devAccounts = [
     displayName: 'Christopher Ian',
     profileImageUrl: 'https://i.pravatar.cc/160?u=swebud-admin-christopher',
     coverImageUrl: 'https://picsum.photos/seed/swebud-admin-cover/1200/420',
-    bio: 'Default SweBud administrator account.',
+    bio: 'Default SweBudd administrator account.',
     storyText: 'Admin QA ActSnap.',
-    roles: ['admin', 'user'],
   },
   {
     email: 'topher@swebud.loc',
@@ -42,9 +41,8 @@ const devAccounts = [
     displayName: 'Topher',
     profileImageUrl: 'https://i.pravatar.cc/160?u=swebud-topher',
     coverImageUrl: 'https://picsum.photos/seed/swebud-topher-cover/1200/420',
-    bio: 'Local seeded account for repeatable SweBud QA.',
+    bio: 'Local seeded account for repeatable SweBudd QA.',
     storyText: 'Seeded ActSnap for avatar and feed QA.',
-    roles: ['user'],
   },
 ];
 const devActivityPersonas: ActivityPersona[] = [ActivityPersona.runner, ActivityPersona.bodybuilder];
@@ -90,16 +88,6 @@ async function main() {
 
   console.log(`realistic-seed-start run=${RUN_ID}`);
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
-  await prisma.role.upsert({
-    where: { key: 'admin' },
-    update: { name: 'Admin', description: 'Full administrative access.' },
-    create: { key: 'admin', name: 'Admin', description: 'Full administrative access.' },
-  });
-  await prisma.role.upsert({
-    where: { key: 'user' },
-    update: { name: 'Users', description: 'Default application user access.' },
-    create: { key: 'user', name: 'Users', description: 'Default application user access.' },
-  });
 
   const users: { id: string; username: string | null }[] = [];
   for (let i = 0; i < userCount; i += 1) {
@@ -115,7 +103,6 @@ async function main() {
         profileImageUrl: `https://i.pravatar.cc/160?img=${(i % 70) + 1}`,
         coverImageUrl: `https://picsum.photos/seed/swebud-cover-${i}/1200/420`,
         ...nearManila(),
-        roles: { deleteMany: {}, create: { role: { connect: { key: 'user' } } } },
       },
       create: {
         email: `real.user.${i + 1}@swebud.loc`,
@@ -126,7 +113,6 @@ async function main() {
         profileImageUrl: `https://i.pravatar.cc/160?img=${(i % 70) + 1}`,
         coverImageUrl: `https://picsum.photos/seed/swebud-cover-${i}/1200/420`,
         ...nearManila(),
-        roles: { create: { role: { connect: { key: 'user' } } } },
         theme: { create: { theme: one(['system', 'light', 'dark']) } },
       },
       select: { id: true, username: true },
@@ -147,7 +133,6 @@ async function main() {
         legalConsentAt: new Date(),
         dataConsentAt: new Date(),
         activityPersonas: activityPersonaLinks(devActivityPersonas),
-        roles: { deleteMany: {}, create: account.roles.map((key) => ({ role: { connect: { key } } })) },
         ...nearManila(),
       },
       create: {
@@ -162,7 +147,6 @@ async function main() {
         legalConsentAt: new Date(),
         dataConsentAt: new Date(),
         activityPersonas: createActivityPersonaLinks(devActivityPersonas),
-        roles: { create: account.roles.map((key) => ({ role: { connect: { key } } })) },
         ...nearManila(),
         theme: { create: { theme: ThemePreference.dark } },
       },

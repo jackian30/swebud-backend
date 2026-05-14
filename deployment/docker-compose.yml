@@ -16,6 +16,23 @@ services:
       timeout: 5s
       retries: 10
 
+  admin-postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${ADMIN_DB_DATABASE:-swebud_admin}
+      POSTGRES_USER: ${ADMIN_DB_USERNAME:-swebud_admin}
+      POSTGRES_PASSWORD: ${ADMIN_DB_PASSWORD:-swebud_admin}
+    ports:
+      - "${ADMIN_DB_PORT:-5433}:5432"
+    volumes:
+      - swebud_admin_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${ADMIN_DB_USERNAME:-swebud_admin} -d ${ADMIN_DB_DATABASE:-swebud_admin}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   mailhog:
     image: mailhog/mailhog:v1.0.1
     restart: unless-stopped
@@ -52,7 +69,7 @@ services:
       SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      MAIL_FROM: ${MAIL_FROM:-SweBud <no-reply@localhost>}
+      MAIL_FROM: ${MAIL_FROM:-SweBudd <no-reply@localhost>}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:3000/auth/google/callback}
@@ -61,7 +78,7 @@ services:
       CLOUDFLARE_TURNSTILE_SITE_KEY: ${CLOUDFLARE_TURNSTILE_SITE_KEY:-}
       KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
-      APP_VERSION: ${APP_VERSION:-0.1.5-beta}
+      APP_VERSION: ${APP_VERSION:-0.2.0-beta}
       LEGAL_TERMS_URL: ${LEGAL_TERMS_URL:-}
       LEGAL_PRIVACY_URL: ${LEGAL_PRIVACY_URL:-}
       MEDIA_STORAGE_DRIVER: ${MEDIA_STORAGE_DRIVER:-local}
@@ -115,7 +132,7 @@ services:
         VITE_CLOUDFLARE_TURNSTILE_SITE_KEY: ${VITE_CLOUDFLARE_TURNSTILE_SITE_KEY:-${CLOUDFLARE_TURNSTILE_SITE_KEY:-}}
         VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
         VITE_KLIPY_API_KEY: ${KLIPY_API_KEY:-}
-        VITE_APP_VERSION: ${APP_VERSION:-0.1.5-beta}
+        VITE_APP_VERSION: ${APP_VERSION:-0.2.0-beta}
     restart: unless-stopped
     depends_on:
       backend:
@@ -128,7 +145,7 @@ services:
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
-      APP_VERSION: ${APP_VERSION:-0.1.5-beta}
+      APP_VERSION: ${APP_VERSION:-0.2.0-beta}
       LEGAL_TERMS_URL: ${LEGAL_TERMS_URL:-}
       LEGAL_PRIVACY_URL: ${LEGAL_PRIVACY_URL:-}
     ports:
@@ -150,7 +167,7 @@ services:
       VITE_GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       VITE_KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       VITE_KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
-      VITE_APP_VERSION: ${APP_VERSION:-0.1.5-beta}
+      VITE_APP_VERSION: ${APP_VERSION:-0.2.0-beta}
       VITE_LEGAL_TERMS_URL: ${LEGAL_TERMS_URL:-}
       VITE_LEGAL_PRIVACY_URL: ${LEGAL_PRIVACY_URL:-}
       BACKEND_UPSTREAM: http://backend:3000
@@ -171,15 +188,28 @@ services:
       dockerfile: Dockerfile
     restart: unless-stopped
     depends_on:
+      admin-postgres:
+        condition: service_healthy
       backend:
         condition: service_healthy
     environment:
-      APP_NAME: ${ADMIN_APP_NAME:-SweBud Admin}
+      APP_NAME: ${ADMIN_APP_NAME:-SweBudd Admin}
       APP_ENV: ${ADMIN_APP_ENV:-production}
       APP_KEY: ${ADMIN_APP_KEY:?Set ADMIN_APP_KEY to a Laravel app key}
       APP_DEBUG: ${ADMIN_APP_DEBUG:-false}
       APP_URL: ${ADMIN_APP_URL:-http://localhost:${ADMIN_PORT:-9100}}
-      SWEBUD_API_BASE_URL: ${ADMIN_API_BASE_URL:-http://localhost:${BACKEND_PORT:-3000}}
+      DB_CONNECTION: pgsql
+      DB_HOST: admin-postgres
+      DB_PORT: 5432
+      DB_DATABASE: ${ADMIN_DB_DATABASE:-swebud_admin}
+      DB_USERNAME: ${ADMIN_DB_USERNAME:-swebud_admin}
+      DB_PASSWORD: ${ADMIN_DB_PASSWORD:-swebud_admin}
+      SWEBUD_DB_HOST: postgres
+      SWEBUD_DB_PORT: 5432
+      SWEBUD_DB_DATABASE: ${POSTGRES_DB:-swebud}
+      SWEBUD_DB_USERNAME: ${POSTGRES_USER:-swebud}
+      SWEBUD_DB_PASSWORD: ${POSTGRES_PASSWORD:-swebud}
+      SWEBUD_DB_SCHEMA: public
       SESSION_DRIVER: ${ADMIN_SESSION_DRIVER:-file}
       CACHE_STORE: ${ADMIN_CACHE_STORE:-file}
       QUEUE_CONNECTION: ${ADMIN_QUEUE_CONNECTION:-sync}
@@ -196,5 +226,6 @@ services:
 
 volumes:
   swebud_postgres_data:
+  swebud_admin_postgres_data:
   swebud_uploads:
   swebud_frontend_node_modules:

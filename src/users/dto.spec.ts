@@ -9,7 +9,7 @@ describe('UpdateMeDto', () => {
 
   it('accepts the current profile update API contract', async () => {
     const value = await pipe.transform({
-      displayName: 'Alice SweBud',
+      displayName: 'Alice SweBudd',
       username: '@Alice.Fit',
       bio: 'Training daily',
       profileImageUrl: '/api/uploads/profile-photos/profile.webp',
@@ -22,7 +22,7 @@ describe('UpdateMeDto', () => {
     }, metadata);
 
     expect(value).toEqual(expect.objectContaining({
-      displayName: 'Alice SweBud',
+      displayName: 'Alice SweBudd',
       username: '@Alice.Fit',
       profileVisibility: ProfileVisibility.private,
       defaultPostVisibility: PostVisibility.only_me,
@@ -32,7 +32,7 @@ describe('UpdateMeDto', () => {
 
   it('rejects removed profile settings instead of silently persisting them', async () => {
     await expect(pipe.transform({
-      displayName: 'Alice SweBud',
+      displayName: 'Alice SweBudd',
       allowMessagesFrom: 'followers',
       showAge: true,
     }, metadata)).rejects.toBeInstanceOf(BadRequestException);

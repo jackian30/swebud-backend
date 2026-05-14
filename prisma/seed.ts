@@ -26,26 +26,15 @@ function sample<T>(items: T[], count: number) {
 }
 
 async function main() {
-  console.log(`🌱 Seeding SweBud dev data: ${USER_COUNT} users, ${POST_COUNT} posts, ${GROUP_COUNT} groups`);
+  console.log(`🌱 Seeding SweBudd dev data: ${USER_COUNT} users, ${POST_COUNT} posts, ${GROUP_COUNT} groups`);
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
-  await prisma.role.upsert({
-    where: { key: 'admin' },
-    update: { name: 'Admin', description: 'Full administrative access.' },
-    create: { key: 'admin', name: 'Admin', description: 'Full administrative access.' },
-  });
-  await prisma.role.upsert({
-    where: { key: 'user' },
-    update: { name: 'Users', description: 'Default application user access.' },
-    create: { key: 'user', name: 'Users', description: 'Default application user access.' },
-  });
 
   const users = [];
-  const admin = await prisma.user.upsert({
+  const primaryUser = await prisma.user.upsert({
     where: { email: 'christopher.ian30.cir@gmail.com' },
     update: {
       username: 'christopherian30cir',
       displayName: 'Christopher Ian',
-      roles: { deleteMany: {}, create: [{ role: { connect: { key: 'admin' } } }, { role: { connect: { key: 'user' } } }] },
     },
     create: {
       email: 'christopher.ian30.cir@gmail.com',
@@ -55,11 +44,10 @@ async function main() {
       legalConsentAt: new Date(),
       dataConsentAt: new Date(),
       dateOfBirth: new Date('1995-05-11T00:00:00.000Z'),
-      roles: { create: [{ role: { connect: { key: 'admin' } } }, { role: { connect: { key: 'user' } } }] },
       theme: { create: { theme: ThemePreference.system } },
     },
   });
-  users.push(admin);
+  users.push(primaryUser);
 
   for (let i = 0; i < USER_COUNT; i += 1) {
     const first = faker.person.firstName();
@@ -78,7 +66,6 @@ async function main() {
         ]),
         profileImageUrl: faker.image.avatar(),
         ...loc,
-        roles: { deleteMany: {}, create: { role: { connect: { key: 'user' } } } },
       },
       create: {
         email: `seed.user.${i + 1}@swebud.loc`,
@@ -88,7 +75,6 @@ async function main() {
         bio: `${faker.helpers.arrayElement(['Runner', 'Lifter', 'Cyclist', 'Yoga enjoyer'])}. ${faker.lorem.sentence()}`,
         profileImageUrl: faker.image.avatar(),
         ...loc,
-        roles: { create: { role: { connect: { key: 'user' } } } },
         theme: { create: { theme: faker.helpers.arrayElement(Object.values(ThemePreference)) } },
       },
     }));

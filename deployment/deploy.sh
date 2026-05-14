@@ -10,7 +10,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
   echo "Created $ENV_FILE. Review secrets before production use."
 fi
 
-docker compose -p "$PROJECT" --env-file "$ENV_FILE" -f "$SCRIPT_DIR/docker-compose.yml" up -d --build --remove-orphans postgres mailhog migrate backend frontend
+docker compose -p "$PROJECT" --env-file "$ENV_FILE" -f "$SCRIPT_DIR/docker-compose.yml" up -d --build --remove-orphans postgres admin-postgres mailhog migrate backend frontend admin
 
 env_value() {
   local key="$1"
@@ -20,9 +20,11 @@ env_value() {
   echo "${value:-$fallback}"
 }
 
-echo "SweBud stack is starting:"
+echo "SweBudd stack is starting:"
 echo "- Frontend container: http://localhost:$(env_value FRONTEND_PORT 9000)"
 echo "- Backend container:  http://localhost:$(env_value BACKEND_PORT 3000)"
+echo "- Admin container:    http://localhost:$(env_value ADMIN_PORT 9100)"
+echo "- Admin API:          http://localhost:$(env_value ADMIN_PORT 9100)/admin-api"
 echo "- API base:           $(env_value API_BASE_URL /api)"
 echo "- Allowed frontend:   $(env_value FRONTEND_ORIGIN http://localhost:9000)"
 echo "- MailHog:            http://localhost:$(env_value MAILHOG_UI_PORT 8126)"

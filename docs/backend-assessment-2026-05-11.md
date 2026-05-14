@@ -21,7 +21,7 @@ That created duplicated state and used a PostgreSQL array for repeatable user pr
 
 ## Assessment Notes
 
-- Social join tables are already normalized: follows, blocks, close buddies, saves, views, likes, reports, roles, and group memberships use composite keys or unique constraints appropriately.
+- Social join tables are already normalized: follows, blocks, close buddies, saves, views, likes, reports, and group memberships use composite keys or unique constraints appropriately. Legacy backend user-role tables were removed when admin runtime moved to Laravel.
 - Media is mostly normalized into `post_images` and `comment_images`.
 - `likeCount`, `commentCount`, `viewCount`, and repost counts are intentionally denormalized counters for feed performance. Keep them, but treat them as derived values and update them transactionally.
 - Message and message request reference preview fields are duplicated by design for immutable previews. They could be normalized later if shared reference editing becomes a requirement.

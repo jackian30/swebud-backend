@@ -1,8 +1,8 @@
-# SweBud Backend
+# SweBudd Backend
 
-NestJS + Prisma + PostgreSQL backend for **SweBud** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
+NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.1.5 beta**
+Current release: **0.2.0 beta**
 
 ## Stack
 
@@ -12,6 +12,7 @@ Current release: **0.1.5 beta**
 - Socket.IO realtime events
 - JWT auth with DB-backed sliding sessions
 - Docker local deployment
+- Render free web service deployment config
 - MailHog for local email testing
 
 ## Main features
@@ -32,7 +33,7 @@ Current release: **0.1.5 beta**
 
 ## Tags and discovery
 
-SweBud supports two post-level tagging systems:
+SweBudd supports two post-level tagging systems:
 
 - Hashtags are parsed from post text, normalized to lowercase, stored in `hashtags` + `post_hashtags`, and returned on feed/post responses.
 - People tags are explicit selected user ids, stored in `post_tagged_users`, returned as `taggedUsers`, and notify tagged users with a mention notification.
@@ -137,7 +138,7 @@ From this repo:
 ./deployment/deploy.sh
 ```
 
-From the parent SweBud workspace, the preferred local helper is:
+From the parent SweBudd workspace, the preferred local helper is:
 
 ```bash
 swebud-up
@@ -167,6 +168,55 @@ GET /health/ready
 ```
 
 `/health/ready` verifies database connectivity and is used by the Docker healthcheck.
+
+## Render + Supabase free web deployment
+
+Use `render.yaml` to create the free backend web service on Render:
+
+```text
+Runtime: Node
+Region: Singapore
+Plan: Free
+Build command: npm ci && npm run prisma:generate && npm run build
+Start command: npm run start:render
+Health check path: /health/live
+```
+
+Set these Render environment variables:
+
+```text
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
+FRONTEND_ORIGIN=https://<your-cloudflare-pages-domain>
+ALLOW_LOCAL_ORIGINS=false
+NODE_ENV=production
+MEDIA_STORAGE_DRIVER=s3
+```
+
+For **Supabase Storage**, create a public bucket for app media and set:
+
+```text
+MEDIA_S3_BUCKET=<bucket-name>
+MEDIA_PUBLIC_BASE_URL=https://<project-ref>.supabase.co/storage/v1/object/public/<bucket-name>/
+AWS_REGION=ap-southeast-1
+AWS_S3_ENDPOINT=https://<project-ref>.supabase.co/storage/v1/s3
+AWS_S3_FORCE_PATH_STYLE=true
+AWS_ACCESS_KEY_ID=<supabase-storage-access-key>
+AWS_SECRET_ACCESS_KEY=<supabase-storage-secret-key>
+```
+
+For **Cloudflare R2**, set:
+
+```text
+MEDIA_S3_BUCKET=<bucket-name>
+MEDIA_PUBLIC_BASE_URL=https://media.your-domain.com/
+AWS_REGION=auto
+AWS_S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+AWS_S3_FORCE_PATH_STYLE=true
+AWS_ACCESS_KEY_ID=<r2-access-key-id>
+AWS_SECRET_ACCESS_KEY=<r2-secret-access-key>
+```
+
+Render's free web service has an ephemeral filesystem and sleeps when idle, so production media must use `MEDIA_STORAGE_DRIVER=s3`; do not use local upload storage on Render.
 
 ## Production subdomains
 
@@ -239,6 +289,7 @@ postgresql://swebud:swebud@localhost:5432/swebud?schema=public
 ```bash
 npm run dev              # Nest watch mode
 npm run start            # run compiled app
+npm run start:render     # deploy migrations, then run compiled app on Render
 npm run build            # compile backend
 npm test                 # Jest test gate; passes with no tests currently
 npm run lint             # ESLint
@@ -343,11 +394,11 @@ Then run the full Docker stack and API smokes from the workspace if available.
 
 ## Release tags
 
-The local beta release tags currently exist through `v0.1.5-beta`. Create the next tag only after committing the matching version bump and release changes:
+Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.1.6-beta -m "v0.1.6-beta"
-git push origin v0.1.6-beta
+git tag -a v0.2.0-beta -m "v0.2.0-beta"
+git push origin v0.2.0-beta
 ```
 
 ## Beta caveats
@@ -355,4 +406,4 @@ git push origin v0.1.6-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.1.5-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.0-beta flows, but production release still needs broader end-to-end coverage.

@@ -1,12 +1,12 @@
 # Chats and End-to-End Encryption
 
-This document describes the current SweBud chat feature and the beta end-to-end encryption foundation.
+This document describes the current SweBudd chat feature and the beta end-to-end encryption foundation.
 
-Current status: `0.1.4-beta`
+Current status: `0.2.0-beta`
 
 ## Chat surfaces
 
-SweBud currently has three chat surfaces:
+SweBudd currently has three chat surfaces:
 
 - Direct buddy chats between mutual followers.
 - Message requests when users are not mutual followers yet.
