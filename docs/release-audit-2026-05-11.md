@@ -39,4 +39,4 @@ Release checks were passing for the local beta stack after fixes in this audit.
 - Composer and PHP are not installed on the host, so `php artisan test` could not be run locally. The admin Docker image builds and boots, but PHPUnit should be run in a dev/test image that includes dev dependencies.
 - The frontend build still emits large chunk warnings, mostly from map and framework bundles. This is not a blocker for beta, but route-level splitting should be revisited.
 - The admin database editor is intentionally powerful. Sensitive field redaction is now server-side, but production access should still be restricted to trusted admins only.
-- Current backend release metadata is `0.2.0-beta`.
+- Current backend release metadata is `0.2.1-beta`.
