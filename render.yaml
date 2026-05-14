@@ -24,7 +24,7 @@ services:
       - key: ALLOW_LOCAL_ORIGINS
         value: "false"
       - key: APP_VERSION
-        value: "0.2.1-beta"
+        value: "0.2.2-beta"
       - key: MEDIA_STORAGE_DRIVER
         value: s3
       - key: MEDIA_S3_BUCKET
