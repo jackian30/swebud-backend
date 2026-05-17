@@ -9,7 +9,7 @@ export class HealthController {
   live() {
     return {
       ok: true,
-      version: process.env.APP_VERSION || '0.2.2-beta',
+      version: process.env.APP_VERSION || '0.2.3-beta',
       uptime: Math.round(process.uptime()),
       timestamp: new Date().toISOString(),
     };
@@ -21,7 +21,7 @@ export class HealthController {
     return {
       ok: true,
       database: 'ok',
-      version: process.env.APP_VERSION || '0.2.2-beta',
+      version: process.env.APP_VERSION || '0.2.3-beta',
       timestamp: new Date().toISOString(),
     };
   }
