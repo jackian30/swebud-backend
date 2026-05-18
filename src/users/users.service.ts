@@ -5,7 +5,7 @@ import { CompleteUserOnboardingDto, ReportUserDto, UpdateAccountDto, UpdateMeDto
 import { NotificationsService } from '../notifications/notifications.service';
 import { visibleAuthorWhere, visiblePostWhere } from '../privacy/privacy';
 import { activityPersonaLinkSelect, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
-import { exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
+import { availableProfileBadgesFor, exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
 
 @Injectable()
 export class UsersService {
@@ -232,11 +232,17 @@ export class UsersService {
     return { ok: true };
   }
 
-  private withOnboarding<T extends { usernameFinalized?: boolean | null; dateOfBirth?: Date | string | null; legalConsentAt?: Date | string | null; dataConsentAt?: Date | string | null; activityPersonas?: any; betaUser?: boolean | null; hideProfileBadges?: boolean | null; badges?: any }>(user: T) {
-    return { ...exposeProfileBadges(exposeActivityPersonas(user)), onboardingComplete: Boolean(user.usernameFinalized && user.dateOfBirth && user.legalConsentAt && user.dataConsentAt) };
+  private withOnboarding<T extends { usernameFinalized?: boolean | null; dateOfBirth?: Date | string | null; legalConsentAt?: Date | string | null; dataConsentAt?: Date | string | null; activityPersonas?: any; betaUser?: boolean | null; hideProfileBadges?: boolean | null; hiddenProfileBadgeCodes?: string[] | null; badges?: any }>(user: T) {
+    const visibleUser = exposeProfileBadges(exposeActivityPersonas(user));
+    return {
+      ...visibleUser,
+      hiddenProfileBadgeCodes: user.hiddenProfileBadgeCodes ?? [],
+      availableProfileBadges: availableProfileBadgesFor(user),
+      onboardingComplete: Boolean(user.usernameFinalized && user.dateOfBirth && user.legalConsentAt && user.dataConsentAt),
+    };
   }
-  private select() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, profileVisibility: true, defaultPostVisibility: true, betaUser: true, hideProfileBadges: true, badges: { select: profileBadgeSelect }, verified: true, latitude: true, longitude: true, theme: true, chatPublicKey: true, createdAt: true, _count: { select: { followers: true, following: true } } } as const; }
-  private publicSelect() { return { id: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, activityPersonas: activityPersonaLinkSelect, profileVisibility: true, betaUser: true, hideProfileBadges: true, badges: { select: profileBadgeSelect }, verified: true, chatPublicKey: true, createdAt: true } as const; }
+  private select() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, profileVisibility: true, defaultPostVisibility: true, betaUser: true, hideProfileBadges: true, hiddenProfileBadgeCodes: true, badges: { select: profileBadgeSelect }, verified: true, latitude: true, longitude: true, theme: true, chatPublicKey: true, createdAt: true, _count: { select: { followers: true, following: true } } } as const; }
+  private publicSelect() { return { id: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, activityPersonas: activityPersonaLinkSelect, profileVisibility: true, betaUser: true, hideProfileBadges: true, hiddenProfileBadgeCodes: true, badges: { select: profileBadgeSelect }, verified: true, chatPublicKey: true, createdAt: true } as const; }
   private async resolveUserId(identifier: string) {
     const normalized = identifier.toLowerCase().replace(/^@/, '').trim();
     const user = await this.prisma.user.findFirst({

@@ -14,6 +14,8 @@ export class UpdateMeDto {
   @IsOptional() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
   @IsOptional() @IsEnum(ProfileVisibility) profileVisibility?: ProfileVisibility;
   @IsOptional() @IsEnum(PostVisibility) defaultPostVisibility?: PostVisibility;
+  @IsOptional() @IsBoolean() hideProfileBadges?: boolean;
+  @IsOptional() @IsArray() @IsString({ each: true }) hiddenProfileBadgeCodes?: string[];
   @IsOptional() @IsNumber() @Min(-90) @Max(90) latitude?: number;
   @IsOptional() @IsNumber() @Min(-180) @Max(180) longitude?: number;
 }

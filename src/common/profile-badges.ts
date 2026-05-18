@@ -8,6 +8,7 @@ export type ProfileBadge = {
 type ProfileBadgeUser = {
   betaUser?: boolean | null;
   hideProfileBadges?: boolean | null;
+  hiddenProfileBadgeCodes?: string[] | null;
   badges?: Array<{
     badge: {
       code: string;
@@ -35,13 +36,16 @@ export const profileBadgeSelect = {
 
 export function profileBadgesFor(user: ProfileBadgeUser): ProfileBadge[] {
   if (user.hideProfileBadges) return [];
-  const badges = (user.badges ?? [])
+  const hiddenCodes = new Set(user.hiddenProfileBadgeCodes ?? []);
+  const userBadges = Array.isArray(user.badges) ? user.badges : [];
+  const badges = userBadges
     .map((userBadge) => userBadge.badge)
     .filter((badge) => badge.active !== false)
+    .filter((badge) => !hiddenCodes.has(badge.code))
     .sort((left, right) => (left.sortOrder ?? 0) - (right.sortOrder ?? 0) || left.label.localeCompare(right.label))
     .map(({ code, label, description, iconUrl }) => ({ code, label, description, iconUrl }));
 
-  if (!badges.some((badge) => badge.code === 'beta_user') && user.betaUser) {
+  if (!hiddenCodes.has('beta_user') && !badges.some((badge) => badge.code === 'beta_user') && user.betaUser) {
     badges.push({
       code: 'beta_user',
       label: 'Beta User',
@@ -53,9 +57,14 @@ export function profileBadgesFor(user: ProfileBadgeUser): ProfileBadge[] {
   return badges;
 }
 
-export function exposeProfileBadges<T extends ProfileBadgeUser>(user: T): Omit<T, 'betaUser' | 'badges'> & { badges: ProfileBadge[] } {
-  const { betaUser, badges, ...publicUser } = user;
+export function availableProfileBadgesFor(user: ProfileBadgeUser): ProfileBadge[] {
+  return profileBadgesFor({ ...user, hideProfileBadges: false, hiddenProfileBadgeCodes: [] });
+}
+
+export function exposeProfileBadges<T extends ProfileBadgeUser>(user: T): Omit<T, 'betaUser' | 'badges' | 'hiddenProfileBadgeCodes'> & { badges: ProfileBadge[] } {
+  const { betaUser, badges, hiddenProfileBadgeCodes, ...publicUser } = user;
   void betaUser;
   void badges;
+  void hiddenProfileBadgeCodes;
   return { ...publicUser, badges: profileBadgesFor(user) };
 }

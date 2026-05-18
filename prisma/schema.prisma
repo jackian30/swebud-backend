@@ -230,6 +230,7 @@ model User {
   defaultPostVisibility PostVisibility    @default(public) @map("default_post_visibility")
   betaUser              Boolean           @default(false) @map("beta_user")
   hideProfileBadges     Boolean           @default(false) @map("hide_profile_badges")
+  hiddenProfileBadgeCodes String[]         @default([]) @map("hidden_profile_badge_codes")
   verified              Boolean           @default(false)
   googleId              String?           @unique @map("google_id")
   googleEmailVerified   Boolean           @default(false) @map("google_email_verified")

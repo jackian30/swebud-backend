@@ -1,4 +1,4 @@
-import { exposeProfileBadges, profileBadgesFor } from './profile-badges';
+import { availableProfileBadgesFor, exposeProfileBadges, profileBadgesFor } from './profile-badges';
 
 describe('profile badges', () => {
   it('marks beta users with a beta badge', () => {
@@ -12,6 +12,18 @@ describe('profile badges', () => {
 
   it('hides badges when profile badges are disabled', () => {
     expect(profileBadgesFor({ betaUser: true, hideProfileBadges: true })).toEqual([]);
+  });
+
+  it('hides selected badge codes only', () => {
+    expect(profileBadgesFor({
+      betaUser: true,
+      hiddenProfileBadgeCodes: ['beta_user'],
+      badges: [{ badge: { code: 'app_creator', label: 'App Creator', description: 'Creator of SweBudd', iconUrl: '/icons/profile-badges/app-creator.svg', active: true } }],
+    })).toEqual([{ code: 'app_creator', label: 'App Creator', description: 'Creator of SweBudd', iconUrl: '/icons/profile-badges/app-creator.svg' }]);
+  });
+
+  it('can list available badges even when profile badges are hidden', () => {
+    expect(availableProfileBadgesFor({ betaUser: true, hideProfileBadges: true }).map((badge) => badge.code)).toContain('beta_user');
   });
 
   it('does not expose the internal beta flag', () => {
