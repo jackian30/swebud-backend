@@ -186,23 +186,70 @@ Set these Render environment variables:
 
 ```text
 DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
+DIRECT_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
 FRONTEND_ORIGIN=https://<your-cloudflare-pages-domain>
 ALLOW_LOCAL_ORIGINS=false
 NODE_ENV=production
 MEDIA_STORAGE_DRIVER=s3
 ```
 
+Get the Supabase values step by step:
+
+1. Open Supabase and create/select the SweBud project.
+2. Copy the project ref from **Project Settings > General > Reference ID**. Use this as `<project-ref>`.
+3. Get the database password from the password saved when the project was created. If it was not saved, go to **Project Settings > Database > Database password** and reset it, then use the new value as `<password>`.
+4. Open **Project Settings > Database > Connection string**.
+5. Select the **Transaction pooler** connection string for `DATABASE_URL`.
+6. Choose the region closest to the deploy target, usually Singapore/ap-southeast-1 for Render Singapore.
+7. Copy the URI and replace `[YOUR-PASSWORD]` with the database password. It should match this shape:
+
+```text
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
+```
+
+8. Also copy the direct/session connection string for Prisma migrations and set it as `DIRECT_URL`. It should match this shape:
+
+```text
+DIRECT_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
+```
+
+Prisma uses `DATABASE_URL` for the running app and `DIRECT_URL` for `prisma migrate deploy`. Do not run migrations through Supabase's transaction pooler.
+
 For **Supabase Storage**, create a public bucket for app media and set:
 
 ```text
-MEDIA_S3_BUCKET=<bucket-name>
-MEDIA_PUBLIC_BASE_URL=https://<project-ref>.supabase.co/storage/v1/object/public/<bucket-name>/
+MEDIA_S3_BUCKET=swebudd-media
+MEDIA_PUBLIC_BASE_URL=https://<project-ref>.supabase.co/storage/v1/object/public/swebudd-media/
 AWS_REGION=ap-southeast-1
 AWS_S3_ENDPOINT=https://<project-ref>.supabase.co/storage/v1/s3
 AWS_S3_FORCE_PATH_STYLE=true
 AWS_ACCESS_KEY_ID=<supabase-storage-access-key>
 AWS_SECRET_ACCESS_KEY=<supabase-storage-secret-key>
 ```
+
+Get the Supabase Storage values step by step:
+
+1. Open **Storage > Buckets** in the same Supabase project.
+2. Create a bucket for uploads, for example `swebudd-media`.
+3. Set the bucket to **Public** so uploaded media can be read by the frontend.
+4. Use the bucket name as `MEDIA_S3_BUCKET`.
+5. Build the public media base URL with the project ref and bucket name:
+
+```text
+MEDIA_PUBLIC_BASE_URL=https://<project-ref>.supabase.co/storage/v1/object/public/swebudd-media/
+```
+
+6. Build the S3 endpoint with the same project ref:
+
+```text
+AWS_S3_ENDPOINT=https://<project-ref>.supabase.co/storage/v1/s3
+```
+
+7. Open **Project Settings > Storage > S3 Connection**.
+8. Create/copy the S3 access key pair.
+9. Put the S3 access key ID in `AWS_ACCESS_KEY_ID`.
+10. Put the S3 secret access key in `AWS_SECRET_ACCESS_KEY`.
+11. Keep `AWS_REGION=ap-southeast-1` and `AWS_S3_FORCE_PATH_STYLE=true`.
 
 For **Cloudflare R2**, set:
 

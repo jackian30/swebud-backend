@@ -15,6 +15,8 @@ services:
         value: production
       - key: DATABASE_URL
         sync: false
+      - key: DIRECT_URL
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_REFRESH_SECRET
@@ -28,13 +30,13 @@ services:
       - key: MEDIA_STORAGE_DRIVER
         value: s3
       - key: MEDIA_S3_BUCKET
-        sync: false
+        value: swebudd-media
       - key: MEDIA_PUBLIC_BASE_URL
-        sync: false
+        value: https://bgdkdayvsdclrwcoyvzm.supabase.co/storage/v1/object/public/swebudd-media/
       - key: AWS_REGION
-        sync: false
+        value: ap-southeast-1
       - key: AWS_S3_ENDPOINT
-        sync: false
+        value: https://bgdkdayvsdclrwcoyvzm.supabase.co/storage/v1/s3
       - key: AWS_S3_FORCE_PATH_STYLE
         value: "true"
       - key: AWS_ACCESS_KEY_ID

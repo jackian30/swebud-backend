@@ -239,53 +239,53 @@ model User {
   createdAt             DateTime          @default(now()) @map("created_at")
   updatedAt             DateTime          @updatedAt @map("updated_at")
 
-  posts                    Post[]
-  wallPosts                Post[]                   @relation("ProfileWallPosts")
-  taggedPosts              PostTag[]                @relation("PostTaggedUsers")
-  comments                 Comment[]
-  likes                    PostLike[]
-  commentLikes             CommentLike[]
-  savedPosts               PostSave[]
-  viewedPosts              PostView[]
-  reposts                  Repost[]
-  repostLikes              RepostLike[]
-  hiddenPosts              HiddenPost[]
-  postReports              PostReport[]
-  userReportsSent          UserReport[]             @relation("UserReportsSent")
-  userReportsReceived      UserReport[]             @relation("UserReportsReceived")
-  blocksSent               Block[]                  @relation("BlocksSent")
-  blocksReceived           Block[]                  @relation("BlocksReceived")
-  notifications            Notification[]           @relation("NotificationsReceived")
-  notificationActors       Notification[]           @relation("NotificationActors")
-  theme                    UserTheme?
-  refreshTokens            RefreshToken[]
-  passwordResetTokens      PasswordResetToken[]
-  following                Follow[]                 @relation("Following")
-  followers                Follow[]                 @relation("Followers")
-  sentFollowRequests       FollowRequest[]          @relation("SentFollowRequests")
-  receivedFollowRequests   FollowRequest[]          @relation("ReceivedFollowRequests")
-  sentMessageRequests      MessageRequest[]         @relation("SentMessageRequests")
-  receivedMessageRequests  MessageRequest[]         @relation("ReceivedMessageRequests")
-  chatProfileOverrides     ChatProfileOverride[]    @relation("ChatProfileOverrideOwners")
-  chatProfileOverridePeers ChatProfileOverride[]    @relation("ChatProfileOverridePeers")
-  groupMembers             GroupMember[]
-  createdBuddyGroupChats    BuddyGroupChat[]        @relation("BuddyGroupChatCreators")
+  posts                     Post[]
+  wallPosts                 Post[]                   @relation("ProfileWallPosts")
+  taggedPosts               PostTag[]                @relation("PostTaggedUsers")
+  comments                  Comment[]
+  likes                     PostLike[]
+  commentLikes              CommentLike[]
+  savedPosts                PostSave[]
+  viewedPosts               PostView[]
+  reposts                   Repost[]
+  repostLikes               RepostLike[]
+  hiddenPosts               HiddenPost[]
+  postReports               PostReport[]
+  userReportsSent           UserReport[]             @relation("UserReportsSent")
+  userReportsReceived       UserReport[]             @relation("UserReportsReceived")
+  blocksSent                Block[]                  @relation("BlocksSent")
+  blocksReceived            Block[]                  @relation("BlocksReceived")
+  notifications             Notification[]           @relation("NotificationsReceived")
+  notificationActors        Notification[]           @relation("NotificationActors")
+  theme                     UserTheme?
+  refreshTokens             RefreshToken[]
+  passwordResetTokens       PasswordResetToken[]
+  following                 Follow[]                 @relation("Following")
+  followers                 Follow[]                 @relation("Followers")
+  sentFollowRequests        FollowRequest[]          @relation("SentFollowRequests")
+  receivedFollowRequests    FollowRequest[]          @relation("ReceivedFollowRequests")
+  sentMessageRequests       MessageRequest[]         @relation("SentMessageRequests")
+  receivedMessageRequests   MessageRequest[]         @relation("ReceivedMessageRequests")
+  chatProfileOverrides      ChatProfileOverride[]    @relation("ChatProfileOverrideOwners")
+  chatProfileOverridePeers  ChatProfileOverride[]    @relation("ChatProfileOverridePeers")
+  groupMembers              GroupMember[]
+  createdBuddyGroupChats    BuddyGroupChat[]         @relation("BuddyGroupChatCreators")
   buddyGroupChatMemberships BuddyGroupChatMember[]
-  createdGroupChannels     GroupChatChannel[]       @relation("GroupChatChannelCreators")
-  groupChannelMemberships  GroupChatChannelMember[]
-  groupPosts               GroupPost[]
-  sentMessages             Message[]                @relation("SentMessages")
-  receivedMessages         Message[]                @relation("ReceivedMessages")
-  buddySession             BuddySession?
-  createdBuddyRooms        BuddyRoom[]              @relation("BuddyRoomCreators")
-  closeBuddies             CloseBuddy[]             @relation("CloseBuddyOwners")
-  closeBuddyOf             CloseBuddy[]             @relation("CloseBuddyMembers")
-  externalIntegrations     ExternalIntegration[]
-  activities               Activity[]
-  activityPersonas         UserActivityPersona[]
-  stories                  Story[]
-  storyViews               StoryView[]
-  storyReactions           StoryReaction[]
+  createdGroupChannels      GroupChatChannel[]       @relation("GroupChatChannelCreators")
+  groupChannelMemberships   GroupChatChannelMember[]
+  groupPosts                GroupPost[]
+  sentMessages              Message[]                @relation("SentMessages")
+  receivedMessages          Message[]                @relation("ReceivedMessages")
+  buddySession              BuddySession?
+  createdBuddyRooms         BuddyRoom[]              @relation("BuddyRoomCreators")
+  closeBuddies              CloseBuddy[]             @relation("CloseBuddyOwners")
+  closeBuddyOf              CloseBuddy[]             @relation("CloseBuddyMembers")
+  externalIntegrations      ExternalIntegration[]
+  activities                Activity[]
+  activityPersonas          UserActivityPersona[]
+  stories                   Story[]
+  storyViews                StoryView[]
+  storyReactions            StoryReaction[]
 
   @@index([latitude, longitude])
   @@index([createdAt])
@@ -376,20 +376,20 @@ model FollowRequest {
 }
 
 model MessageRequest {
-  id          String               @id @default(uuid())
-  senderId    String               @map("sender_id")
-  recipientId String               @map("recipient_id")
-  body        String
+  id                  String               @id @default(uuid())
+  senderId            String               @map("sender_id")
+  recipientId         String               @map("recipient_id")
+  body                String
   referenceType       String?              @map("reference_type")
   referenceId         String?              @map("reference_id")
   referenceMediaUrl   String?              @map("reference_media_url")
   referenceText       String?              @map("reference_text")
   referenceAuthorName String?              @map("reference_author_name")
-  status      MessageRequestStatus @default(pending)
-  createdAt   DateTime             @default(now()) @map("created_at")
-  updatedAt   DateTime             @updatedAt @map("updated_at")
-  sender      User                 @relation("SentMessageRequests", fields: [senderId], references: [id], onDelete: Cascade)
-  recipient   User                 @relation("ReceivedMessageRequests", fields: [recipientId], references: [id], onDelete: Cascade)
+  status              MessageRequestStatus @default(pending)
+  createdAt           DateTime             @default(now()) @map("created_at")
+  updatedAt           DateTime             @updatedAt @map("updated_at")
+  sender              User                 @relation("SentMessageRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient           User                 @relation("ReceivedMessageRequests", fields: [recipientId], references: [id], onDelete: Cascade)
 
   @@index([recipientId, status, createdAt])
   @@index([senderId, status, createdAt])
@@ -513,22 +513,22 @@ model PostImage {
 }
 
 model Story {
-  id        String         @id @default(uuid())
-  authorId  String         @map("author_id")
-  text      String?
-  mediaUrl  String?        @map("media_url")
-  mediaType String?        @map("media_type")
-  mimeType  String?        @map("mime_type")
-  filename  String?
-  textPlacement String     @default("caption") @map("text_placement")
-  visibility PostVisibility @default(public)
-  viewCount Int            @default(0) @map("view_count")
-  expiresAt DateTime       @map("expires_at")
-  createdAt DateTime       @default(now()) @map("created_at")
-  updatedAt DateTime       @updatedAt @map("updated_at")
-  author    User           @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  views     StoryView[]
-  reactions StoryReaction[]
+  id            String          @id @default(uuid())
+  authorId      String          @map("author_id")
+  text          String?
+  mediaUrl      String?         @map("media_url")
+  mediaType     String?         @map("media_type")
+  mimeType      String?         @map("mime_type")
+  filename      String?
+  textPlacement String          @default("caption") @map("text_placement")
+  visibility    PostVisibility  @default(public)
+  viewCount     Int             @default(0) @map("view_count")
+  expiresAt     DateTime        @map("expires_at")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  author        User            @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  views         StoryView[]
+  reactions     StoryReaction[]
 
   @@index([authorId, createdAt])
   @@index([expiresAt, createdAt])
@@ -537,11 +537,11 @@ model Story {
 }
 
 model StoryView {
-  storyId      String   @map("story_id")
-  userId       String   @map("user_id")
-  viewedAt     DateTime @default(now()) @map("viewed_at")
-  story        Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  storyId  String   @map("story_id")
+  userId   String   @map("user_id")
+  viewedAt DateTime @default(now()) @map("viewed_at")
+  story    Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([storyId, userId])
   @@index([userId, viewedAt])
@@ -738,31 +738,31 @@ model MessageReaction {
 }
 
 model Message {
-  id          String            @id @default(uuid())
-  senderId    String            @map("sender_id")
-  recipientId String?           @map("recipient_id")
-  groupId     String?           @map("group_id")
-  buddyGroupChatId String?      @map("buddy_group_chat_id")
-  channelId   String?           @map("channel_id")
-  body        String
+  id                  String            @id @default(uuid())
+  senderId            String            @map("sender_id")
+  recipientId         String?           @map("recipient_id")
+  groupId             String?           @map("group_id")
+  buddyGroupChatId    String?           @map("buddy_group_chat_id")
+  channelId           String?           @map("channel_id")
+  body                String
   referenceType       String?           @map("reference_type")
   referenceId         String?           @map("reference_id")
   referenceMediaUrl   String?           @map("reference_media_url")
   referenceText       String?           @map("reference_text")
   referenceAuthorName String?           @map("reference_author_name")
-  ciphertext  String?
-  nonce       String?
-  encrypted   Boolean           @default(false)
-  readAt      DateTime?         @map("read_at")
-  deletedAt   DateTime?         @map("deleted_at")
-  deletedById String?           @map("deleted_by_id")
-  createdAt   DateTime          @default(now()) @map("created_at")
-  sender      User              @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  recipient   User?             @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
-  group       Group?            @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  buddyGroupChat BuddyGroupChat? @relation(fields: [buddyGroupChatId], references: [id], onDelete: Cascade)
-  channel     GroupChatChannel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
-  reactions   MessageReaction[]
+  ciphertext          String?
+  nonce               String?
+  encrypted           Boolean           @default(false)
+  readAt              DateTime?         @map("read_at")
+  deletedAt           DateTime?         @map("deleted_at")
+  deletedById         String?           @map("deleted_by_id")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  sender              User              @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient           User?             @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
+  group               Group?            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  buddyGroupChat      BuddyGroupChat?   @relation(fields: [buddyGroupChatId], references: [id], onDelete: Cascade)
+  channel             GroupChatChannel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  reactions           MessageReaction[]
 
   @@index([senderId, recipientId, createdAt])
   @@index([recipientId, senderId, createdAt])

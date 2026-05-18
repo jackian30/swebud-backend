@@ -26,4 +26,4 @@ RUN mkdir -p uploads/images uploads/videos && chown -R node:node uploads
 USER node
 
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main.js"]
+CMD ["sh", "-c", "DATABASE_URL=\"${DIRECT_URL:-$DATABASE_URL}\" npx prisma migrate deploy && node dist/src/main.js"]

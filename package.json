@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "nest start --watch",
     "start": "node dist/src/main.js",
-    "start:render": "npm run prisma:deploy && node dist/src/main.js",
+    "start:render": "DATABASE_URL=\"${DIRECT_URL:-$DATABASE_URL}\" npm run prisma:deploy && node dist/src/main.js",
     "build": "nest build",
     "test": "jest --passWithNoTests",
     "lint": "eslint \"src/**/*.ts\"",
