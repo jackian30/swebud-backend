@@ -9,6 +9,7 @@ import { AddBuddyGroupParticipantsDto, CreateBuddyGroupChatDto, MessageReactionD
 @Controller('chat')
 export class ChatController {
   constructor(private chat: ChatService, private gateway: ChatGateway) {}
+  @Get('keys/me') myKey(@CurrentUser() user: AuthUser) { return this.chat.myKey(user.id); }
   @Post('keys') registerKey(@CurrentUser() user: AuthUser, @Body() dto: RegisterChatKeyDto) { return this.chat.registerKey(user.id, dto); }
   @Get('keys/:peerId') peerKey(@Param('peerId') peerId: string) { return this.chat.peerKey(peerId); }
   @Get('profiles/buddy/:peerId') buddyProfile(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.buddyProfile(user.id, peerId); }

@@ -234,6 +234,7 @@ model User {
   legalConsentAt        DateTime?         @map("legal_consent_at")
   dataConsentAt         DateTime?         @map("data_consent_at")
   chatPublicKey         String?           @map("chat_public_key")
+  chatPrivateKey        String?           @map("chat_private_key")
   latitude              Float?
   longitude             Float?
   createdAt             DateTime          @default(now()) @map("created_at")

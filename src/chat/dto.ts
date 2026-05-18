@@ -13,7 +13,10 @@ export class SendDirectMessageDto {
   @IsOptional() @IsString() @MaxLength(120) referenceAuthorName?: string;
 }
 
-export class RegisterChatKeyDto { @IsString() @MaxLength(4096) publicKey!: string; }
+export class RegisterChatKeyDto {
+  @IsString() @MaxLength(4096) publicKey!: string;
+  @IsOptional() @IsString() @MaxLength(4096) privateKey?: string;
+}
 export class MessageReactionDto { @IsString() @MaxLength(32) emoji!: string; }
 export class TypingDto { @IsUUID() recipientId!: string; }
 export class UpdateChatProfileDto {

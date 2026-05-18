@@ -8,7 +8,15 @@ export class ChatService {
   constructor(private prisma: PrismaService, private notifications: NotificationsService) {}
 
   registerKey(userId: string, dto: RegisterChatKeyDto) {
-    return this.prisma.user.update({ where: { id: userId }, data: { chatPublicKey: dto.publicKey }, select: { id: true, chatPublicKey: true } });
+    return this.prisma.user.update({
+      where: { id: userId },
+      data: { chatPublicKey: dto.publicKey, ...(dto.privateKey ? { chatPrivateKey: dto.privateKey } : {}) },
+      select: { id: true, chatPublicKey: true, chatPrivateKey: true },
+    });
+  }
+
+  myKey(userId: string) {
+    return this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, chatPublicKey: true, chatPrivateKey: true } });
   }
 
   peerKey(peerId: string) {
