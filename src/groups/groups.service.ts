@@ -218,7 +218,7 @@ export class GroupsService {
   async messages(userId: string, groupId: string, channelId?: string) {
     await this.ensureMember(userId, groupId);
     const channel = channelId ? await this.ensureChannelAccess(userId, groupId, channelId) : await this.defaultChannel(groupId, userId);
-    return this.prisma.message.findMany({ where: { groupId, channelId: channel.id }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+    return this.prisma.message.findMany({ where: { groupId, channelId: channel.id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
   }
 
   async sendMessage(userId: string, groupId: string, channelId: string | undefined, dto: GroupMessageDto) {
@@ -230,7 +230,8 @@ export class GroupsService {
     }
     const body = dto.body.trim();
     if (!body) throw new BadRequestException('Message cannot be empty');
-    return this.prisma.message.create({ data: { senderId: userId, groupId, channelId: channel.id, body }, include: this.messageInclude() });
+    const referenceData = await this.messageReferenceData(groupId, channel.id, dto);
+    return this.prisma.message.create({ data: { senderId: userId, groupId, channelId: channel.id, body, ...referenceData }, include: this.messageInclude() });
   }
 
   private async memberRole(userId: string, groupId: string) {
@@ -336,6 +337,21 @@ export class GroupsService {
 
   private messageInclude() {
     return { sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, channel: true, reactions: true } as const;
+  }
+
+  private async messageReferenceData(groupId: string, channelId: string, dto: GroupMessageDto) {
+    if (dto.referenceType !== 'message' || !dto.referenceId) return {};
+    const target = await this.prisma.message.findUniqueOrThrow({
+      where: { id: dto.referenceId },
+      select: { groupId: true, channelId: true },
+    });
+    if (target.groupId !== groupId || target.channelId !== channelId) throw new BadRequestException('Reply target is not in this channel.');
+    return {
+      referenceType: dto.referenceType,
+      referenceId: dto.referenceId.trim(),
+      referenceText: dto.referenceText?.trim() || undefined,
+      referenceAuthorName: dto.referenceAuthorName?.trim() || undefined,
+    };
   }
 
   private channelInclude() {

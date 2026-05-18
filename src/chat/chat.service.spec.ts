@@ -41,6 +41,9 @@ describe('ChatService', () => {
         deleteMany: jest.fn(),
         create: jest.fn(),
       },
+      hiddenMessage: {
+        upsert: jest.fn(),
+      },
       groupMember: {
         findUnique: jest.fn(),
       },
@@ -313,7 +316,25 @@ describe('ChatService', () => {
     });
   });
 
-  it('soft deletes a message sent by the current user and clears private payload', async () => {
+  it('deletes a message only for the current user', async () => {
+    prisma.message.findUniqueOrThrow.mockResolvedValueOnce({
+      id: 'message-1',
+      senderId: peerId,
+      recipientId: userId,
+      groupId: null,
+    });
+
+    await service.deleteForMe(userId, 'message-1');
+
+    expect(prisma.hiddenMessage.upsert).toHaveBeenCalledWith({
+      where: { messageId_userId: { messageId: 'message-1', userId } },
+      create: { messageId: 'message-1', userId },
+      update: {},
+    });
+    expect(prisma.message.update).not.toHaveBeenCalled();
+  });
+
+  it('unsends a message sent by the current user and clears private payload', async () => {
     prisma.message.findUniqueOrThrow.mockResolvedValueOnce({
       id: 'message-1',
       senderId: userId,
@@ -321,7 +342,7 @@ describe('ChatService', () => {
       groupId: null,
     });
 
-    await service.deleteMessage(userId, 'message-1');
+    await service.unsendMessage(userId, 'message-1');
 
     expect(prisma.message.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'message-1' },
@@ -341,7 +362,7 @@ describe('ChatService', () => {
     expect(prisma.messageReaction.deleteMany).toHaveBeenCalledWith({ where: { messageId: 'message-1' } });
   });
 
-  it('blocks deleting a message sent by someone else', async () => {
+  it('blocks unsending a message sent by someone else', async () => {
     prisma.message.findUniqueOrThrow.mockResolvedValueOnce({
       id: 'message-1',
       senderId: peerId,
@@ -349,11 +370,11 @@ describe('ChatService', () => {
       groupId: null,
     });
 
-    await expect(service.deleteMessage(userId, 'message-1')).rejects.toBeInstanceOf(ForbiddenException);
+    await expect(service.unsendMessage(userId, 'message-1')).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.message.update).not.toHaveBeenCalled();
   });
 
-  it('allows deleting a group message sent by the current user', async () => {
+  it('allows unsending a group message sent by the current user', async () => {
     prisma.message.findUniqueOrThrow.mockResolvedValueOnce({
       id: 'message-1',
       senderId: userId,
@@ -362,7 +383,7 @@ describe('ChatService', () => {
     });
     prisma.groupMember.findUnique.mockResolvedValueOnce({ userId });
 
-    await service.deleteMessage(userId, 'message-1');
+    await service.unsendMessage(userId, 'message-1');
 
     expect(prisma.message.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'message-1' },

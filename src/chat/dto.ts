@@ -6,7 +6,7 @@ export class SendDirectMessageDto {
   @IsOptional() @IsString() @MaxLength(12000) ciphertext?: string;
   @IsOptional() @IsString() @MaxLength(512) nonce?: string;
   @IsOptional() @IsBoolean() encrypted?: boolean;
-  @IsOptional() @IsIn(['actsnap']) referenceType?: 'actsnap';
+  @IsOptional() @IsIn(['actsnap', 'message']) referenceType?: 'actsnap' | 'message';
   @IsOptional() @IsString() @MaxLength(120) referenceId?: string;
   @IsOptional() @IsString() @MaxLength(12000) referenceMediaUrl?: string;
   @IsOptional() @IsString() @MaxLength(500) referenceText?: string;
@@ -36,4 +36,8 @@ export class AddBuddyGroupParticipantsDto {
 
 export class SendBuddyGroupMessageDto {
   @IsString() @MaxLength(4000) body!: string;
+  @IsOptional() @IsIn(['message']) referenceType?: 'message';
+  @IsOptional() @IsString() @MaxLength(120) referenceId?: string;
+  @IsOptional() @IsString() @MaxLength(500) referenceText?: string;
+  @IsOptional() @IsString() @MaxLength(120) referenceAuthorName?: string;
 }

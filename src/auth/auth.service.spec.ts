@@ -22,10 +22,12 @@ describe('AuthService Google login', () => {
       }),
     } as any);
 
-    const prisma = {
+    let prisma: any;
+    prisma = {
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue(null),
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockImplementation(({ data, select }) => Promise.resolve({
           id: 'user-1',
           ...data,
@@ -44,6 +46,7 @@ describe('AuthService Google login', () => {
       refreshToken: {
         create: jest.fn().mockResolvedValue({}),
       },
+      $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
     };
     const jwt = { signAsync: jest.fn().mockResolvedValue('token') };
     const config = { get: jest.fn().mockReturnValue(undefined) };
@@ -79,12 +82,14 @@ describe('AuthService Google login', () => {
       }),
     } as any);
 
-    const prisma = {
+    let prisma: any;
+    prisma = {
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn()
           .mockResolvedValueOnce({ id: 'existing-user' })
           .mockResolvedValueOnce(null),
+        count: jest.fn().mockResolvedValue(0),
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({
           id: 'user-2',
           ...data,
@@ -102,6 +107,7 @@ describe('AuthService Google login', () => {
       refreshToken: {
         create: jest.fn().mockResolvedValue({}),
       },
+      $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
     };
     const service = new AuthService(
       prisma as any,

@@ -47,6 +47,7 @@ export class ChatService {
   async send(senderId: string, dto: SendDirectMessageDto, trustedReference = false) {
     if (senderId === dto.recipientId) throw new BadRequestException('Cannot message yourself');
     await this.ensureMutual(senderId, dto.recipientId);
+    const referenceData = await this.directReferenceData(senderId, dto.recipientId, dto, trustedReference);
     return this.prisma.message.create({
       data: {
         senderId,
@@ -55,7 +56,7 @@ export class ChatService {
         ciphertext: dto.ciphertext,
         nonce: dto.nonce,
         encrypted: Boolean(dto.encrypted),
-        ...this.referenceData(dto, trustedReference),
+        ...referenceData,
       },
       include: this.messageInclude(),
     });
@@ -78,7 +79,15 @@ export class ChatService {
   async decline(userId: string, id: string) { const req = await this.prisma.messageRequest.findUniqueOrThrow({ where: { id } }); if (req.recipientId !== userId) throw new ForbiddenException(); return this.prisma.messageRequest.update({ where: { id }, data: { status: 'declined' }, include: this.requestInclude() }); }
 
   conversation(userId: string, peerId: string) {
-    return this.prisma.message.findMany({ where: { groupId: null, OR: [{ senderId: userId, recipientId: peerId }, { senderId: peerId, recipientId: userId }] }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+    return this.prisma.message.findMany({
+      where: {
+        groupId: null,
+        hiddenBy: { none: { userId } },
+        OR: [{ senderId: userId, recipientId: peerId }, { senderId: peerId, recipientId: userId }],
+      },
+      orderBy: { createdAt: 'asc' },
+      include: this.messageInclude(),
+    });
   }
 
   async conversations(userId: string) {
@@ -92,7 +101,7 @@ export class ChatService {
         include: { following: { select: this.chatPeerSelect() } },
       }),
       this.prisma.message.findMany({
-        where: { groupId: null, OR: [{ senderId: userId }, { recipientId: userId }] },
+        where: { groupId: null, hiddenBy: { none: { userId } }, OR: [{ senderId: userId }, { recipientId: userId }] },
         orderBy: { createdAt: 'desc' },
         take: 300,
         include: this.messageInclude(),
@@ -169,13 +178,14 @@ export class ChatService {
 
   async buddyGroupMessages(userId: string, id: string) {
     await this.ensureBuddyGroupMember(userId, id);
-    return this.prisma.message.findMany({ where: { buddyGroupChatId: id }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+    return this.prisma.message.findMany({ where: { buddyGroupChatId: id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
   }
 
   async sendBuddyGroupMessage(userId: string, id: string, dto: SendBuddyGroupMessageDto) {
     await this.ensureBuddyGroupMember(userId, id);
+    const referenceData = await this.buddyGroupReferenceData(id, dto);
     const message = await this.prisma.message.create({
-      data: { senderId: userId, buddyGroupChatId: id, body: dto.body.trim() },
+      data: { senderId: userId, buddyGroupChatId: id, body: dto.body.trim(), ...referenceData },
       include: this.messageInclude(),
     });
     await this.prisma.buddyGroupChat.update({ where: { id }, data: { updatedAt: new Date() } });
@@ -217,7 +227,17 @@ export class ChatService {
     return this.message(messageId);
   }
 
-  async deleteMessage(userId: string, messageId: string) {
+  async deleteForMe(userId: string, messageId: string) {
+    await this.ensureCanAccessMessage(userId, messageId);
+    await this.prisma.hiddenMessage.upsert({
+      where: { messageId_userId: { messageId, userId } },
+      create: { messageId, userId },
+      update: {},
+    });
+    return { ok: true };
+  }
+
+  async unsendMessage(userId: string, messageId: string) {
     const message = await this.ensureCanAccessMessage(userId, messageId);
     if (message.senderId !== userId) throw new ForbiddenException('Only the sender can delete this message');
     const deletedAt = new Date();
@@ -336,12 +356,36 @@ export class ChatService {
   private messageInclude() { return { sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, recipient: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, reactions: true } as const; }
   private chatPeerSelect() { return { id: true, displayName: true, username: true, profileImageUrl: true, chatPublicKey: true } as const; }
   private requestInclude() { return { sender: { select: { id: true, displayName: true, username: true, bio: true, profileImageUrl: true, chatPublicKey: true } }, recipient: { select: { id: true, displayName: true, username: true, profileImageUrl: true, chatPublicKey: true } } } as const; }
-  private referenceData(dto: SendDirectMessageDto, trustedReference = false) {
+  private async directReferenceData(senderId: string, recipientId: string, dto: SendDirectMessageDto, trustedReference = false) {
+    if (trustedReference) return this.referenceData(dto, true);
+    if (dto.referenceType !== 'message' || !dto.referenceId) return {};
+    const target = await this.prisma.message.findUniqueOrThrow({
+      where: { id: dto.referenceId },
+      select: { senderId: true, recipientId: true, groupId: true, buddyGroupChatId: true },
+    });
+    const participants = new Set([senderId, recipientId]);
+    if (target.groupId || target.buddyGroupChatId || !target.recipientId || !participants.has(target.senderId) || !participants.has(target.recipientId)) {
+      throw new BadRequestException('Reply target is not in this conversation.');
+    }
+    return this.referenceData(dto, true);
+  }
+
+  private async buddyGroupReferenceData(buddyGroupChatId: string, dto: SendBuddyGroupMessageDto) {
+    if (dto.referenceType !== 'message' || !dto.referenceId) return {};
+    const target = await this.prisma.message.findUniqueOrThrow({
+      where: { id: dto.referenceId },
+      select: { buddyGroupChatId: true },
+    });
+    if (target.buddyGroupChatId !== buddyGroupChatId) throw new BadRequestException('Reply target is not in this group buddies chat.');
+    return this.referenceData(dto, true);
+  }
+
+  private referenceData(dto: SendDirectMessageDto | SendBuddyGroupMessageDto, trustedReference = false) {
     if (!trustedReference) return {};
     return {
       referenceType: dto.referenceType,
       referenceId: dto.referenceId?.trim() || undefined,
-      referenceMediaUrl: dto.referenceMediaUrl?.trim() || undefined,
+      referenceMediaUrl: 'referenceMediaUrl' in dto ? dto.referenceMediaUrl?.trim() || undefined : undefined,
       referenceText: dto.referenceText?.trim() || undefined,
       referenceAuthorName: dto.referenceAuthorName?.trim() || undefined,
     };

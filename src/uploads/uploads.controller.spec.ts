@@ -1,5 +1,5 @@
 import { BadRequestException } from '@nestjs/common';
-import { UploadsController, uploadLimits } from './uploads.controller';
+import { UploadsController, uploadFileFilter, uploadLimits } from './uploads.controller';
 
 describe('UploadsController', () => {
   const file = { originalname: 'upload.jpg', mimetype: 'image/jpeg', size: 100, buffer: Buffer.from('file') } as Express.Multer.File;
@@ -54,5 +54,21 @@ describe('UploadsController', () => {
 
   it('keeps the batch per-file Multer limit within the total batch cap', () => {
     expect(uploadLimits.batchFileBytes * uploadLimits.batchFiles).toBeLessThanOrEqual(uploadLimits.batchBytes);
+  });
+
+  it('rejects non-media files before upload processing', () => {
+    const cb = jest.fn();
+
+    uploadFileFilter('media')(undefined, { mimetype: 'application/pdf' } as Express.Multer.File, cb);
+
+    expect(cb).toHaveBeenCalledWith(expect.any(BadRequestException), false);
+  });
+
+  it('allows only the matching media kind for constrained endpoints', () => {
+    const cb = jest.fn();
+
+    uploadFileFilter('image')(undefined, { mimetype: 'video/mp4' } as Express.Multer.File, cb);
+
+    expect(cb).toHaveBeenCalledWith(expect.any(BadRequestException), false);
   });
 });

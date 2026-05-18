@@ -254,6 +254,7 @@ model User {
   reposts                   Repost[]
   repostLikes               RepostLike[]
   hiddenPosts               HiddenPost[]
+  hiddenMessages            HiddenMessage[]
   postReports               PostReport[]
   userReportsSent           UserReport[]             @relation("UserReportsSent")
   userReportsReceived       UserReport[]             @relation("UserReportsReceived")
@@ -799,6 +800,7 @@ model Message {
   buddyGroupChat      BuddyGroupChat?   @relation(fields: [buddyGroupChatId], references: [id], onDelete: Cascade)
   channel             GroupChatChannel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
   reactions           MessageReaction[]
+  hiddenBy            HiddenMessage[]
 
   @@index([senderId, recipientId, createdAt])
   @@index([recipientId, senderId, createdAt])
@@ -808,6 +810,18 @@ model Message {
   @@index([buddyGroupChatId, createdAt])
   @@index([channelId, createdAt])
   @@map("messages")
+}
+
+model HiddenMessage {
+  messageId String   @map("message_id")
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId, createdAt])
+  @@map("hidden_messages")
 }
 
 model CommentImage {

@@ -17,8 +17,8 @@ export class ChatController {
   @Post('messages') async send(@CurrentUser() user: AuthUser, @Body() dto: SendDirectMessageDto) { const message = await this.chat.send(user.id, dto); this.gateway.emitMessage(dto.recipientId, 'chat:message', message); this.gateway.emitMessage(user.id, 'chat:message', message); return message; }
   @Post('messages/:id/reactions') async react(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: MessageReactionDto) { const message = await this.chat.react(user.id, id, dto); if (message.recipientId) this.gateway.emitMessage(message.recipientId, 'chat:message', message); this.gateway.emitMessage(message.senderId, 'chat:message', message); return message; }
   @Delete('messages/:id/reactions') async unreact(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('emoji') emoji: string) { const message = await this.chat.unreact(user.id, id, emoji); if (message.recipientId) this.gateway.emitMessage(message.recipientId, 'chat:message', message); this.gateway.emitMessage(message.senderId, 'chat:message', message); return message; }
-  @Delete('messages/:id') async deleteMessage(@CurrentUser() user: AuthUser, @Param('id') id: string) {
-    const message = await this.chat.deleteMessage(user.id, id);
+  @Post('messages/:id/unsend') async unsendMessage(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    const message = await this.chat.unsendMessage(user.id, id);
     if (message.buddyGroupChatId) {
       const room = await this.chat.buddyGroupChat(user.id, message.buddyGroupChatId);
       for (const member of room.members ?? []) this.gateway.emitMessage(member.userId, 'chat:buddy-group-message', message);
@@ -28,6 +28,7 @@ export class ChatController {
     this.gateway.emitMessage(message.senderId, 'chat:message', message);
     return message;
   }
+  @Delete('messages/:id') deleteMessage(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.chat.deleteForMe(user.id, id); }
   @Post('requests') async request(@CurrentUser() user: AuthUser, @Body() dto: SendDirectMessageDto) { const request = await this.chat.request(user.id, dto); this.gateway.emitMessage(dto.recipientId, 'chat:request', request); return request; }
   @Get('requests') requests(@CurrentUser() user: AuthUser) { return this.chat.requests(user.id); }
   @Patch('requests/:id/accept') async accept(@CurrentUser() user: AuthUser, @Param('id') id: string) { const request = await this.chat.accept(user.id, id); this.gateway.emitMessage(request.senderId, 'chat:request-updated', request); this.gateway.emitMessage(user.id, 'chat:request-updated', request); return request; }

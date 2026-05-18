@@ -37,7 +37,13 @@ export class GroupPostDto {
   @IsOptional() @IsArray() @ArrayMaxSize(10) @ValidateNested({ each: true }) @Type(() => GroupPostImageDto) images?: GroupPostImageDto[];
 }
 
-export class GroupMessageDto { @IsString() @MaxLength(1000) body!: string; }
+export class GroupMessageDto {
+  @IsString() @MaxLength(1000) body!: string;
+  @IsOptional() @IsIn(['message']) referenceType?: 'message';
+  @IsOptional() @IsString() @MaxLength(120) referenceId?: string;
+  @IsOptional() @IsString() @MaxLength(500) referenceText?: string;
+  @IsOptional() @IsString() @MaxLength(120) referenceAuthorName?: string;
+}
 
 export class CreateGroupChannelDto {
   @IsString() @Matches(/^[a-z0-9][a-z0-9 -]{1,38}[a-z0-9]$/i) name!: string;

@@ -7,7 +7,7 @@ import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/act
 
 const DEFAULT_TTL_MINUTES = 60;
 const DEFAULT_ROOM_TTL_MINUTES = 120;
-const DEFAULT_RADIUS_KM = 25;
+const DEFAULT_RADIUS_KM = 100;
 const DEFAULT_TAKE = 50;
 
 @Injectable()
