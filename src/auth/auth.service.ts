@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
-import { ActivityPersona } from '@prisma/client';
+import { ActivityPersona, Prisma } from '@prisma/client';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -11,6 +11,7 @@ import { CompleteOnboardingDto, GoogleLoginDto, LoginDto, RegisterDto } from './
 import { TurnstileService } from './turnstile.service';
 import { allowedOrigins, requiredSecret } from '../common/security';
 import { activityPersonaLinkSelect, createActivityPersonaLinks, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
+import { exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
 
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MS = 1000 * 60 * 30;
@@ -33,6 +34,9 @@ type SafeUser = {
   dataConsentAt?: Date | null;
   googleId?: string | null;
   googleEmailVerified?: boolean;
+  betaUser?: boolean | null;
+  hideProfileBadges?: boolean | null;
+  badges?: Array<{ badge: { code: string; label: string; description?: string | null; iconUrl: string; active?: boolean | null; sortOrder?: number | null } }>;
 };
 
 type GoogleTokenInfo = {
@@ -70,8 +74,8 @@ export class AuthService {
     if (existing?.username === username) throw new BadRequestException('Username already taken');
 
     const now = new Date();
-    const user = await this.prisma.user.create({
-      data: {
+    const user = await this.prisma.$transaction(async (tx) => tx.user.create({
+      data: await this.userCreateData(tx, {
         email,
         username,
         usernameFinalized: true,
@@ -83,9 +87,9 @@ export class AuthService {
         legalConsentAt: now,
         dataConsentAt: now,
         theme: { create: { theme: 'system' } },
-      },
+      }),
       select: this.safeUserSelect(),
-    });
+    }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     void this.mail.sendWelcomeEmail({ to: user.email, displayName: user.displayName });
     return this.issueTokens(user);
@@ -124,8 +128,8 @@ export class AuthService {
         data: { googleId: profile.sub, googleEmailVerified, verified: googleEmailVerified || undefined, displayName: existing.displayName ?? profile.name ?? null, profileImageUrl: profile.picture ?? undefined },
         select: this.safeUserSelect(),
       })
-      : await this.prisma.user.create({
-        data: {
+      : await this.prisma.$transaction(async (tx) => tx.user.create({
+        data: await this.userCreateData(tx, {
           email,
           googleId: profile.sub,
           googleEmailVerified,
@@ -136,9 +140,9 @@ export class AuthService {
           usernameFinalized: false,
           profileImageUrl: profile.picture,
           theme: { create: { theme: 'system' } },
-        },
+        }),
         select: this.safeUserSelect(),
-      });
+      }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     return this.issueTokens(user);
   }
@@ -237,7 +241,7 @@ export class AuthService {
     await this.prisma.refreshToken.create({
       data: { id: sessionId, userId: user.id, tokenHash: await bcrypt.hash(refreshToken, 12), expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
     });
-    const normalizedUser = exposeActivityPersonas(user);
+    const normalizedUser = exposeProfileBadges(exposeActivityPersonas(user));
     return { user: { ...normalizedUser, ...onboarding }, accessToken, refreshToken, ...onboarding };
   }
 
@@ -284,5 +288,16 @@ export class AuthService {
   private accessSecret() { return requiredSecret(this.config, 'JWT_SECRET', 'dev-secret'); }
   private refreshSecret() { return requiredSecret(this.config, 'JWT_REFRESH_SECRET', 'dev-refresh-secret'); }
   private normalizeUsername(username?: string) { return username?.toLowerCase().replace(/^@/, '').trim().replace(/[^a-z0-9._-]/g, '') ?? ''; }
-  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true } as const; }
+  private async shouldAssignBetaUser(tx: Prisma.TransactionClient) {
+    return await tx.user.count() < 300;
+  }
+  private async userCreateData(tx: Prisma.TransactionClient, data: Prisma.UserCreateInput): Promise<Prisma.UserCreateInput> {
+    const betaUser = await this.shouldAssignBetaUser(tx);
+    return {
+      ...data,
+      betaUser,
+      badges: betaUser ? { create: { badge: { connect: { id: 'badge_beta_user' } }, note: 'Auto-assigned to early beta user' } } : undefined,
+    };
+  }
+  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true, betaUser: true, hideProfileBadges: true, badges: { select: profileBadgeSelect } } as const; }
 }

@@ -5,6 +5,7 @@ import { CompleteUserOnboardingDto, ReportUserDto, UpdateAccountDto, UpdateMeDto
 import { NotificationsService } from '../notifications/notifications.service';
 import { visibleAuthorWhere, visiblePostWhere } from '../privacy/privacy';
 import { activityPersonaLinkSelect, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
+import { exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
 
 @Injectable()
 export class UsersService {
@@ -43,7 +44,7 @@ export class UsersService {
       const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
       if (existing && existing.id !== userId) throw new ConflictException('Email already registered');
     }
-    return this.prisma.user.update({ where: { id: userId }, data: { email }, select: this.select() }).then((user) => exposeActivityPersonas(user));
+    return this.prisma.user.update({ where: { id: userId }, data: { email }, select: this.select() }).then((user) => this.withOnboarding(user));
   }
   async updatePassword(userId: string, dto: UpdatePasswordDto) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { passwordHash: true } });
@@ -83,7 +84,7 @@ export class UsersService {
         select: { ...this.publicSelect(), _count: { select: { followers: true, following: true } } },
       });
       return {
-        ...exposeActivityPersonas(profile),
+        ...exposeProfileBadges(exposeActivityPersonas(profile)),
         posts: [],
         reposts: [],
         isFollowing: Boolean(isFollowing),
@@ -133,9 +134,9 @@ export class UsersService {
         taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' } },
       },
     });
-    return { ...exposeActivityPersonas(profile), posts, isFollowing: Boolean(isFollowing), followsMe: Boolean(followsMe), isCloseBuddy: Boolean(isCloseBuddy), isPrivateLocked: false, followRequestStatus: pendingFollowRequest?.status ?? null };
+    return { ...exposeProfileBadges(exposeActivityPersonas(profile)), posts, isFollowing: Boolean(isFollowing), followsMe: Boolean(followsMe), isCloseBuddy: Boolean(isCloseBuddy), isPrivateLocked: false, followRequestStatus: pendingFollowRequest?.status ?? null };
   }
-  search(q = '') { return this.prisma.user.findMany({ where: q ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { displayName: { contains: q, mode: 'insensitive' } }, { username: { contains: q.toLowerCase().replace(/^@/, ''), mode: 'insensitive' } }] } : {}, take: 25, orderBy: { createdAt: 'desc' }, select: this.publicSelect() }).then((users) => users.map((user) => exposeActivityPersonas(user))); }
+  search(q = '') { return this.prisma.user.findMany({ where: q ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { displayName: { contains: q, mode: 'insensitive' } }, { username: { contains: q.toLowerCase().replace(/^@/, ''), mode: 'insensitive' } }] } : {}, take: 25, orderBy: { createdAt: 'desc' }, select: this.publicSelect() }).then((users) => users.map((user) => exposeProfileBadges(exposeActivityPersonas(user)))); }
   async follow(userId: string, identifier: string) {
     const targetId = await this.resolveUserId(identifier);
     if (userId === targetId) throw new BadRequestException('Cannot follow yourself');
@@ -162,8 +163,8 @@ export class UsersService {
     const targetId = await this.resolveUserId(identifier);
     return this.prisma.$transaction([this.prisma.follow.deleteMany({ where: { followerId: userId, followingId: targetId } }), this.prisma.followRequest.deleteMany({ where: { requesterId: userId, recipientId: targetId, status: 'pending' } })]).then(() => ({ ok: true }));
   }
-  incomingFollowRequests(userId: string) { return this.prisma.followRequest.findMany({ where: { recipientId: userId, status: 'pending' }, include: { requester: { select: this.publicSelect() } }, orderBy: { createdAt: 'desc' } }).then((rows) => rows.map((row) => ({ ...row, requester: exposeActivityPersonas(row.requester) }))); }
-  sentFollowRequests(userId: string) { return this.prisma.followRequest.findMany({ where: { requesterId: userId, status: 'pending' }, include: { recipient: { select: this.publicSelect() } }, orderBy: { createdAt: 'desc' } }).then((rows) => rows.map((row) => ({ ...row, recipient: exposeActivityPersonas(row.recipient) }))); }
+  incomingFollowRequests(userId: string) { return this.prisma.followRequest.findMany({ where: { recipientId: userId, status: 'pending' }, include: { requester: { select: this.publicSelect() } }, orderBy: { createdAt: 'desc' } }).then((rows) => rows.map((row) => ({ ...row, requester: exposeProfileBadges(exposeActivityPersonas(row.requester)) }))); }
+  sentFollowRequests(userId: string) { return this.prisma.followRequest.findMany({ where: { requesterId: userId, status: 'pending' }, include: { recipient: { select: this.publicSelect() } }, orderBy: { createdAt: 'desc' } }).then((rows) => rows.map((row) => ({ ...row, recipient: exposeProfileBadges(exposeActivityPersonas(row.recipient)) }))); }
   async acceptFollowRequest(userId: string, requestId: string) {
     const request = await this.prisma.followRequest.findFirst({ where: { id: requestId, recipientId: userId, status: 'pending' } });
     if (!request) throw new NotFoundException('Follow request not found');
@@ -189,7 +190,7 @@ export class UsersService {
     const targetId = await this.resolveUserId(identifier);
     return this.prisma.closeBuddy.delete({ where: { ownerId_buddyId: { ownerId: userId, buddyId: targetId } } }).catch(() => null).then(() => ({ closeBuddy: false }));
   }
-  closeBuddies(userId: string) { return this.prisma.closeBuddy.findMany({ where: { ownerId: userId }, include: { buddy: { select: this.publicSelect() } }, orderBy: { createdAt: 'desc' } }).then(rows => rows.map(r => exposeActivityPersonas(r.buddy))); }
+  closeBuddies(userId: string) { return this.prisma.closeBuddy.findMany({ where: { ownerId: userId }, include: { buddy: { select: this.publicSelect() } }, orderBy: { createdAt: 'desc' } }).then(rows => rows.map(r => exposeProfileBadges(exposeActivityPersonas(r.buddy)))); }
   followers(userId: string) { return this.profileFollowers(userId, userId); }
   async profileFollowers(identifier: string, viewerId = identifier) {
     const userId = await this.resolveUserId(identifier);
@@ -197,7 +198,7 @@ export class UsersService {
       where: { followingId: userId, follower: visibleAuthorWhere(viewerId) },
       include: { follower: { select: this.publicSelect() } },
       orderBy: { createdAt: 'desc' },
-    }).then(rows => rows.map(r => exposeActivityPersonas(r.follower)));
+    }).then(rows => rows.map(r => exposeProfileBadges(exposeActivityPersonas(r.follower))));
   }
   following(userId: string, nonFollowback?: string) { return this.profileFollowing(userId, userId).then(users => users.filter((u: any) => nonFollowback === 'true' ? !u.followsBack : true)); }
   async profileFollowing(identifier: string, viewerId = identifier) {
@@ -206,7 +207,7 @@ export class UsersService {
       where: { followerId: userId, following: visibleAuthorWhere(viewerId) },
       include: { following: { select: { ...this.publicSelect(), following: { where: { followingId: userId }, select: { followerId: true } } } } },
       orderBy: { createdAt: 'desc' },
-    }).then(rows => rows.map(r => ({ ...exposeActivityPersonas(r.following), followsBack: r.following.following.length > 0, following: undefined })));
+    }).then(rows => rows.map(r => ({ ...exposeProfileBadges(exposeActivityPersonas(r.following)), followsBack: r.following.following.length > 0, following: undefined })));
   }
   async mutual(userId: string) { const following = await this.following(userId); return following.filter((u: any) => u.followsBack); }
   async block(userId: string, identifier: string) {
@@ -231,11 +232,11 @@ export class UsersService {
     return { ok: true };
   }
 
-  private withOnboarding<T extends { usernameFinalized?: boolean | null; dateOfBirth?: Date | string | null; legalConsentAt?: Date | string | null; dataConsentAt?: Date | string | null; activityPersonas?: any }>(user: T) {
-    return { ...exposeActivityPersonas(user), onboardingComplete: Boolean(user.usernameFinalized && user.dateOfBirth && user.legalConsentAt && user.dataConsentAt) };
+  private withOnboarding<T extends { usernameFinalized?: boolean | null; dateOfBirth?: Date | string | null; legalConsentAt?: Date | string | null; dataConsentAt?: Date | string | null; activityPersonas?: any; betaUser?: boolean | null; hideProfileBadges?: boolean | null; badges?: any }>(user: T) {
+    return { ...exposeProfileBadges(exposeActivityPersonas(user)), onboardingComplete: Boolean(user.usernameFinalized && user.dateOfBirth && user.legalConsentAt && user.dataConsentAt) };
   }
-  private select() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, profileVisibility: true, defaultPostVisibility: true, verified: true, latitude: true, longitude: true, theme: true, chatPublicKey: true, createdAt: true, _count: { select: { followers: true, following: true } } } as const; }
-  private publicSelect() { return { id: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, activityPersonas: activityPersonaLinkSelect, profileVisibility: true, verified: true, chatPublicKey: true, createdAt: true } as const; }
+  private select() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, profileVisibility: true, defaultPostVisibility: true, betaUser: true, hideProfileBadges: true, badges: { select: profileBadgeSelect }, verified: true, latitude: true, longitude: true, theme: true, chatPublicKey: true, createdAt: true, _count: { select: { followers: true, following: true } } } as const; }
+  private publicSelect() { return { id: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, activityPersonas: activityPersonaLinkSelect, profileVisibility: true, betaUser: true, hideProfileBadges: true, badges: { select: profileBadgeSelect }, verified: true, chatPublicKey: true, createdAt: true } as const; }
   private async resolveUserId(identifier: string) {
     const normalized = identifier.toLowerCase().replace(/^@/, '').trim();
     const user = await this.prisma.user.findFirst({
