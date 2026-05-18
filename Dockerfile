@@ -26,4 +26,4 @@ RUN mkdir -p uploads/images uploads/videos && chown -R node:node uploads
 USER node
 
 EXPOSE 3000
-CMD ["sh", "-c", "DATABASE_URL=\"${DIRECT_URL:-$DATABASE_URL}\" npx prisma migrate deploy && node dist/src/main.js"]
+CMD ["sh", "-c", "if [ -z \"$DIRECT_URL\" ]; then echo \"DIRECT_URL is required for Prisma migrations; use the Supabase direct/session connection, not the transaction pooler\" >&2; exit 1; fi; DATABASE_URL=\"$DIRECT_URL\" npx prisma migrate deploy && node dist/src/main.js"]
