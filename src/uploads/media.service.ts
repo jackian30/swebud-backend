@@ -13,7 +13,7 @@ export class MediaService {
     return this.mediaLibrary.kindForMime(mimeType);
   }
 
-  filterFor(allowed: 'image' | 'video' | 'media') {
+  filterFor(allowed: 'image' | 'video' | 'audio' | 'media') {
     return this.mediaLibrary.filterFor(allowed);
   }
 

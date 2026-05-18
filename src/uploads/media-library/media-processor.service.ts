@@ -10,11 +10,11 @@ export class MediaProcessor {
     const kind = kindForMime(file.mimetype);
     if (!kind) throw new BadRequestException(`Unsupported media type: ${file.mimetype || 'unknown'}`);
     assertCollectionAccepts(collection, kind, file.mimetype);
-    if (file.size > collection.maxBytes) throw new BadRequestException(`${kind === 'image' ? 'Image' : 'Video'} is too large.`);
+    if (file.size > collection.maxBytes) throw new BadRequestException(`${kind === 'image' ? 'Image' : kind === 'audio' ? 'Audio' : 'Video'} is too large.`);
     this.assertMagicBytes(file);
 
-    if (kind === 'video') {
-      return { buffer: file.buffer, filename: this.randomName(extensionForMime(file.mimetype)), mimeType: file.mimetype, size: file.buffer.length, type: 'video' };
+    if (kind === 'video' || kind === 'audio') {
+      return { buffer: file.buffer, filename: this.randomName(extensionForMime(file.mimetype)), mimeType: file.mimetype, size: file.buffer.length, type: kind };
     }
     return this.processImage(file, collection);
   }
@@ -55,13 +55,23 @@ export class MediaProcessor {
     const isGif = b.length > 6 && (b.toString('ascii', 0, 6) === 'GIF87a' || b.toString('ascii', 0, 6) === 'GIF89a');
     const isMp4Like = b.length > 12 && b.toString('ascii', 4, 8) === 'ftyp';
     const isWebm = b.length > 4 && b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3;
+    const isOgg = b.length > 4 && b.toString('ascii', 0, 4) === 'OggS';
+    const isWav = b.length > 12 && b.toString('ascii', 0, 4) === 'RIFF' && b.toString('ascii', 8, 12) === 'WAVE';
+    const isMp3 = b.length > 3 && (b.toString('ascii', 0, 3) === 'ID3' || (b[0] === 0xff && (b[1] & 0xe0) === 0xe0));
+    const isAac = b.length > 2 && b[0] === 0xff && (b[1] & 0xf0) === 0xf0;
     const allowed =
       (file.mimetype === 'image/jpeg' && isJpeg) ||
       (file.mimetype === 'image/png' && isPng) ||
       (file.mimetype === 'image/webp' && isWebp) ||
       (file.mimetype === 'image/gif' && isGif) ||
       ((file.mimetype === 'video/mp4' || file.mimetype === 'video/quicktime') && isMp4Like) ||
-      (file.mimetype === 'video/webm' && isWebm);
+      (file.mimetype === 'video/webm' && isWebm) ||
+      (file.mimetype === 'audio/webm' && isWebm) ||
+      (file.mimetype === 'audio/ogg' && isOgg) ||
+      (file.mimetype === 'audio/wav' && isWav) ||
+      ((file.mimetype === 'audio/mp4') && isMp4Like) ||
+      (file.mimetype === 'audio/mpeg' && isMp3) ||
+      (file.mimetype === 'audio/aac' && isAac);
     if (!allowed) throw new BadRequestException('Uploaded file content does not match its media type.');
   }
 }

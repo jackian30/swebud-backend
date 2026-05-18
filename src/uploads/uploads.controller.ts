@@ -6,6 +6,7 @@ import { MediaService } from './media.service';
 
 const maxImageBytes = 15 * 1024 * 1024;
 const maxVideoBytes = 100 * 1024 * 1024;
+const maxAudioBytes = 25 * 1024 * 1024;
 const maxBatchBytes = 120 * 1024 * 1024;
 const maxBatchFiles = 6;
 const maxBatchFileBytes = Math.floor(maxBatchBytes / maxBatchFiles);
@@ -13,6 +14,7 @@ const maxBatchFileBytes = Math.floor(maxBatchBytes / maxBatchFiles);
 export const uploadLimits = {
   imageBytes: maxImageBytes,
   videoBytes: maxVideoBytes,
+  audioBytes: maxAudioBytes,
   batchBytes: maxBatchBytes,
   batchFiles: maxBatchFiles,
   batchFileBytes: maxBatchFileBytes,
@@ -75,6 +77,12 @@ export class UploadsController {
   @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: maxVideoBytes, files: 1 } }))
   video(@UploadedFile() file: Express.Multer.File) {
     return this.media.upload(file, 'generic-video');
+  }
+
+  @Post('audio')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: maxAudioBytes, files: 1 } }))
+  audio(@UploadedFile() file: Express.Multer.File) {
+    return this.media.upload(file, 'generic-audio');
   }
 
   @Post('media')

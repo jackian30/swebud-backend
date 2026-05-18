@@ -22,7 +22,7 @@ RUN npm ci --omit=dev && npm cache clean --force
 COPY --chown=node:node prisma ./prisma
 RUN npx prisma generate
 COPY --chown=node:node --from=build /app/dist ./dist
-RUN mkdir -p uploads/images uploads/videos && chown -R node:node uploads
+RUN mkdir -p uploads/images uploads/videos uploads/audio && chown -R node:node uploads
 USER node
 
 EXPOSE 3000

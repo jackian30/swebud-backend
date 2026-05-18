@@ -1,4 +1,4 @@
-export type MediaKind = 'image' | 'video';
+export type MediaKind = 'image' | 'video' | 'audio';
 
 export type MediaCollectionName =
   | 'profile-photo'
@@ -10,6 +10,7 @@ export type MediaCollectionName =
   | 'comment-media'
   | 'generic-image'
   | 'generic-video'
+  | 'generic-audio'
   | 'generic-media';
 
 export type MediaConversion = {
@@ -22,7 +23,7 @@ export type MediaConversion = {
 export type MediaCollection = {
   name: MediaCollectionName;
   folder: string;
-  accepts: 'image' | 'video' | 'media';
+  accepts: 'image' | 'video' | 'audio' | 'media';
   maxBytes: number;
   conversion?: MediaConversion;
 };

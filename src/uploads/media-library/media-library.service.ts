@@ -23,7 +23,7 @@ export class MediaLibraryService {
     return kindForMime(mimeType);
   }
 
-  filterFor(allowed: 'image' | 'video' | 'media') {
+  filterFor(allowed: 'image' | 'video' | 'audio' | 'media') {
     return (_req: unknown, file: Express.Multer.File, cb: (error: Error | null, acceptFile: boolean) => void) => {
       const kind = kindForMime(file.mimetype);
       if (kind && (allowed === 'media' || kind === allowed)) return cb(null, true);
