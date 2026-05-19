@@ -12,6 +12,7 @@ import { TurnstileService } from './turnstile.service';
 import { allowedOrigins, requiredSecret } from '../common/security';
 import { activityPersonaLinkSelect, createActivityPersonaLinks, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
 import { exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
+import { normalizeUsername } from '../common/usernames';
 
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MS = 1000 * 60 * 30;
@@ -67,7 +68,7 @@ export class AuthService {
     if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
 
     const email = dto.email.toLowerCase().trim();
-    const username = this.normalizeUsername(dto.username);
+    const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException('Username is required');
     const existing = await this.prisma.user.findFirst({ where: { OR: [{ email }, { username }] } });
     if (existing?.email === email) throw new BadRequestException('Email already registered');
@@ -149,7 +150,7 @@ export class AuthService {
 
   async completeOnboarding(userId: string, dto: CompleteOnboardingDto) {
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
-    const username = this.normalizeUsername(dto.username);
+    const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException('Username is required');
     const existing = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
     if (existing && existing.id !== userId) throw new BadRequestException('Username already taken');
@@ -269,7 +270,7 @@ export class AuthService {
   private async googleDefaultUsername(profile: Pick<GoogleTokenInfo, 'email' | 'given_name' | 'family_name' | 'name'>) {
     const nameBase = [profile.given_name, profile.family_name].filter(Boolean).join('');
     const fallbackName = profile.name?.replace(/\s+/g, '') || profile.email.split('@')[0];
-    const base = this.normalizeUsername(nameBase || fallbackName).replace(/[._-]/g, '') || 'googleuser';
+    const base = normalizeUsername(nameBase || fallbackName).replace(/[._-]/g, '') || 'googleuser';
     const normalizedBase = base.slice(0, 24);
     for (let attempt = 0; attempt < 8; attempt++) {
       const suffix = attempt === 0 ? '' : String(attempt + 1);
@@ -287,7 +288,6 @@ export class AuthService {
 
   private accessSecret() { return requiredSecret(this.config, 'JWT_SECRET', 'dev-secret'); }
   private refreshSecret() { return requiredSecret(this.config, 'JWT_REFRESH_SECRET', 'dev-refresh-secret'); }
-  private normalizeUsername(username?: string) { return username?.toLowerCase().replace(/^@/, '').trim().replace(/[^a-z0-9._-]/g, '') ?? ''; }
   private async shouldAssignBetaUser(tx: Prisma.TransactionClient) {
     return await tx.user.count() < 300;
   }

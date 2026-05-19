@@ -6,6 +6,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { visibleAuthorWhere, visiblePostWhere } from '../privacy/privacy';
 import { activityPersonaLinkSelect, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
 import { availableProfileBadgesFor, exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
+import { normalizeUsername } from '../common/usernames';
 
 @Injectable()
 export class UsersService {
@@ -13,7 +14,7 @@ export class UsersService {
 
   async me(userId: string) { return this.withOnboarding(await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: this.select() })); }
   async updateMe(userId: string, dto: UpdateMeDto) {
-    const username = dto.username?.toLowerCase().replace(/^@/, '').trim().replace(/[^a-z0-9._-]/g, '');
+    const username = normalizeUsername(dto.username);
     const { displayName, activityPersonas, ...rest } = dto;
     delete rest.username;
     delete rest.activityPersona;
@@ -27,7 +28,7 @@ export class UsersService {
   }
   async completeOnboarding(userId: string, dto: CompleteUserOnboardingDto) {
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
-    const username = dto.username?.toLowerCase().replace(/^@/, '').trim().replace(/[^a-z0-9._-]/g, '');
+    const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException('Username is required');
     if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
     const existing = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });

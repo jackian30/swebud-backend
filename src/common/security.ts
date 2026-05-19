@@ -2,6 +2,7 @@ import { ForbiddenException, HttpException, HttpStatus, Injectable, NestMiddlewa
 import { ConfigService } from '@nestjs/config';
 import { Request, Response, NextFunction } from 'express';
 import { IncomingMessage } from 'http';
+import { booleanConfig } from './config';
 
 const weakSecretValues = new Set([
   '',
@@ -14,12 +15,6 @@ const weakSecretValues = new Set([
 
 function isLocalOrigin(origin: string) {
   return /^https?:\/\/(localhost|[a-z0-9.-]+\.loc|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|192\.168\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2\d|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/i.test(origin);
-}
-
-function booleanEnv(config: ConfigService, key: string, fallback = false) {
-  const raw = config.get<string>(key);
-  if (raw == null || raw === '') return fallback;
-  return ['1', 'true', 'yes', 'on'].includes(String(raw).trim().toLowerCase());
 }
 
 function numericEnv(config: ConfigService, key: string) {
@@ -47,7 +42,7 @@ export function allowedOrigins(config: ConfigService) {
 }
 
 export function allowLocalOrigins(config: ConfigService) {
-  return booleanEnv(config, 'ALLOW_LOCAL_ORIGINS', process.env.NODE_ENV !== 'production');
+  return booleanConfig(config, 'ALLOW_LOCAL_ORIGINS', process.env.NODE_ENV !== 'production');
 }
 
 export function isAllowedOrigin(config: ConfigService, origin?: string) {

@@ -150,6 +150,14 @@ enum BuddySessionVisibility {
   @@map("buddy_session_visibility")
 }
 
+enum BuddyDiscoveryAudience {
+  public
+  mutuals
+  close_buddies
+
+  @@map("buddy_discovery_audience")
+}
+
 enum PostReportReason {
   spam
   harassment
@@ -348,6 +356,9 @@ model BuddySession {
   roomId      String?        @map("room_id")
   activity    BuddyActivity?
   subActivity String?        @map("sub_activity")
+  note        String?
+  visibleTo   BuddyDiscoveryAudience @default(public) @map("visible_to")
+  canSee      BuddyDiscoveryAudience @default(public) @map("can_see")
   latitude    Float
   longitude   Float
   expiresAt   DateTime       @map("expires_at")
@@ -358,6 +369,8 @@ model BuddySession {
 
   @@index([roomId, expiresAt])
   @@index([activity, expiresAt])
+  @@index([visibleTo, expiresAt])
+  @@index([canSee, expiresAt])
   @@index([latitude, longitude])
   @@map("buddy_sessions")
 }

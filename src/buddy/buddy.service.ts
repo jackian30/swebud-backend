@@ -1,6 +1,6 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { randomBytes } from 'crypto';
-import { BuddyActivity, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
+import { BuddyActivity, BuddyDiscoveryAudience, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { BuddyRoomQueryDto, CreateBuddyRoomDto, JoinBuddyRoomDto, NearbyBuddyQueryDto, UpsertBuddySessionDto } from './dto';
 import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/activity-personas';
@@ -27,10 +27,23 @@ export class BuddyService {
     const expiresAt = new Date(Date.now() + ttlMinutes * 60_000);
     const activity = room?.activity ?? dto.activity ?? null;
     const subActivity = (room?.subActivity ?? dto.subActivity)?.trim() || null;
+    const note = dto.note?.trim() || null;
+    const visibleTo = dto.visibleTo ?? BuddyDiscoveryAudience.public;
+    const canSee = dto.canSee ?? BuddyDiscoveryAudience.public;
     const session = await this.prisma.buddySession.upsert({
       where: { userId },
-      create: { userId, roomId: room?.id ?? null, activity, subActivity, latitude: dto.latitude, longitude: dto.longitude, expiresAt },
-      update: { roomId: room?.id ?? null, activity, subActivity, latitude: dto.latitude, longitude: dto.longitude, expiresAt },
+      create: { userId, roomId: room?.id ?? null, activity, subActivity, note, visibleTo, canSee, latitude: dto.latitude, longitude: dto.longitude, expiresAt },
+      update: {
+        roomId: room?.id ?? null,
+        activity,
+        subActivity,
+        note,
+        ...(dto.visibleTo !== undefined ? { visibleTo: dto.visibleTo } : {}),
+        ...(dto.canSee !== undefined ? { canSee: dto.canSee } : {}),
+        latitude: dto.latitude,
+        longitude: dto.longitude,
+        expiresAt,
+      },
       include: this.sessionInclude(),
     });
     return this.toBuddy(session, dto.latitude, dto.longitude);
@@ -46,12 +59,18 @@ export class BuddyService {
     const take = query.take ?? DEFAULT_TAKE;
     const blocked = await this.blockedUserIds(userId);
     const room = query.roomId ? await this.ensureCanJoinRoom(userId, { roomId: query.roomId }) : null;
+    const viewerSession = await this.prisma.buddySession.findUnique({ where: { userId }, select: { canSee: true, expiresAt: true } });
+    const canSee = viewerSession && viewerSession.expiresAt > new Date() ? viewerSession.canSee : BuddyDiscoveryAudience.public;
     const sessions = await this.prisma.buddySession.findMany({
       where: {
         userId: { not: userId, notIn: blocked },
         roomId: room ? room.id : null,
         ...(query.activity && !room ? { activity: query.activity } : {}),
         expiresAt: { gt: new Date() },
+        AND: [
+          this.visibleToViewerWhere(userId),
+          this.viewerCanSeeWhere(userId, canSee),
+        ],
       },
       include: this.sessionInclude(),
       orderBy: { updatedAt: 'desc' },
@@ -169,6 +188,9 @@ export class BuddyService {
       room: session.room ? this.toRoom(session.room, session.room.creatorId === session.userId) : null,
       activity: session.activity,
       subActivity: session.subActivity,
+      note: session.note,
+      visibleTo: session.visibleTo,
+      canSee: session.canSee,
       latitude: session.latitude,
       longitude: session.longitude,
       expiresAt: session.expiresAt,
@@ -199,6 +221,40 @@ export class BuddyService {
 
   private sessionInclude() {
     return { user: { select: this.userSelect() }, room: { include: this.roomInclude() } } as const;
+  }
+
+  private visibleToViewerWhere(viewerId: string) {
+    return {
+      OR: [
+        { visibleTo: BuddyDiscoveryAudience.public },
+        {
+          visibleTo: BuddyDiscoveryAudience.mutuals,
+          user: {
+            followers: { some: { followerId: viewerId } },
+            following: { some: { followingId: viewerId } },
+          },
+        },
+        {
+          visibleTo: BuddyDiscoveryAudience.close_buddies,
+          user: { closeBuddies: { some: { buddyId: viewerId } } },
+        },
+      ],
+    };
+  }
+
+  private viewerCanSeeWhere(viewerId: string, audience: BuddyDiscoveryAudience) {
+    if (audience === BuddyDiscoveryAudience.mutuals) {
+      return {
+        user: {
+          followers: { some: { followerId: viewerId } },
+          following: { some: { followingId: viewerId } },
+        },
+      };
+    }
+    if (audience === BuddyDiscoveryAudience.close_buddies) {
+      return { user: { closeBuddyOf: { some: { ownerId: viewerId } } } };
+    }
+    return {};
   }
 
   private roomInclude() {

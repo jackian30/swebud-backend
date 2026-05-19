@@ -1,10 +1,13 @@
 import { Type } from 'class-transformer';
 import { IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { BuddyActivity, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
+import { BuddyActivity, BuddyDiscoveryAudience, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 
 export class UpsertBuddySessionDto {
   @IsOptional() @IsEnum(BuddyActivity) activity?: BuddyActivity;
   @IsOptional() @IsString() @MaxLength(60) subActivity?: string;
+  @IsOptional() @IsString() @MaxLength(120) note?: string;
+  @IsOptional() @IsEnum(BuddyDiscoveryAudience) visibleTo?: BuddyDiscoveryAudience;
+  @IsOptional() @IsEnum(BuddyDiscoveryAudience) canSee?: BuddyDiscoveryAudience;
   @IsOptional() @IsUUID() roomId?: string;
   @IsNumber() @Min(-90) @Max(90) latitude!: number;
   @IsNumber() @Min(-180) @Max(180) longitude!: number;
