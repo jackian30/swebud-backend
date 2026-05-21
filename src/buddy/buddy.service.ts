@@ -9,6 +9,7 @@ const DEFAULT_TTL_MINUTES = 60;
 const DEFAULT_ROOM_TTL_MINUTES = 120;
 const DEFAULT_RADIUS_KM = 100;
 const DEFAULT_TAKE = 50;
+const EMPTY_ROOM_START_GRACE_MS = 60_000;
 
 @Injectable()
 export class BuddyService {
@@ -23,6 +24,7 @@ export class BuddyService {
 
   async upsert(userId: string, dto: UpsertBuddySessionDto) {
     const room = dto.roomId ? await this.ensureCanJoinRoom(userId, { roomId: dto.roomId }) : null;
+    const previousSession = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true } });
     const ttlMinutes = Math.min(Math.max(dto.ttlMinutes ?? DEFAULT_TTL_MINUTES, 5), 120);
     const expiresAt = new Date(Date.now() + ttlMinutes * 60_000);
     const activity = room?.activity ?? dto.activity ?? null;
@@ -46,11 +48,27 @@ export class BuddyService {
       },
       include: this.sessionInclude(),
     });
+    if (room?.id) {
+      await this.prisma.buddyRoomParticipant.upsert({
+        where: { roomId_userId: { roomId: room.id, userId } },
+        create: { roomId: room.id, userId },
+        update: {},
+      });
+    }
+    if (previousSession?.roomId && previousSession.roomId !== room?.id) {
+      await this.prisma.buddyRoomParticipant.deleteMany({ where: { roomId: previousSession.roomId, userId } });
+      await this.closeRoomIfNoActiveParticipants(previousSession.roomId);
+    }
     return this.toBuddy(session, dto.latitude, dto.longitude);
   }
 
   async stop(userId: string) {
+    const session = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true } });
     await this.prisma.buddySession.delete({ where: { userId } }).catch(() => null);
+    if (session?.roomId) {
+      await this.prisma.buddyRoomParticipant.deleteMany({ where: { roomId: session.roomId, userId } });
+      await this.closeRoomIfNoActiveParticipants(session.roomId);
+    }
     return { ok: true };
   }
 
@@ -85,21 +103,26 @@ export class BuddyService {
 
   async rooms(userId: string, query: BuddyRoomQueryDto = {}) {
     const now = new Date();
-    const where: any = { expiresAt: { gt: now } };
+    const baseWhere: any = { expiresAt: { gt: now } };
     if (query.groupId) {
       await this.ensureGroupMember(userId, query.groupId);
-      where.scope = 'group';
-      where.groupId = query.groupId;
+      baseWhere.scope = 'group';
+      baseWhere.groupId = query.groupId;
     } else if (query.scope === 'group') {
       const memberships = await this.prisma.groupMember.findMany({ where: { userId }, select: { groupId: true } });
-      where.scope = 'group';
-      where.groupId = { in: memberships.map((member) => member.groupId) };
+      baseWhere.scope = 'group';
+      baseWhere.groupId = { in: memberships.map((member) => member.groupId) };
     } else {
-      where.scope = 'public';
-      where.visibility = 'public';
+      baseWhere.scope = 'public';
+      baseWhere.OR = [
+        { creatorId: userId },
+        { participants: { some: { userId } } },
+      ];
     }
-    const rooms = await this.prisma.buddyRoom.findMany({ where, orderBy: { createdAt: 'desc' }, include: this.roomInclude() });
-    return rooms.map((room) => this.toRoom(room));
+    const where = { ...baseWhere, sessions: { some: { expiresAt: { gt: now } } } };
+    const rooms = await this.prisma.buddyRoom.findMany({ where, orderBy: { createdAt: 'desc' }, include: this.roomInclude(now) });
+    await this.closeInactiveRoomsForList(baseWhere, now);
+    return rooms.map((room) => this.toRoom(room, this.canAccessRoomCode(userId, room)));
   }
 
   async createRoom(userId: string, dto: CreateBuddyRoomDto) {
@@ -113,13 +136,14 @@ export class BuddyService {
       data: {
         name: dto.name.trim(),
         scope,
-        visibility: dto.visibility ?? BuddySessionVisibility.public,
+        visibility: BuddySessionVisibility.private,
         code: await this.uniqueRoomCode(),
         groupId: scope === BuddySessionScope.group ? dto.groupId : null,
         creatorId: userId,
         activity: dto.activity ?? null,
         subActivity: dto.subActivity?.trim() || null,
         expiresAt: new Date(Date.now() + ttlMinutes * 60_000),
+        participants: { create: { userId } },
       },
       include: this.roomInclude(),
     });
@@ -128,6 +152,11 @@ export class BuddyService {
 
   async joinRoom(userId: string, dto: JoinBuddyRoomDto) {
     const room = await this.ensureCanJoinRoom(userId, dto);
+    await this.prisma.buddyRoomParticipant.upsert({
+      where: { roomId_userId: { roomId: room.id, userId } },
+      create: { roomId: room.id, userId },
+      update: {},
+    });
     return this.upsert(userId, { roomId: room.id, latitude: dto.latitude, longitude: dto.longitude, ttlMinutes: DEFAULT_TTL_MINUTES });
   }
 
@@ -137,6 +166,25 @@ export class BuddyService {
     if (room.creatorId !== userId) throw new ForbiddenException('Only the creator can close this buddy session.');
     await this.prisma.buddyRoom.delete({ where: { id: roomId } });
     return { ok: true };
+  }
+
+  private async closeRoomIfNoActiveParticipants(roomId: string) {
+    const activeParticipants = await this.prisma.buddySession.count({ where: { roomId, expiresAt: { gt: new Date() } } });
+    if (activeParticipants > 0) return;
+    await this.prisma.buddyRoom.delete({ where: { id: roomId } }).catch(() => null);
+  }
+
+  private async closeInactiveRoomsForList(where: any, now = new Date()) {
+    const staleRooms = await this.prisma.buddyRoom.findMany({
+      where: {
+        ...where,
+        createdAt: { lt: new Date(now.getTime() - EMPTY_ROOM_START_GRACE_MS) },
+        sessions: { none: { expiresAt: { gt: now } } },
+      },
+      select: { id: true },
+    });
+    if (!staleRooms.length) return;
+    await this.prisma.buddyRoom.deleteMany({ where: { id: { in: staleRooms.map((room) => room.id) } } });
   }
 
   activityOptions() {
@@ -150,11 +198,32 @@ export class BuddyService {
       include: this.roomInclude(),
     });
     if (!room || room.expiresAt <= new Date()) throw new NotFoundException('Buddy session not found');
+    const activeParticipants = room._count?.sessions ?? await this.activeRoomSessionCount(room.id);
+    if (activeParticipants <= 0 && !this.canStartEmptyRoom(userId, room)) {
+      await this.prisma.buddyRoom.delete({ where: { id: room.id } }).catch(() => null);
+      throw new NotFoundException('Buddy session has ended');
+    }
     if (room.scope === BuddySessionScope.group) await this.ensureGroupMember(userId, room.groupId!);
-    if (room.visibility === BuddySessionVisibility.private && room.creatorId !== userId && dto.code?.trim().toUpperCase() !== room.code) {
+    if (room.visibility === BuddySessionVisibility.private && !this.canAccessRoomCode(userId, room) && dto.code?.trim().toUpperCase() !== room.code) {
       throw new ForbiddenException('Enter the buddy session code to join.');
     }
     return room;
+  }
+
+  private canAccessRoomCode(userId: string, room: any) {
+    return room.creatorId === userId || Boolean(room.participants?.some((participant: { userId: string }) => participant.userId === userId));
+  }
+
+  private canStartEmptyRoom(userId: string, room: any) {
+    const createdAt = room.createdAt instanceof Date ? room.createdAt.getTime() : new Date(room.createdAt).getTime();
+    return room.creatorId === userId
+      && this.canAccessRoomCode(userId, room)
+      && Number.isFinite(createdAt)
+      && Date.now() - createdAt < EMPTY_ROOM_START_GRACE_MS;
+  }
+
+  private activeRoomSessionCount(roomId: string) {
+    return this.prisma.buddySession.count({ where: { roomId, expiresAt: { gt: new Date() } } });
   }
 
   private async ensureGroupMember(userId: string, groupId: string) {
@@ -185,7 +254,7 @@ export class BuddyService {
       id: session.id,
       userId: session.userId,
       roomId: session.roomId,
-      room: session.room ? this.toRoom(session.room, session.room.creatorId === session.userId) : null,
+      room: session.room ? this.toRoom(session.room, this.canAccessRoomCode(session.userId, session.room)) : null,
       activity: session.activity,
       subActivity: session.subActivity,
       note: session.note,
@@ -257,11 +326,12 @@ export class BuddyService {
     return {};
   }
 
-  private roomInclude() {
+  private roomInclude(now = new Date()) {
     return {
       group: { select: { id: true, name: true, slug: true } },
       creator: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
-      _count: { select: { sessions: true } },
+      participants: { select: { userId: true } },
+      _count: { select: { sessions: { where: { expiresAt: { gt: now } } } } },
     } as const;
   }
 

@@ -16,10 +16,11 @@ import { IntegrationsModule } from './integrations/integrations.module';
 import { ActivitiesModule } from './activities/activities.module';
 import { KlipyModule } from './klipy/klipy.module';
 import { StoriesModule } from './stories/stories.module';
+import { RealtimePresenceModule } from './realtime/realtime-presence.module';
 import { RateLimitMiddleware } from './common/security';
 import { HealthController } from './health.controller';
 
-@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, MailModule, AuthModule, UsersModule, FeedModule, PostsModule, GroupsModule, ChatModule, ThemeModule, UploadsModule, NotificationsModule, BuddyModule, IntegrationsModule, ActivitiesModule, KlipyModule, StoriesModule], controllers: [HealthController] })
+@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, MailModule, AuthModule, UsersModule, FeedModule, PostsModule, GroupsModule, RealtimePresenceModule, ChatModule, ThemeModule, UploadsModule, NotificationsModule, BuddyModule, IntegrationsModule, ActivitiesModule, KlipyModule, StoriesModule], controllers: [HealthController] })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply(RateLimitMiddleware).forRoutes('*');

@@ -15,6 +15,16 @@ enum ThemePreference {
   @@map("theme_preference")
 }
 
+enum MapVisualPreference {
+  system
+  streets
+  light
+  dark
+  satellite
+
+  @@map("map_visual_preference")
+}
+
 enum GroupRole {
   owner
   admin
@@ -223,33 +233,33 @@ enum ActivitySource {
 }
 
 model User {
-  id                    String            @id @default(uuid())
-  email                 String            @unique
-  passwordHash          String            @map("password_hash")
-  displayName           String?           @map("display_name")
-  username              String            @unique
-  usernameFinalized     Boolean           @default(true) @map("username_finalized")
-  bio                   String?
-  profileImageUrl       String?           @map("profile_image_url")
-  coverImageUrl         String?           @map("cover_image_url")
-  gender                UserGender?       @map("gender")
-  dateOfBirth           DateTime?         @map("date_of_birth")
-  profileVisibility     ProfileVisibility @default(public) @map("profile_visibility")
-  defaultPostVisibility PostVisibility    @default(public) @map("default_post_visibility")
-  betaUser              Boolean           @default(false) @map("beta_user")
-  hideProfileBadges     Boolean           @default(false) @map("hide_profile_badges")
-  hiddenProfileBadgeCodes String[]         @default([]) @map("hidden_profile_badge_codes")
-  verified              Boolean           @default(false)
-  googleId              String?           @unique @map("google_id")
-  googleEmailVerified   Boolean           @default(false) @map("google_email_verified")
-  legalConsentAt        DateTime?         @map("legal_consent_at")
-  dataConsentAt         DateTime?         @map("data_consent_at")
-  chatPublicKey         String?           @map("chat_public_key")
-  chatPrivateKey        String?           @map("chat_private_key")
-  latitude              Float?
-  longitude             Float?
-  createdAt             DateTime          @default(now()) @map("created_at")
-  updatedAt             DateTime          @updatedAt @map("updated_at")
+  id                      String            @id @default(uuid())
+  email                   String            @unique
+  passwordHash            String            @map("password_hash")
+  displayName             String?           @map("display_name")
+  username                String            @unique
+  usernameFinalized       Boolean           @default(true) @map("username_finalized")
+  bio                     String?
+  profileImageUrl         String?           @map("profile_image_url")
+  coverImageUrl           String?           @map("cover_image_url")
+  gender                  UserGender?       @map("gender")
+  dateOfBirth             DateTime?         @map("date_of_birth")
+  profileVisibility       ProfileVisibility @default(public) @map("profile_visibility")
+  defaultPostVisibility   PostVisibility    @default(public) @map("default_post_visibility")
+  betaUser                Boolean           @default(false) @map("beta_user")
+  hideProfileBadges       Boolean           @default(false) @map("hide_profile_badges")
+  hiddenProfileBadgeCodes String[]          @default([]) @map("hidden_profile_badge_codes")
+  verified                Boolean           @default(false)
+  googleId                String?           @unique @map("google_id")
+  googleEmailVerified     Boolean           @default(false) @map("google_email_verified")
+  legalConsentAt          DateTime?         @map("legal_consent_at")
+  dataConsentAt           DateTime?         @map("data_consent_at")
+  chatPublicKey           String?           @map("chat_public_key")
+  chatPrivateKey          String?           @map("chat_private_key")
+  latitude                Float?
+  longitude               Float?
+  createdAt               DateTime          @default(now()) @map("created_at")
+  updatedAt               DateTime          @updatedAt @map("updated_at")
 
   posts                     Post[]
   wallPosts                 Post[]                   @relation("ProfileWallPosts")
@@ -291,6 +301,7 @@ model User {
   receivedMessages          Message[]                @relation("ReceivedMessages")
   buddySession              BuddySession?
   createdBuddyRooms         BuddyRoom[]              @relation("BuddyRoomCreators")
+  buddyRoomParticipants     BuddyRoomParticipant[]
   closeBuddies              CloseBuddy[]             @relation("CloseBuddyOwners")
   closeBuddyOf              CloseBuddy[]             @relation("CloseBuddyMembers")
   externalIntegrations      ExternalIntegration[]
@@ -351,21 +362,21 @@ model UserActivityPersona {
 }
 
 model BuddySession {
-  id          String         @id @default(uuid())
-  userId      String         @unique @map("user_id")
-  roomId      String?        @map("room_id")
+  id          String                 @id @default(uuid())
+  userId      String                 @unique @map("user_id")
+  roomId      String?                @map("room_id")
   activity    BuddyActivity?
-  subActivity String?        @map("sub_activity")
+  subActivity String?                @map("sub_activity")
   note        String?
   visibleTo   BuddyDiscoveryAudience @default(public) @map("visible_to")
   canSee      BuddyDiscoveryAudience @default(public) @map("can_see")
   latitude    Float
   longitude   Float
-  expiresAt   DateTime       @map("expires_at")
-  createdAt   DateTime       @default(now()) @map("created_at")
-  updatedAt   DateTime       @updatedAt @map("updated_at")
-  user        User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  room        BuddyRoom?     @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  expiresAt   DateTime               @map("expires_at")
+  createdAt   DateTime               @default(now()) @map("created_at")
+  updatedAt   DateTime               @updatedAt @map("updated_at")
+  user        User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  room        BuddyRoom?             @relation(fields: [roomId], references: [id], onDelete: SetNull)
 
   @@index([roomId, expiresAt])
   @@index([activity, expiresAt])
@@ -376,25 +387,38 @@ model BuddySession {
 }
 
 model BuddyRoom {
-  id          String                 @id @default(uuid())
-  name        String
-  scope       BuddySessionScope      @default(public)
-  visibility  BuddySessionVisibility @default(public)
-  code        String                 @unique
-  groupId     String?                @map("group_id")
-  creatorId   String                 @map("creator_id")
-  activity    BuddyActivity?
-  subActivity String?                @map("sub_activity")
-  expiresAt   DateTime               @map("expires_at")
-  createdAt   DateTime               @default(now()) @map("created_at")
-  updatedAt   DateTime               @updatedAt @map("updated_at")
-  group       Group?                 @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  creator     User                   @relation("BuddyRoomCreators", fields: [creatorId], references: [id], onDelete: Cascade)
-  sessions    BuddySession[]
+  id           String                 @id @default(uuid())
+  name         String
+  scope        BuddySessionScope      @default(public)
+  visibility   BuddySessionVisibility @default(public)
+  code         String                 @unique
+  groupId      String?                @map("group_id")
+  creatorId    String                 @map("creator_id")
+  activity     BuddyActivity?
+  subActivity  String?                @map("sub_activity")
+  expiresAt    DateTime               @map("expires_at")
+  createdAt    DateTime               @default(now()) @map("created_at")
+  updatedAt    DateTime               @updatedAt @map("updated_at")
+  group        Group?                 @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator      User                   @relation("BuddyRoomCreators", fields: [creatorId], references: [id], onDelete: Cascade)
+  sessions     BuddySession[]
+  participants BuddyRoomParticipant[]
 
   @@index([scope, visibility, expiresAt])
   @@index([groupId, expiresAt])
   @@map("buddy_rooms")
+}
+
+model BuddyRoomParticipant {
+  roomId   String    @map("room_id")
+  userId   String    @map("user_id")
+  joinedAt DateTime  @default(now()) @map("joined_at")
+  room     BuddyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, userId])
+  @@index([userId])
+  @@map("buddy_room_participants")
 }
 
 model Follow {
@@ -463,10 +487,11 @@ model ChatProfileOverride {
 }
 
 model UserTheme {
-  userId    String          @id @map("user_id")
-  theme     ThemePreference @default(system)
-  updatedAt DateTime        @updatedAt @map("updated_at")
-  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    String              @id @map("user_id")
+  theme     ThemePreference     @default(system)
+  mapVisual MapVisualPreference @default(streets) @map("map_visual")
+  updatedAt DateTime            @updatedAt @map("updated_at")
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_themes")
 }

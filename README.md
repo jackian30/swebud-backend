@@ -27,7 +27,7 @@ Current release: **0.2.2 beta**
 - Hashtags: search endpoint with post counts for composer suggestions
 - Profiles/social graph: username, bio, avatar/cover, follow/unfollow, searchable profile followers/following, mutual/non-followback
 - Groups: public/private groups, membership, group posts as regular posts, group feed filtering/pagination
-- Chat: message requests, direct/group chat, typing/unread/reactions, validated ActSnap reply references, E2EE foundation fields
+- Chat: message requests, direct/group chat, typing/unread/reactions, validated ActSnap reply references, multi-device friendly E2EE foundation fields
 - Notifications: login, salute, comment, reply, mention, follow, message request
 - Uploads: MediaLibrary-style collections with local storage by default and S3-ready driver config
 
@@ -49,7 +49,7 @@ The feed relevance ranker also uses the current user's recent preferred hashtags
 
 ## Chat documentation
 
-Detailed chat behavior, data flow, realtime events, and the current end-to-end encryption foundation are documented in:
+Detailed chat behavior, data flow, realtime events, and the current multi-device friendly end-to-end encryption foundation are documented in:
 
 - [`docs/chats-and-e2ee.md`](docs/chats-and-e2ee.md)
 
@@ -437,7 +437,7 @@ Then run the full Docker stack and API smokes from the workspace if available.
 - ActSnap reference context is only accepted from trusted ActSnap reply flows; generic chat sends ignore client-supplied ActSnap reference fields.
 - Google-created users do not bypass onboarding: auth responses include `requiresOnboarding` and `onboardingMissing` until username, date of birth, legal consent, and data consent are completed.
 - Turnstile is enforced on register/login when `CLOUDFLARE_TURNSTILE_SECRET_KEY` is set; with no secret it returns a local-dev skip and does not block.
-- E2EE chat support is currently a foundation only, not a production-audited Signal-grade implementation.
+- E2EE chat support is currently a foundation only. Direct buddy chats work across logged-in devices, but this is not a production-audited Signal-grade implementation.
 
 ## Release tags
 

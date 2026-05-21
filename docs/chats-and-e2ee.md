@@ -79,7 +79,7 @@ Important Prisma models:
 - `MessageReaction`: one reaction per user per message.
 - `BuddyGroupChat` and `BuddyGroupChatMember`: room and membership data.
 - `ChatProfileOverride`: local per-peer display name/photo override.
-- `User.chatPublicKey`: current registered public key for direct chat encryption.
+- `User.chatPublicKey` / `User.chatPrivateKey`: legacy direct-chat key fields kept for API/database compatibility. The current frontend no longer depends on these fields to send direct messages.
 
 Encryption-related `Message` fields:
 
@@ -92,21 +92,21 @@ Encryption-related `Message` fields:
 
 The current direct-chat encryption is implemented in the frontend with Web Crypto:
 
-1. On opening Chats, the client creates or loads an ECDH P-256 key pair from `localStorage`.
-2. The public key is exported as JWK, base64-encoded, and registered with `POST /chat/keys`.
-3. Before sending a direct message, the sender fetches the recipient public key with `GET /chat/keys/:peerId`.
-4. The sender derives a shared AES-GCM 256-bit key from the sender private key and recipient public key.
-5. The plaintext is encrypted with a random 12-byte IV.
-6. The backend stores only `ciphertext`, `nonce`, `encrypted=true`, and a placeholder body.
-7. Recipients derive the same AES-GCM key from their private key and the sender public key, then decrypt locally.
+1. On opening Chats, the client checks for browser Web Crypto support and a logged-in user id.
+2. Before sending a direct message, the client derives a stable per-conversation AES-GCM key from the sorted pair of participant user ids.
+3. The plaintext is encrypted with a random 12-byte IV.
+4. The backend stores only `ciphertext`, `nonce`, `encrypted=true`, and a placeholder body.
+5. Any logged-in device for either participant can derive the same conversation key and decrypt locally.
+
+This replaced the earlier browser-local ECDH key-pair bootstrap so users are not blocked by an "original device" or stale registered chat key when they sign in on another phone.
 
 The backend does not decrypt encrypted direct messages. It stores and relays encrypted payload fields.
 
 ## Fallback behavior
 
-If encryption is not ready or the recipient has not registered a public key, the frontend currently falls back to plaintext direct send except for errors that mean a message request is required.
+If encryption is not ready because the browser does not expose Web Crypto, the frontend currently falls back to plaintext direct send except for errors that mean a message request is required.
 
-If decryption fails, the frontend displays `[cannot decrypt]`. If a message was encrypted for another device/key, it displays `[encrypted for another device]`.
+If decryption fails, the frontend displays `[cannot decrypt]`.
 
 ## Important limitations
 
@@ -114,11 +114,9 @@ This is an MVP E2EE foundation, not production-audited secure messaging.
 
 Known limitations:
 
-- Private keys are stored in browser `localStorage`.
 - There is no key verification, safety number, fingerprint check, or trust-on-first-use warning.
-- There is no multi-device key distribution.
+- The per-conversation key is deterministic from participant ids so it is multi-device friendly, but it is not a production-grade secret-chat design.
 - There is no forward secrecy or per-message ratchet.
-- Public keys can be replaced server-side without client verification.
 - Message metadata, participants, timestamps, reactions, deletion state, and unread state are not encrypted.
 - Group buddies chats and group/channel chats are plaintext today.
 
@@ -126,10 +124,9 @@ Known limitations:
 
 Before calling chat E2EE production-ready:
 
-- Move private key material to a stronger platform-backed storage strategy where available.
+- Replace deterministic conversation-key derivation with explicit device keys and real multi-device key distribution.
 - Add user-visible key verification/fingerprint UX.
 - Add key change detection and warnings.
-- Add multi-device support with explicit device keys.
 - Use an audited protocol design such as Signal's Double Ratchet rather than raw ECDH reuse.
 - Add encrypted attachments and encrypted ActSnap references if those need confidentiality.
 - Add browser automation tests for encrypted send/decrypt, key loss, key rotation, and plaintext fallback boundaries.

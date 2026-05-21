@@ -5,7 +5,7 @@ describe('ChatGateway', () => {
   let room: { emit: jest.Mock };
 
   beforeEach(() => {
-    gateway = new ChatGateway({} as any, {} as any, { send: jest.fn() } as any, {} as any);
+    gateway = new ChatGateway({} as any, {} as any, { send: jest.fn() } as any, {} as any, { trackConnection: jest.fn(), trackDisconnection: jest.fn() } as any);
     room = { emit: jest.fn() };
     gateway.server = { to: jest.fn().mockReturnValue(room) } as any;
   });
