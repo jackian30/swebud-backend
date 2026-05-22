@@ -1,5 +1,5 @@
 import { Transform, Type } from 'class-transformer';
-import { PostVisibility } from '@prisma/client';
+import { PostReportReason, PostVisibility, ReportCategory } from '@prisma/client';
 import { ArrayMaxSize, IsArray, IsEnum, IsNumber, IsOptional, IsString, Max, MaxLength, Min, ValidateNested } from 'class-validator';
 
 const normalizeTaggedUsers = ({ value }: { value: unknown }) => Array.isArray(value)
@@ -41,8 +41,10 @@ export class CommentDto {
 }
 
 export class ReportPostDto {
-  @IsOptional() @IsString() reason?: 'spam' | 'harassment' | 'nudity' | 'violence' | 'other';
-  @IsOptional() @IsString() note?: string;
+  @IsOptional() @IsEnum(PostReportReason) reason?: PostReportReason;
+  @IsOptional() @IsEnum(ReportCategory) category?: ReportCategory;
+  @IsOptional() @IsString() @MaxLength(1000) note?: string;
+  @IsOptional() @IsString() @MaxLength(1000) details?: string;
 }
 
 export class UpdatePostDto {

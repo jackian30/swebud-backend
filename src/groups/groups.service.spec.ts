@@ -12,6 +12,7 @@ describe('GroupsService', () => {
       groupMember: {
         findUnique: jest.fn().mockResolvedValue({ userId, groupId, role: 'member' }),
       },
+      $queryRaw: jest.fn().mockResolvedValue([]),
       group: {
         findMany: jest.fn().mockResolvedValue([]),
         findUniqueOrThrow: jest.fn().mockResolvedValue({ allowAnonymousPosts: true }),

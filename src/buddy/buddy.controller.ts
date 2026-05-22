@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } fro
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { BuddyService } from './buddy.service';
-import { BuddyRoomQueryDto, CreateBuddyRoomDto, JoinBuddyRoomDto, NearbyBuddyQueryDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, CreateBuddyRoomDto, InviteBuddyRoomDto, JoinBuddyRoomDto, NearbyBuddyQueryDto, UpsertBuddySessionDto } from './dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('buddy')
@@ -18,5 +18,12 @@ export class BuddyController {
   @Get('rooms') rooms(@CurrentUser() user: AuthUser, @Query() query: BuddyRoomQueryDto) { return this.buddy.rooms(user.id, query); }
   @Post('rooms') createRoom(@CurrentUser() user: AuthUser, @Body() dto: CreateBuddyRoomDto) { return this.buddy.createRoom(user.id, dto); }
   @Post('rooms/join') joinRoom(@CurrentUser() user: AuthUser, @Body() dto: JoinBuddyRoomDto) { return this.buddy.joinRoom(user.id, dto); }
+  @Get('rooms/:id/invite-candidates') inviteCandidates(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('q') q?: string) {
+    return this.buddy.inviteCandidates(user.id, id, q);
+  }
+  @Post('rooms/:id/invites') async inviteRoom(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: InviteBuddyRoomDto) {
+    const result = await this.buddy.inviteRoom(user.id, id, dto);
+    return { sent: result.sent, recipients: result.recipients };
+  }
   @Delete('rooms/:id') closeRoom(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.buddy.closeRoom(user.id, id); }
 }

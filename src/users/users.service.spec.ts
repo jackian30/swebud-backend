@@ -18,6 +18,7 @@ describe('UsersService profile privacy', () => {
       follow: { findUnique: jest.fn().mockResolvedValue(null) },
       closeBuddy: { findUnique: jest.fn().mockResolvedValue(null) },
       followRequest: { findUnique: jest.fn().mockResolvedValue(null) },
+      block: { findUnique: jest.fn().mockResolvedValue(null) },
       post: { findMany: jest.fn().mockResolvedValue([]) },
     };
     const service = new UsersService(prisma as any, { create: jest.fn() } as any);
@@ -74,11 +75,21 @@ describe('UsersService profile reports', () => {
         reportedId: 'reported-1',
         reporterId: 'reporter-1',
         reason: UserReportReason.harassment,
+        category: 'harassment',
         note: 'abusive messages',
+        details: null,
+        status: 'open',
       },
       update: {
         reason: UserReportReason.harassment,
+        category: 'harassment',
         note: 'abusive messages',
+        details: null,
+        status: 'open',
+        reviewedAt: null,
+        reviewedById: null,
+        actionTaken: null,
+        resolutionNote: null,
       },
     });
   });

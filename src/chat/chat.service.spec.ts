@@ -22,6 +22,10 @@ describe('ChatService', () => {
         findUnique: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
       },
+      block: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+      },
       message: {
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'message-1', ...data })),
         findMany: jest.fn().mockResolvedValue([]),
@@ -44,9 +48,13 @@ describe('ChatService', () => {
       hiddenMessage: {
         upsert: jest.fn(),
       },
+      buddyGroupChatReadState: {
+        upsert: jest.fn(),
+      },
       groupMember: {
         findUnique: jest.fn(),
       },
+      $queryRaw: jest.fn().mockResolvedValue([{ count: 0n }]),
       $transaction: jest.fn().mockImplementation((operations) => Promise.all(operations)),
     };
     notifications = { create: jest.fn().mockResolvedValue({}) };
@@ -58,6 +66,21 @@ describe('ChatService', () => {
 
     await expect(service.send(userId, { recipientId: peerId, body: 'hello' })).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks direct messages when either user has blocked the other', async () => {
+    prisma.block.findFirst.mockResolvedValue({ blockerId: peerId });
+    prisma.follow.findUnique.mockResolvedValue({ createdAt: new Date() });
+
+    await expect(service.send(userId, { recipientId: peerId, body: 'hello' })).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('blocks direct chat profile access when either user has blocked the other', async () => {
+    prisma.block.findFirst.mockResolvedValue({ blockerId: peerId });
+
+    await expect(service.buddyProfile(userId, peerId)).rejects.toBeInstanceOf(ForbiddenException);
+    expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
   });
 
   it('sends direct messages between mutual buddies', async () => {
@@ -232,7 +255,16 @@ describe('ChatService', () => {
       where: { senderId: peerId, recipientId: userId, readAt: null },
       data: { readAt: expect.any(Date) },
     });
-    expect(prisma.message.count).toHaveBeenCalledWith({ where: { recipientId: userId, readAt: null } });
+    expect(prisma.message.count).toHaveBeenCalledWith({
+      where: {
+        recipientId: userId,
+        readAt: null,
+        sender: {
+          blocksSent: { none: { blockedId: userId } },
+          blocksReceived: { none: { blockerId: userId } },
+        },
+      },
+    });
   });
 
   it('notifies the message sender when someone else reacts to their message', async () => {

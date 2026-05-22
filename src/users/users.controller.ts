@@ -19,12 +19,13 @@ export class UsersController {
   @Get('me/following') following(@CurrentUser() user: AuthUser, @Query('nonFollowback') nonFollowback?: string) { return this.users.following(user.id, nonFollowback); }
   @Get('me/mutual') mutual(@CurrentUser() user: AuthUser) { return this.users.mutual(user.id); }
   @Get('me/close-buddies') closeBuddies(@CurrentUser() user: AuthUser) { return this.users.closeBuddies(user.id); }
+  @Get('me/blocked') blockedUsers(@CurrentUser() user: AuthUser) { return this.users.blockedUsers(user.id); }
   @Get('me/follow-requests') incomingFollowRequests(@CurrentUser() user: AuthUser) { return this.users.incomingFollowRequests(user.id); }
   @Get('me/follow-requests/sent') sentFollowRequests(@CurrentUser() user: AuthUser) { return this.users.sentFollowRequests(user.id); }
   @Post('me/follow-requests/:id/accept') acceptFollowRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.acceptFollowRequest(user.id, id); }
   @Post('me/follow-requests/:id/decline') declineFollowRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.declineFollowRequest(user.id, id); }
   @Delete('me/follow-requests/:id') cancelFollowRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.cancelFollowRequest(user.id, id); }
-  @Get() search(@Query('q') q?: string) { return this.users.search(q); }
+  @Get() search(@CurrentUser() user: AuthUser, @Query('q') q?: string) { return this.users.search(user.id, q); }
   @Post(':id/close-buddy') addCloseBuddy(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.addCloseBuddy(user.id, id); }
   @Delete(':id/close-buddy') removeCloseBuddy(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.removeCloseBuddy(user.id, id); }
   @Get(':id/followers') profileFollowers(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.profileFollowers(id, user.id); }

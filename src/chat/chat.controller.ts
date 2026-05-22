@@ -11,7 +11,7 @@ export class ChatController {
   constructor(private chat: ChatService, private gateway: ChatGateway) {}
   @Get('keys/me') myKey(@CurrentUser() user: AuthUser) { return this.chat.myKey(user.id); }
   @Post('keys') registerKey(@CurrentUser() user: AuthUser, @Body() dto: RegisterChatKeyDto) { return this.chat.registerKey(user.id, dto); }
-  @Get('keys/:peerId') peerKey(@Param('peerId') peerId: string) { return this.chat.peerKey(peerId); }
+  @Get('keys/:peerId') peerKey(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.peerKey(user.id, peerId); }
   @Get('profiles/buddy/:peerId') buddyProfile(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.buddyProfile(user.id, peerId); }
   @Patch('profiles/buddy/:peerId') updateBuddyProfile(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string, @Body() dto: UpdateChatProfileDto) { return this.chat.updateBuddyProfile(user.id, peerId, dto); }
   @Post('messages') async send(@CurrentUser() user: AuthUser, @Body() dto: SendDirectMessageDto) { const message = await this.chat.send(user.id, dto); this.gateway.emitMessage(dto.recipientId, 'chat:message', message); this.gateway.emitMessage(user.id, 'chat:message', message); return message; }

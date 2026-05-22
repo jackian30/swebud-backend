@@ -37,6 +37,10 @@ type SafeUser = {
   googleEmailVerified?: boolean;
   betaUser?: boolean | null;
   hideProfileBadges?: boolean | null;
+  moderationStatus?: string | null;
+  bannedAt?: Date | null;
+  bannedUntil?: Date | null;
+  banReason?: string | null;
   badges?: Array<{ badge: { code: string; label: string; description?: string | null; iconUrl: string; active?: boolean | null; sortOrder?: number | null } }>;
 };
 
@@ -109,6 +113,7 @@ export class AuthService {
       select: { ...this.safeUserSelect(), passwordHash: true },
     });
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) throw new UnauthorizedException('Invalid credentials');
+    this.assertAccountAllowed(user);
     const activeSessions = await this.prisma.refreshToken.count({ where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } } });
     const safeUser = Object.fromEntries(Object.entries(user).filter(([key]) => key !== 'passwordHash')) as unknown as SafeUser;
     const tokens = await this.issueTokens(safeUser);
@@ -145,6 +150,7 @@ export class AuthService {
         select: this.safeUserSelect(),
       }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
+    this.assertAccountAllowed(user);
     return this.issueTokens(user);
   }
 
@@ -185,6 +191,7 @@ export class AuthService {
 
     await this.prisma.refreshToken.update({ where: { id: match.id }, data: { revokedAt: new Date() } });
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: payload.sub }, select: this.safeUserSelect() });
+    this.assertAccountAllowed(user);
     return this.issueTokens(user);
   }
 
@@ -256,6 +263,17 @@ export class AuthService {
     return { requiresOnboarding: onboardingMissing.length > 0, onboardingMissing };
   }
 
+  private assertAccountAllowed(user: SafeUser) {
+    if (this.isBanned(user)) {
+      throw new UnauthorizedException(user.banReason ? `Account banned: ${user.banReason}` : 'Account banned');
+    }
+  }
+
+  private isBanned(user: SafeUser) {
+    if (user.moderationStatus !== 'banned' && !user.bannedAt) return false;
+    return !user.bannedUntil || user.bannedUntil.getTime() > Date.now();
+  }
+
   private async verifyGoogleIdToken(idToken: string): Promise<GoogleTokenInfo> {
     const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`).catch(() => null);
     if (!response?.ok) throw new UnauthorizedException('Invalid Google token');
@@ -299,5 +317,5 @@ export class AuthService {
       badges: betaUser ? { create: { badge: { connect: { id: 'badge_beta_user' } }, note: 'Auto-assigned to early beta user' } } : undefined,
     };
   }
-  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true, betaUser: true, hideProfileBadges: true, badges: { select: profileBadgeSelect } } as const; }
+  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true, betaUser: true, hideProfileBadges: true, moderationStatus: true, bannedAt: true, bannedUntil: true, banReason: true, badges: { select: profileBadgeSelect } } as const; }
 }

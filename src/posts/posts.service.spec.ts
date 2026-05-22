@@ -21,6 +21,9 @@ describe('PostsService', () => {
       comment: {
         findMany: jest.fn().mockResolvedValue([]),
       },
+      follow: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
     };
     notifications = { create: jest.fn().mockResolvedValue({}) };
     service = new PostsService(prisma, notifications);
@@ -97,6 +100,48 @@ describe('PostsService', () => {
           ],
         },
       }),
+    }));
+  });
+
+  it('allows tagging users the author follows', async () => {
+    prisma.follow.findMany.mockResolvedValueOnce([{ followingId: 'user-2' }]);
+
+    await service.create(authorId, { text: 'with tag', taggedUserIds: ['user-2'] });
+
+    expect(prisma.follow.findMany).toHaveBeenCalledWith({
+      where: { followerId: authorId, followingId: { in: ['user-2'] } },
+      select: { followingId: true },
+    });
+    expect(prisma.post.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        taggedUsers: { create: [{ userId: 'user-2' }] },
+      }),
+    }));
+  });
+
+  it('rejects tagging users the author does not follow', async () => {
+    prisma.follow.findMany.mockResolvedValueOnce([]);
+
+    await expect(service.create(authorId, { text: 'bad tag', taggedUserIds: ['user-2'] })).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.post.create).not.toHaveBeenCalled();
+  });
+
+  it('only notifies mentioned users the author follows', async () => {
+    prisma.user.findMany.mockResolvedValueOnce([{ id: 'user-2' }]);
+
+    await service.create(authorId, { text: 'hello @seedbuddy' });
+
+    expect(prisma.user.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        OR: [{ username: { equals: 'seedbuddy', mode: 'insensitive' } }],
+        followers: { some: { followerId: authorId } },
+      }),
+      select: { id: true },
+    }));
+    expect(notifications.create).toHaveBeenCalledWith(expect.objectContaining({
+      userId: 'user-2',
+      actorId: authorId,
+      type: 'mention',
     }));
   });
 

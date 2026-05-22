@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AddBuddyGroupParticipantsDto, CreateBuddyGroupChatDto, MessageReactionDto, RegisterChatKeyDto, SendBuddyGroupMessageDto, SendDirectMessageDto, UpdateChatProfileDto } from './dto';
@@ -19,12 +20,14 @@ export class ChatService {
     return this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, chatPublicKey: true, chatPrivateKey: true } });
   }
 
-  peerKey(peerId: string) {
+  async peerKey(userId: string, peerId: string) {
+    await this.ensureNotBlocked(userId, peerId);
     return this.prisma.user.findUniqueOrThrow({ where: { id: peerId }, select: { id: true, chatPublicKey: true } });
   }
 
   async buddyProfile(userId: string, peerId: string) {
     if (userId === peerId) throw new BadRequestException('Cannot customize a chat with yourself');
+    await this.ensureNotBlocked(userId, peerId);
     const [peer, override] = await Promise.all([
       this.prisma.user.findUniqueOrThrow({ where: { id: peerId }, select: { id: true, displayName: true, username: true, profileImageUrl: true } }),
       this.prisma.chatProfileOverride.findUnique({ where: { ownerId_peerId: { ownerId: userId, peerId } } }),
@@ -34,6 +37,7 @@ export class ChatService {
 
   async updateBuddyProfile(userId: string, peerId: string, dto: UpdateChatProfileDto) {
     if (userId === peerId) throw new BadRequestException('Cannot customize a chat with yourself');
+    await this.ensureNotBlocked(userId, peerId);
     await this.prisma.user.findUniqueOrThrow({ where: { id: peerId }, select: { id: true } });
     const displayName = dto.displayName?.trim() || null;
     const profileImageUrl = dto.profileImageUrl?.trim() || null;
@@ -46,6 +50,7 @@ export class ChatService {
 
   async send(senderId: string, dto: SendDirectMessageDto, trustedReference = false) {
     if (senderId === dto.recipientId) throw new BadRequestException('Cannot message yourself');
+    await this.ensureNotBlocked(senderId, dto.recipientId);
     await this.ensureMutual(senderId, dto.recipientId);
     const referenceData = await this.directReferenceData(senderId, dto.recipientId, dto, trustedReference);
     return this.prisma.message.create({
@@ -64,6 +69,7 @@ export class ChatService {
 
   async request(senderId: string, dto: SendDirectMessageDto, trustedReference = false) {
     if (senderId === dto.recipientId) throw new BadRequestException('Cannot message yourself');
+    await this.ensureNotBlocked(senderId, dto.recipientId);
     if (await this.isMutual(senderId, dto.recipientId)) return this.send(senderId, dto, trustedReference);
     const request = await this.prisma.messageRequest.create({ data: { senderId, recipientId: dto.recipientId, body: dto.encrypted ? '[encrypted request]' : dto.body.trim(), ...this.referenceData(dto, trustedReference) }, include: this.requestInclude() });
     void this.notifications.create({ userId: dto.recipientId, actorId: senderId, type: 'message_request', entityId: request.id, message: 'sent you a message request' });
@@ -72,13 +78,25 @@ export class ChatService {
 
   async requests(userId: string) {
     await this.acceptMutualRequests(userId);
-    return this.prisma.messageRequest.findMany({ where: { recipientId: userId, status: 'pending' }, orderBy: { createdAt: 'desc' }, include: this.requestInclude() });
+    return this.prisma.messageRequest.findMany({
+      where: {
+        recipientId: userId,
+        status: 'pending',
+        sender: {
+          blocksSent: { none: { blockedId: userId } },
+          blocksReceived: { none: { blockerId: userId } },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: this.requestInclude(),
+    });
   }
 
-  async accept(userId: string, id: string) { const req = await this.prisma.messageRequest.findUniqueOrThrow({ where: { id } }); if (req.recipientId !== userId) throw new ForbiddenException(); await this.prisma.message.create({ data: { senderId: req.senderId, recipientId: req.recipientId, body: req.body, referenceType: req.referenceType, referenceId: req.referenceId, referenceMediaUrl: req.referenceMediaUrl, referenceText: req.referenceText, referenceAuthorName: req.referenceAuthorName } }); return this.prisma.messageRequest.update({ where: { id }, data: { status: 'accepted' }, include: this.requestInclude() }); }
+  async accept(userId: string, id: string) { const req = await this.prisma.messageRequest.findUniqueOrThrow({ where: { id } }); if (req.recipientId !== userId) throw new ForbiddenException(); await this.ensureNotBlocked(req.senderId, req.recipientId); await this.prisma.message.create({ data: { senderId: req.senderId, recipientId: req.recipientId, body: req.body, referenceType: req.referenceType, referenceId: req.referenceId, referenceMediaUrl: req.referenceMediaUrl, referenceText: req.referenceText, referenceAuthorName: req.referenceAuthorName } }); return this.prisma.messageRequest.update({ where: { id }, data: { status: 'accepted' }, include: this.requestInclude() }); }
   async decline(userId: string, id: string) { const req = await this.prisma.messageRequest.findUniqueOrThrow({ where: { id } }); if (req.recipientId !== userId) throw new ForbiddenException(); return this.prisma.messageRequest.update({ where: { id }, data: { status: 'declined' }, include: this.requestInclude() }); }
 
-  conversation(userId: string, peerId: string) {
+  async conversation(userId: string, peerId: string) {
+    await this.ensureNotBlocked(userId, peerId);
     return this.prisma.message.findMany({
       where: {
         groupId: null,
@@ -92,7 +110,7 @@ export class ChatService {
 
   async conversations(userId: string) {
     await this.acceptMutualRequests(userId);
-    const [mutualFollows, directMessages] = await Promise.all([
+    const [mutualFollows, directMessages, blockedPeerIds] = await Promise.all([
       this.prisma.follow.findMany({
         where: {
           followerId: userId,
@@ -106,12 +124,15 @@ export class ChatService {
         take: 300,
         include: this.messageInclude(),
       }),
+      this.blockedPeerIds(userId),
     ]);
     const peers = new Map<string, any>();
-    for (const follow of mutualFollows) peers.set(follow.following.id, follow.following);
+    for (const follow of mutualFollows) {
+      if (!blockedPeerIds.has(follow.following.id)) peers.set(follow.following.id, follow.following);
+    }
     for (const message of directMessages) {
       const peer = message.senderId === userId ? message.recipient : message.sender;
-      if (peer?.id) peers.set(peer.id, peer);
+      if (peer?.id && !blockedPeerIds.has(peer.id)) peers.set(peer.id, peer);
     }
     const peerList = [...peers.values()];
     const peerIds = peerList.map((peer) => peer.id).filter(Boolean);
@@ -136,12 +157,15 @@ export class ChatService {
   }
 
   async buddyGroupChats(userId: string) {
-    const rooms = await this.prisma.buddyGroupChat.findMany({
-      where: { members: { some: { userId } } },
-      orderBy: { updatedAt: 'desc' },
-      include: this.buddyGroupInclude(),
-    });
-    return rooms.map((room) => this.withLastBuddyGroupMessage(room));
+    const [rooms, unreadByRoom] = await Promise.all([
+      this.prisma.buddyGroupChat.findMany({
+        where: { members: { some: { userId } } },
+        orderBy: { updatedAt: 'desc' },
+        include: this.buddyGroupInclude(),
+      }),
+      this.buddyGroupUnreadCounts(userId),
+    ]);
+    return rooms.map((room) => ({ ...this.withLastBuddyGroupMessage(room), unreadCount: unreadByRoom.get(room.id) ?? 0 }));
   }
 
   async buddyGroupChat(userId: string, id: string) {
@@ -178,7 +202,9 @@ export class ChatService {
 
   async buddyGroupMessages(userId: string, id: string) {
     await this.ensureBuddyGroupMember(userId, id);
-    return this.prisma.message.findMany({ where: { buddyGroupChatId: id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+    const messages = await this.prisma.message.findMany({ where: { buddyGroupChatId: id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+    await this.markBuddyGroupRead(userId, id);
+    return messages;
   }
 
   async sendBuddyGroupMessage(userId: string, id: string, dto: SendBuddyGroupMessageDto) {
@@ -193,8 +219,21 @@ export class ChatService {
   }
 
   async unreadCount(userId: string) {
-    const count = await this.prisma.message.count({ where: { recipientId: userId, readAt: null } });
-    return { count };
+    const [directCount, groupUnread, buddyGroupUnread] = await Promise.all([
+      this.prisma.message.count({
+        where: {
+          recipientId: userId,
+          readAt: null,
+          sender: {
+            blocksSent: { none: { blockedId: userId } },
+            blocksReceived: { none: { blockerId: userId } },
+          },
+        },
+      }),
+      this.groupUnreadCount(userId),
+      this.buddyGroupUnreadCount(userId),
+    ]);
+    return { count: directCount + groupUnread + buddyGroupUnread };
   }
 
   async markRead(userId: string, peerId: string) {
@@ -304,6 +343,31 @@ export class ChatService {
     if (!(await this.isMutual(userId, peerId))) throw new ForbiddenException('Send a message request first.');
   }
 
+  private async ensureNotBlocked(userId: string, peerId: string) {
+    if (await this.hasBlockBetween(userId, peerId)) throw new ForbiddenException('You cannot message this user.');
+  }
+
+  private async hasBlockBetween(userId: string, peerId: string) {
+    const block = await this.prisma.block.findFirst({
+      where: {
+        OR: [
+          { blockerId: userId, blockedId: peerId },
+          { blockerId: peerId, blockedId: userId },
+        ],
+      },
+      select: { blockerId: true },
+    });
+    return Boolean(block);
+  }
+
+  private async blockedPeerIds(userId: string) {
+    const blocks = await this.prisma.block.findMany({
+      where: { OR: [{ blockerId: userId }, { blockedId: userId }] },
+      select: { blockerId: true, blockedId: true },
+    });
+    return new Set(blocks.map((block) => block.blockerId === userId ? block.blockedId : block.blockerId));
+  }
+
   private async isMutual(userId: string, peerId: string) {
     const [following, followsMe] = await Promise.all([
       this.prisma.follow.findUnique({ where: { followerId_followingId: { followerId: userId, followingId: peerId } } }),
@@ -319,7 +383,7 @@ export class ChatService {
     });
     const mutualRequests = [];
     for (const request of pending) {
-      if (await this.isMutual(request.senderId, request.recipientId)) mutualRequests.push(request);
+      if ((await this.isMutual(request.senderId, request.recipientId)) && !(await this.hasBlockBetween(request.senderId, request.recipientId))) mutualRequests.push(request);
     }
     await Promise.all(mutualRequests.map((request) => this.prisma.$transaction([
       this.prisma.message.create({ data: { senderId: request.senderId, recipientId: request.recipientId, body: request.body, referenceType: request.referenceType, referenceId: request.referenceId, referenceMediaUrl: request.referenceMediaUrl, referenceText: request.referenceText, referenceAuthorName: request.referenceAuthorName } }),
@@ -343,6 +407,92 @@ export class ChatService {
 
   private withLastBuddyGroupMessage(room: any) {
     return { ...room, lastMessage: room.messages?.[0] ?? null, messages: undefined };
+  }
+
+  private async markBuddyGroupRead(userId: string, buddyGroupChatId: string) {
+    await this.prisma.buddyGroupChatReadState.upsert({
+      where: { userId_buddyGroupChatId: { userId, buddyGroupChatId } },
+      create: { userId, buddyGroupChatId, lastReadAt: new Date() },
+      update: { lastReadAt: new Date() },
+    });
+  }
+
+  private async groupUnreadCount(userId: string) {
+    const rows = await this.prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
+      SELECT COUNT(*)::bigint AS count
+      FROM "messages" AS message
+      INNER JOIN "group_members" AS member
+        ON member."group_id" = message."group_id"
+        AND member."user_id" = ${userId}
+      LEFT JOIN "group_chat_channels" AS channel
+        ON channel."id" = message."channel_id"
+      LEFT JOIN "group_chat_channel_members" AS channel_member
+        ON channel_member."channel_id" = message."channel_id"
+        AND channel_member."user_id" = ${userId}
+      LEFT JOIN "group_chat_read_states" AS read_state
+        ON read_state."user_id" = ${userId}
+        AND read_state."channel_id" = message."channel_id"
+      WHERE message."group_id" IS NOT NULL
+        AND message."sender_id" <> ${userId}
+        AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
+        AND NOT EXISTS (
+          SELECT 1 FROM "hidden_messages" AS hidden
+          WHERE hidden."message_id" = message."id"
+            AND hidden."user_id" = ${userId}
+        )
+        AND (
+          channel."id" IS NULL
+          OR channel."visibility" = 'public'::group_chat_channel_visibility
+          OR member."role" IN ('owner'::group_role, 'admin'::group_role)
+          OR channel_member."user_id" IS NOT NULL
+        )
+    `);
+    return Number(rows[0]?.count ?? 0n);
+  }
+
+  private async buddyGroupUnreadCount(userId: string) {
+    const rows = await this.prisma.$queryRaw<{ count: bigint }[]>(Prisma.sql`
+      SELECT COUNT(*)::bigint AS count
+      FROM "messages" AS message
+      INNER JOIN "buddy_group_chat_members" AS member
+        ON member."buddy_group_chat_id" = message."buddy_group_chat_id"
+        AND member."user_id" = ${userId}
+      LEFT JOIN "buddy_group_chat_read_states" AS read_state
+        ON read_state."user_id" = ${userId}
+        AND read_state."buddy_group_chat_id" = message."buddy_group_chat_id"
+      WHERE message."buddy_group_chat_id" IS NOT NULL
+        AND message."sender_id" <> ${userId}
+        AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
+        AND NOT EXISTS (
+          SELECT 1 FROM "hidden_messages" AS hidden
+          WHERE hidden."message_id" = message."id"
+            AND hidden."user_id" = ${userId}
+        )
+    `);
+    return Number(rows[0]?.count ?? 0n);
+  }
+
+  private async buddyGroupUnreadCounts(userId: string) {
+    const rows = await this.prisma.$queryRaw<{ buddyGroupChatId: string; count: bigint }[]>(Prisma.sql`
+      SELECT message."buddy_group_chat_id" AS "buddyGroupChatId", COUNT(*)::bigint AS count
+      FROM "messages" AS message
+      INNER JOIN "buddy_group_chat_members" AS member
+        ON member."buddy_group_chat_id" = message."buddy_group_chat_id"
+        AND member."user_id" = ${userId}
+      LEFT JOIN "buddy_group_chat_read_states" AS read_state
+        ON read_state."user_id" = ${userId}
+        AND read_state."buddy_group_chat_id" = message."buddy_group_chat_id"
+      WHERE message."buddy_group_chat_id" IS NOT NULL
+        AND message."sender_id" <> ${userId}
+        AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
+        AND NOT EXISTS (
+          SELECT 1 FROM "hidden_messages" AS hidden
+          WHERE hidden."message_id" = message."id"
+            AND hidden."user_id" = ${userId}
+        )
+      GROUP BY message."buddy_group_chat_id"
+    `);
+    return new Map(rows.map((row) => [row.buddyGroupChatId, Number(row.count)]));
   }
 
   private buddyGroupInclude() {

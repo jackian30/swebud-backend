@@ -1,7 +1,8 @@
 import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { GroupReportReason, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateGroupChannelDto, CreateGroupDto, GroupMessageDto, GroupPostDto, UpdateGroupSettingsDto } from './dto';
+import { CreateGroupChannelDto, CreateGroupDto, GroupMessageDto, GroupPostDto, ReportGroupDto, UpdateGroupSettingsDto } from './dto';
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
 const DEFAULT_GROUP_CHANNEL_NAME = 'main';
@@ -11,8 +12,8 @@ const DEFAULT_GROUP_CHANNEL_DESCRIPTION = 'Main channel';
 export class GroupsService {
   constructor(private prisma: PrismaService) {}
 
-  create(userId: string, dto: CreateGroupDto) {
-    return this.prisma.group.create({
+  async create(userId: string, dto: CreateGroupDto) {
+    const group = await this.prisma.group.create({
       data: {
         name: dto.name.trim(),
         slug: dto.slug.toLowerCase(),
@@ -22,8 +23,9 @@ export class GroupsService {
         members: { create: { userId, role: 'owner' } },
         chatChannels: { create: { name: DEFAULT_GROUP_CHANNEL_NAME, description: DEFAULT_GROUP_CHANNEL_DESCRIPTION, creatorId: userId } },
       },
-      include: this.include(),
+      include: this.include(true),
     });
+    return { ...group, isMember: true, capabilities: this.capabilities('owner') };
   }
 
   async list(userId?: string) {
@@ -32,23 +34,28 @@ export class GroupsService {
       orderBy: { createdAt: 'desc' },
       include: this.include(Boolean(userId)),
     });
-    return groups.map((group) => {
+    const unreadByGroup = userId ? await this.unreadCountByGroup(userId) : new Map<string, number>();
+    return this.sortGroupsByActivity(groups.map((group) => {
       const { members, messages, ...summary } = group;
       return {
         ...summary,
         isMember: userId ? members.some((member) => member.userId === userId) : false,
         lastMessage: messages[0] ?? null,
+        unreadCount: unreadByGroup.get(group.id) ?? 0,
       };
-    });
+    }));
   }
 
   async mine(userId: string) {
-    const groups = await this.prisma.group.findMany({
+    const [groups, unreadByGroup] = await Promise.all([
+      this.prisma.group.findMany({
       where: { members: { some: { userId } } },
       orderBy: { createdAt: 'desc' },
       include: this.include(true),
-    });
-    return groups.map((group) => {
+      }),
+      this.unreadCountByGroup(userId),
+    ]);
+    return this.sortGroupsByActivity(groups.map((group) => {
       const { members, messages, ...summary } = group;
       const role = members.find((member) => member.userId === userId)?.role;
       return {
@@ -56,8 +63,9 @@ export class GroupsService {
         isMember: true,
         capabilities: this.capabilities(role),
         lastMessage: messages[0] ?? null,
+        unreadCount: unreadByGroup.get(group.id) ?? 0,
       };
-    });
+    }));
   }
 
   async get(userId: string, slug: string) {
@@ -96,6 +104,20 @@ export class GroupsService {
       include: this.include(true),
     });
     return { ...group, isMember: true, capabilities: this.capabilities(role) };
+  }
+
+  async report(userId: string, groupId: string, dto: ReportGroupDto) {
+    await this.ensureCanView(userId, groupId);
+    const reason = dto.reason ?? GroupReportReason.other;
+    const category = dto.category ?? this.reportCategoryFromReason(reason);
+    const note = dto.note?.trim() || null;
+    const details = dto.details?.trim() || null;
+    await this.prisma.groupReport.upsert({
+      where: { groupId_userId: { groupId, userId } },
+      create: { groupId, userId, reason, category, note, details, status: 'open' },
+      update: { reason, category, note, details, status: 'open', reviewedAt: null, reviewedById: null, actionTaken: null, resolutionNote: null },
+    });
+    return { ok: true };
   }
 
   async updateRole(userId: string, groupId: string, memberId: string, nextRole: 'owner' | 'admin' | 'moderator' | 'member') {
@@ -181,18 +203,25 @@ export class GroupsService {
     await this.ensureMember(userId, groupId);
     await this.ensureDefaultChannel(groupId, userId);
     const role = await this.memberRole(userId, groupId);
-    return this.prisma.groupChatChannel.findMany({
-      where: {
-        groupId,
-        OR: [
-          { visibility: 'public' },
-          ...(this.canManage(role) ? [{ visibility: 'private' as const }] : []),
-          { allowedUsers: { some: { userId } } },
-        ],
-      },
-      orderBy: [{ name: 'asc' }],
-      include: this.channelInclude(),
-    }).then((channels) => this.sortDefaultChannelFirst(channels));
+    const [channels, unreadByChannel] = await Promise.all([
+      this.prisma.groupChatChannel.findMany({
+        where: {
+          groupId,
+          OR: [
+            { visibility: 'public' },
+            ...(this.canManage(role) ? [{ visibility: 'private' as const }] : []),
+            { allowedUsers: { some: { userId } } },
+          ],
+        },
+        orderBy: [{ name: 'asc' }],
+        include: this.channelInclude(),
+      }),
+      this.unreadCountByChannel(userId, groupId),
+    ]);
+    return this.sortDefaultChannelFirst(channels).map((channel) => ({
+      ...channel,
+      unreadCount: unreadByChannel.get(channel.id) ?? 0,
+    }));
   }
 
   async createChannel(userId: string, groupId: string, dto: CreateGroupChannelDto) {
@@ -218,7 +247,9 @@ export class GroupsService {
   async messages(userId: string, groupId: string, channelId?: string) {
     await this.ensureMember(userId, groupId);
     const channel = channelId ? await this.ensureChannelAccess(userId, groupId, channelId) : await this.defaultChannel(groupId, userId);
-    return this.prisma.message.findMany({ where: { groupId, channelId: channel.id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+    const messages = await this.prisma.message.findMany({ where: { groupId, channelId: channel.id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
+    await this.markChannelRead(userId, groupId, channel.id);
+    return messages;
   }
 
   async sendMessage(userId: string, groupId: string, channelId: string | undefined, dto: GroupMessageDto) {
@@ -232,6 +263,23 @@ export class GroupsService {
     if (!body) throw new BadRequestException('Message cannot be empty');
     const referenceData = await this.messageReferenceData(groupId, channel.id, dto);
     return this.prisma.message.create({ data: { senderId: userId, groupId, channelId: channel.id, body, ...referenceData }, include: this.messageInclude() });
+  }
+
+  async messageRecipients(groupId: string, channelId: string) {
+    const channel = await this.prisma.groupChatChannel.findUniqueOrThrow({
+      where: { id: channelId },
+      select: { groupId: true, visibility: true },
+    });
+    if (channel.groupId !== groupId) throw new ForbiddenException();
+    if (channel.visibility !== 'private') {
+      const members = await this.prisma.groupMember.findMany({ where: { groupId }, select: { userId: true } });
+      return members.map((member) => member.userId);
+    }
+    const [managers, allowed] = await Promise.all([
+      this.prisma.groupMember.findMany({ where: { groupId, role: { in: ['owner', 'admin'] } }, select: { userId: true } }),
+      this.prisma.groupChatChannelMember.findMany({ where: { channelId }, select: { userId: true } }),
+    ]);
+    return [...new Set([...managers.map((member) => member.userId), ...allowed.map((member) => member.userId)])];
   }
 
   private async memberRole(userId: string, groupId: string) {
@@ -250,6 +298,91 @@ export class GroupsService {
     };
   }
 
+  private sortGroupsByActivity<T extends { createdAt?: Date; lastMessage?: { createdAt: Date } | null }>(groups: T[]) {
+    return [...groups].sort((left, right) => this.groupActivityTime(right) - this.groupActivityTime(left));
+  }
+
+  private groupActivityTime(group: { createdAt?: Date; lastMessage?: { createdAt: Date } | null }) {
+    return (group.lastMessage?.createdAt ?? group.createdAt ?? new Date(0)).getTime();
+  }
+
+  private async markChannelRead(userId: string, groupId: string, channelId: string) {
+    await this.prisma.groupChatReadState.upsert({
+      where: { userId_channelId: { userId, channelId } },
+      create: { userId, groupId, channelId, lastReadAt: new Date() },
+      update: { groupId, lastReadAt: new Date() },
+    });
+  }
+
+  private async unreadCountByGroup(userId: string) {
+    const rows = await this.prisma.$queryRaw<{ groupId: string; count: bigint }[]>(Prisma.sql`
+      SELECT message."group_id" AS "groupId", COUNT(*)::bigint AS count
+      FROM "messages" AS message
+      INNER JOIN "group_members" AS member
+        ON member."group_id" = message."group_id"
+        AND member."user_id" = ${userId}
+      LEFT JOIN "group_chat_channels" AS channel
+        ON channel."id" = message."channel_id"
+      LEFT JOIN "group_chat_channel_members" AS channel_member
+        ON channel_member."channel_id" = message."channel_id"
+        AND channel_member."user_id" = ${userId}
+      LEFT JOIN "group_chat_read_states" AS read_state
+        ON read_state."user_id" = ${userId}
+        AND read_state."channel_id" = message."channel_id"
+      WHERE message."group_id" IS NOT NULL
+        AND message."sender_id" <> ${userId}
+        AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
+        AND NOT EXISTS (
+          SELECT 1 FROM "hidden_messages" AS hidden
+          WHERE hidden."message_id" = message."id"
+            AND hidden."user_id" = ${userId}
+        )
+        AND (
+          channel."id" IS NULL
+          OR channel."visibility" = 'public'::group_chat_channel_visibility
+          OR member."role" IN ('owner'::group_role, 'admin'::group_role)
+          OR channel_member."user_id" IS NOT NULL
+        )
+      GROUP BY message."group_id"
+    `);
+    return new Map(rows.map((row) => [row.groupId, Number(row.count)]));
+  }
+
+  private async unreadCountByChannel(userId: string, groupId: string) {
+    const rows = await this.prisma.$queryRaw<{ channelId: string; count: bigint }[]>(Prisma.sql`
+      SELECT message."channel_id" AS "channelId", COUNT(*)::bigint AS count
+      FROM "messages" AS message
+      INNER JOIN "group_members" AS member
+        ON member."group_id" = message."group_id"
+        AND member."user_id" = ${userId}
+      LEFT JOIN "group_chat_channels" AS channel
+        ON channel."id" = message."channel_id"
+      LEFT JOIN "group_chat_channel_members" AS channel_member
+        ON channel_member."channel_id" = message."channel_id"
+        AND channel_member."user_id" = ${userId}
+      LEFT JOIN "group_chat_read_states" AS read_state
+        ON read_state."user_id" = ${userId}
+        AND read_state."channel_id" = message."channel_id"
+      WHERE message."group_id" = ${groupId}
+        AND message."channel_id" IS NOT NULL
+        AND message."sender_id" <> ${userId}
+        AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
+        AND NOT EXISTS (
+          SELECT 1 FROM "hidden_messages" AS hidden
+          WHERE hidden."message_id" = message."id"
+            AND hidden."user_id" = ${userId}
+        )
+        AND (
+          channel."id" IS NULL
+          OR channel."visibility" = 'public'::group_chat_channel_visibility
+          OR member."role" IN ('owner'::group_role, 'admin'::group_role)
+          OR channel_member."user_id" IS NOT NULL
+        )
+      GROUP BY message."channel_id"
+    `);
+    return new Map(rows.map((row) => [row.channelId, Number(row.count)]));
+  }
+
   private presentPost(post: any) {
     const { _count, ...presented } = post ?? {};
     const withRepostCount = { ...presented, repostCount: _count?.reposts ?? 0 };
@@ -265,6 +398,11 @@ export class GroupsService {
   private async ensureMember(userId: string, groupId: string) {
     const member = await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
     if (!member) throw new ForbiddenException('Join the group first');
+  }
+
+  private reportCategoryFromReason(reason: GroupReportReason) {
+    if (reason === GroupReportReason.nudity) return 'sexual_content';
+    return reason;
   }
 
   private normalizeChannelName(name: string) {

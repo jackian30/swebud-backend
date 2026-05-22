@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
+import { GroupReportReason, ReportCategory } from '@prisma/client';
+import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
 
 export class CreateGroupDto {
   @IsString() name!: string;
@@ -51,4 +52,11 @@ export class CreateGroupChannelDto {
   @IsOptional() @IsIn(['public', 'private']) visibility?: 'public' | 'private';
   @IsOptional() @IsIn(['everyone', 'admins']) messagePolicy?: 'everyone' | 'admins';
   @IsOptional() @IsArray() @IsString({ each: true }) memberIds?: string[];
+}
+
+export class ReportGroupDto {
+  @IsOptional() @IsEnum(GroupReportReason) reason?: GroupReportReason;
+  @IsOptional() @IsEnum(ReportCategory) category?: ReportCategory;
+  @IsOptional() @IsString() @MaxLength(1000) note?: string;
+  @IsOptional() @IsString() @MaxLength(1000) details?: string;
 }

@@ -175,10 +175,13 @@ export class PostsService {
   async report(userId: string, postId: string, dto: ReportPostDto) {
     await this.ensureCanViewPost(userId, postId);
     const reason = dto.reason ?? 'other';
+    const category = dto.category ?? this.reportCategoryFromReason(reason);
+    const note = dto.note?.trim() || null;
+    const details = dto.details?.trim() || null;
     return this.prisma.postReport.upsert({
       where: { postId_userId: { postId, userId } },
-      create: { postId, userId, reason, note: dto.note?.trim() },
-      update: { reason, note: dto.note?.trim() },
+      create: { postId, userId, reason, category, note, details, status: 'open' },
+      update: { reason, category, note, details, status: 'open', reviewedAt: null, reviewedById: null, actionTaken: null, resolutionNote: null },
     }).then(() => ({ ok: true }));
   }
 
@@ -358,13 +361,21 @@ export class PostsService {
     }));
   }
 
+  private reportCategoryFromReason(reason: ReportPostDto['reason']) {
+    if (reason === 'nudity') return 'sexual_content';
+    return reason ?? 'other';
+  }
+
   private extractMentions(text: string) { return [...text.matchAll(/@([\p{L}\p{N}._-]+)/gu)].map((m) => m[1]).filter(Boolean); }
 
   private async notifyMentionedUsers(actorId: string, postId: string, text: string, message: string) {
     const mentions = [...new Set(this.extractMentions(text))];
     if (!mentions.length) return;
     const users = await this.prisma.user.findMany({
-      where: { OR: mentions.map((mention) => ({ username: { equals: mention, mode: 'insensitive' as const } })) },
+      where: {
+        OR: mentions.map((mention) => ({ username: { equals: mention, mode: 'insensitive' as const } })),
+        followers: { some: { followerId: actorId } },
+      },
       select: { id: true },
     });
     for (const user of users) void this.notifications.create({ userId: user.id, actorId, type: 'mention', entityId: postId, message });
@@ -379,12 +390,12 @@ export class PostsService {
   private async validateTaggedUsers(actorId: string, taggedUserIds?: string[]) {
     const uniqueIds = [...new Set(taggedUserIds ?? [])].filter(Boolean);
     if (!uniqueIds.length) return [];
-    const visibleUsers = await this.prisma.user.findMany({
-      where: { id: { in: uniqueIds }, ...visibleAuthorWhere(actorId) },
-      select: { id: true },
+    const following = await this.prisma.follow.findMany({
+      where: { followerId: actorId, followingId: { in: uniqueIds } },
+      select: { followingId: true },
     });
-    const visibleIds = new Set(visibleUsers.map((user) => user.id));
-    const invalidIds = uniqueIds.filter((id) => !visibleIds.has(id));
+    const followingIds = new Set(following.map((follow) => follow.followingId));
+    const invalidIds = uniqueIds.filter((id) => !followingIds.has(id));
     if (invalidIds.length) throw new BadRequestException('One or more tagged users cannot be tagged');
     return uniqueIds;
   }

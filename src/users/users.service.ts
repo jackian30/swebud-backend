@@ -1,4 +1,5 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { CompleteUserOnboardingDto, ReportUserDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
@@ -73,12 +74,16 @@ export class UsersService {
   async profile(viewerId: string, identifier: string) {
     const userId = await this.resolveUserId(identifier);
     const canViewProfile = Boolean(await this.prisma.user.findFirst({ where: { id: userId, ...visibleAuthorWhere(viewerId) }, select: { id: true } }));
-    const [isFollowing, followsMe, isCloseBuddy, pendingFollowRequest] = await Promise.all([
+    const [isFollowing, followsMe, isCloseBuddy, pendingFollowRequest, blockSent, blockReceived] = await Promise.all([
       this.prisma.follow.findUnique({ where: { followerId_followingId: { followerId: viewerId, followingId: userId } } }),
       this.prisma.follow.findUnique({ where: { followerId_followingId: { followerId: userId, followingId: viewerId } } }),
       this.prisma.closeBuddy.findUnique({ where: { ownerId_buddyId: { ownerId: userId, buddyId: viewerId } } }),
       this.prisma.followRequest.findUnique({ where: { requesterId_recipientId: { requesterId: viewerId, recipientId: userId } } }),
+      this.prisma.block.findUnique({ where: { blockerId_blockedId: { blockerId: viewerId, blockedId: userId } } }),
+      this.prisma.block.findUnique({ where: { blockerId_blockedId: { blockerId: userId, blockedId: viewerId } } }),
     ]);
+    const isBlockedByMe = Boolean(blockSent);
+    const hasBlockedMe = Boolean(blockReceived);
     if (!canViewProfile) {
       const profile = await this.prisma.user.findUniqueOrThrow({
         where: { id: userId },
@@ -92,6 +97,8 @@ export class UsersService {
         followsMe: Boolean(followsMe),
         isCloseBuddy: Boolean(isCloseBuddy),
         isPrivateLocked: true,
+        isBlockedByMe,
+        hasBlockedMe,
         followRequestStatus: pendingFollowRequest?.status ?? null,
       };
     }
@@ -135,9 +142,26 @@ export class UsersService {
         taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' } },
       },
     });
-    return { ...exposeProfileBadges(exposeActivityPersonas(profile)), posts, isFollowing: Boolean(isFollowing), followsMe: Boolean(followsMe), isCloseBuddy: Boolean(isCloseBuddy), isPrivateLocked: false, followRequestStatus: pendingFollowRequest?.status ?? null };
+    return { ...exposeProfileBadges(exposeActivityPersonas(profile)), posts, isFollowing: Boolean(isFollowing), followsMe: Boolean(followsMe), isCloseBuddy: Boolean(isCloseBuddy), isPrivateLocked: false, isBlockedByMe, hasBlockedMe, followRequestStatus: pendingFollowRequest?.status ?? null };
   }
-  search(q = '') { return this.prisma.user.findMany({ where: q ? { OR: [{ email: { contains: q, mode: 'insensitive' } }, { displayName: { contains: q, mode: 'insensitive' } }, { username: { contains: q.toLowerCase().replace(/^@/, ''), mode: 'insensitive' } }] } : {}, take: 25, orderBy: { createdAt: 'desc' }, select: this.publicSelect() }).then((users) => users.map((user) => exposeProfileBadges(exposeActivityPersonas(user)))); }
+  search(viewerId: string, q = '') {
+    const query = q.trim();
+    const filters: Prisma.UserWhereInput[] = [
+      { id: { not: viewerId } },
+      { blocksSent: { none: { blockedId: viewerId } } },
+      { blocksReceived: { none: { blockerId: viewerId } } },
+    ];
+    if (query) {
+      filters.push({
+        OR: [
+          { email: { contains: query, mode: 'insensitive' } },
+          { displayName: { contains: query, mode: 'insensitive' } },
+          { username: { contains: query.toLowerCase().replace(/^@/, ''), mode: 'insensitive' } },
+        ],
+      });
+    }
+    return this.prisma.user.findMany({ where: { AND: filters }, take: 25, orderBy: { createdAt: 'desc' }, select: this.publicSelect() }).then((users) => users.map((user) => exposeProfileBadges(exposeActivityPersonas(user))));
+  }
   async follow(userId: string, identifier: string) {
     const targetId = await this.resolveUserId(identifier);
     if (userId === targetId) throw new BadRequestException('Cannot follow yourself');
@@ -192,6 +216,7 @@ export class UsersService {
     return this.prisma.closeBuddy.delete({ where: { ownerId_buddyId: { ownerId: userId, buddyId: targetId } } }).catch(() => null).then(() => ({ closeBuddy: false }));
   }
   closeBuddies(userId: string) { return this.prisma.closeBuddy.findMany({ where: { ownerId: userId }, include: { buddy: { select: this.publicSelect() } }, orderBy: { createdAt: 'desc' } }).then(rows => rows.map(r => exposeProfileBadges(exposeActivityPersonas(r.buddy)))); }
+  blockedUsers(userId: string) { return this.prisma.block.findMany({ where: { blockerId: userId }, include: { blocked: { select: this.publicSelect() } }, orderBy: { createdAt: 'desc' } }).then(rows => rows.map(r => exposeProfileBadges(exposeActivityPersonas(r.blocked)))); }
   followers(userId: string) { return this.profileFollowers(userId, userId); }
   async profileFollowers(identifier: string, viewerId = identifier) {
     const userId = await this.resolveUserId(identifier);
@@ -214,7 +239,11 @@ export class UsersService {
   async block(userId: string, identifier: string) {
     const targetId = await this.resolveUserId(identifier);
     if (userId === targetId) throw new BadRequestException('Cannot block yourself');
-    await this.prisma.$transaction([this.prisma.follow.deleteMany({ where: { OR: [{ followerId: userId, followingId: targetId }, { followerId: targetId, followingId: userId }] } }), this.prisma.followRequest.deleteMany({ where: { OR: [{ requesterId: userId, recipientId: targetId }, { requesterId: targetId, recipientId: userId }] } })]);
+    await this.prisma.$transaction([
+      this.prisma.follow.deleteMany({ where: { OR: [{ followerId: userId, followingId: targetId }, { followerId: targetId, followingId: userId }] } }),
+      this.prisma.followRequest.deleteMany({ where: { OR: [{ requesterId: userId, recipientId: targetId }, { requesterId: targetId, recipientId: userId }] } }),
+      this.prisma.messageRequest.deleteMany({ where: { OR: [{ senderId: userId, recipientId: targetId }, { senderId: targetId, recipientId: userId }] } }),
+    ]);
     return this.prisma.block.upsert({ where: { blockerId_blockedId: { blockerId: userId, blockedId: targetId } }, create: { blockerId: userId, blockedId: targetId }, update: {} }).then(() => ({ blocked: true }));
   }
   async unblock(userId: string, identifier: string) {
@@ -225,12 +254,20 @@ export class UsersService {
     const targetId = await this.resolveUserId(identifier);
     if (userId === targetId) throw new BadRequestException('Cannot report yourself');
     const note = dto.note?.trim();
+    const details = dto.details?.trim();
+    const reason = dto.reason ?? 'other';
+    const category = dto.category ?? this.reportCategoryFromReason(reason);
     await this.prisma.userReport.upsert({
       where: { reportedId_reporterId: { reportedId: targetId, reporterId: userId } },
-      create: { reportedId: targetId, reporterId: userId, reason: dto.reason ?? 'other', note: note || null },
-      update: { reason: dto.reason ?? 'other', note: note || null },
+      create: { reportedId: targetId, reporterId: userId, reason, category, note: note || null, details: details || null, status: 'open' },
+      update: { reason, category, note: note || null, details: details || null, status: 'open', reviewedAt: null, reviewedById: null, actionTaken: null, resolutionNote: null },
     });
     return { ok: true };
+  }
+
+  private reportCategoryFromReason(reason: ReportUserDto['reason']) {
+    if (reason === 'nudity') return 'sexual_content';
+    return reason ?? 'other';
   }
 
   private withOnboarding<T extends { usernameFinalized?: boolean | null; dateOfBirth?: Date | string | null; legalConsentAt?: Date | string | null; dataConsentAt?: Date | string | null; activityPersonas?: any; betaUser?: boolean | null; hideProfileBadges?: boolean | null; hiddenProfileBadgeCodes?: string[] | null; badges?: any }>(user: T) {

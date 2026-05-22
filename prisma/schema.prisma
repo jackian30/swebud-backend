@@ -188,6 +188,48 @@ enum UserReportReason {
   @@map("user_report_reason")
 }
 
+enum GroupReportReason {
+  spam
+  harassment
+  nudity
+  violence
+  other
+
+  @@map("group_report_reason")
+}
+
+enum ReportCategory {
+  spam
+  harassment
+  hate
+  sexual_content
+  violence
+  self_harm
+  scam
+  privacy
+  impersonation
+  illegal_activity
+  other
+
+  @@map("report_category")
+}
+
+enum ReportStatus {
+  open
+  reviewing
+  resolved
+  dismissed
+
+  @@map("report_status")
+}
+
+enum UserModerationStatus {
+  active
+  banned
+
+  @@map("user_moderation_status")
+}
+
 enum PostVisibility {
   public
   followers
@@ -233,37 +275,41 @@ enum ActivitySource {
 }
 
 model User {
-  id                      String            @id @default(uuid())
-  email                   String            @unique
-  passwordHash            String            @map("password_hash")
-  displayName             String?           @map("display_name")
-  username                String            @unique
-  usernameFinalized       Boolean           @default(true) @map("username_finalized")
+  id                      String               @id @default(uuid())
+  email                   String               @unique
+  passwordHash            String               @map("password_hash")
+  displayName             String?              @map("display_name")
+  username                String               @unique
+  usernameFinalized       Boolean              @default(true) @map("username_finalized")
   bio                     String?
-  profileImageUrl         String?           @map("profile_image_url")
-  coverImageUrl           String?           @map("cover_image_url")
-  gender                  UserGender?       @map("gender")
-  dateOfBirth             DateTime?         @map("date_of_birth")
-  profileVisibility       ProfileVisibility @default(public) @map("profile_visibility")
-  defaultPostVisibility   PostVisibility    @default(public) @map("default_post_visibility")
-  betaUser                Boolean           @default(false) @map("beta_user")
-  hideProfileBadges       Boolean           @default(false) @map("hide_profile_badges")
-  hiddenProfileBadgeCodes String[]          @default([]) @map("hidden_profile_badge_codes")
-  verified                Boolean           @default(false)
-  googleId                String?           @unique @map("google_id")
-  googleEmailVerified     Boolean           @default(false) @map("google_email_verified")
-  legalConsentAt          DateTime?         @map("legal_consent_at")
-  dataConsentAt           DateTime?         @map("data_consent_at")
-  chatPublicKey           String?           @map("chat_public_key")
-  chatPrivateKey          String?           @map("chat_private_key")
+  profileImageUrl         String?              @map("profile_image_url")
+  coverImageUrl           String?              @map("cover_image_url")
+  gender                  UserGender?          @map("gender")
+  dateOfBirth             DateTime?            @map("date_of_birth")
+  profileVisibility       ProfileVisibility    @default(public) @map("profile_visibility")
+  defaultPostVisibility   PostVisibility       @default(public) @map("default_post_visibility")
+  betaUser                Boolean              @default(false) @map("beta_user")
+  hideProfileBadges       Boolean              @default(false) @map("hide_profile_badges")
+  hiddenProfileBadgeCodes String[]             @default([]) @map("hidden_profile_badge_codes")
+  verified                Boolean              @default(false)
+  moderationStatus        UserModerationStatus @default(active) @map("moderation_status")
+  bannedAt                DateTime?            @map("banned_at")
+  bannedUntil             DateTime?            @map("banned_until")
+  banReason               String?              @map("ban_reason")
+  googleId                String?              @unique @map("google_id")
+  googleEmailVerified     Boolean              @default(false) @map("google_email_verified")
+  legalConsentAt          DateTime?            @map("legal_consent_at")
+  dataConsentAt           DateTime?            @map("data_consent_at")
+  chatPublicKey           String?              @map("chat_public_key")
+  chatPrivateKey          String?              @map("chat_private_key")
   latitude                Float?
   longitude               Float?
-  createdAt               DateTime          @default(now()) @map("created_at")
-  updatedAt               DateTime          @updatedAt @map("updated_at")
+  createdAt               DateTime             @default(now()) @map("created_at")
+  updatedAt               DateTime             @updatedAt @map("updated_at")
 
   posts                     Post[]
-  wallPosts                 Post[]                   @relation("ProfileWallPosts")
-  taggedPosts               PostTag[]                @relation("PostTaggedUsers")
+  wallPosts                 Post[]                    @relation("ProfileWallPosts")
+  taggedPosts               PostTag[]                 @relation("PostTaggedUsers")
   comments                  Comment[]
   likes                     PostLike[]
   commentLikes              CommentLike[]
@@ -274,36 +320,39 @@ model User {
   hiddenPosts               HiddenPost[]
   hiddenMessages            HiddenMessage[]
   postReports               PostReport[]
-  userReportsSent           UserReport[]             @relation("UserReportsSent")
-  userReportsReceived       UserReport[]             @relation("UserReportsReceived")
-  blocksSent                Block[]                  @relation("BlocksSent")
-  blocksReceived            Block[]                  @relation("BlocksReceived")
-  notifications             Notification[]           @relation("NotificationsReceived")
-  notificationActors        Notification[]           @relation("NotificationActors")
+  groupReports              GroupReport[]
+  userReportsSent           UserReport[]              @relation("UserReportsSent")
+  userReportsReceived       UserReport[]              @relation("UserReportsReceived")
+  blocksSent                Block[]                   @relation("BlocksSent")
+  blocksReceived            Block[]                   @relation("BlocksReceived")
+  notifications             Notification[]            @relation("NotificationsReceived")
+  notificationActors        Notification[]            @relation("NotificationActors")
   theme                     UserTheme?
   refreshTokens             RefreshToken[]
   passwordResetTokens       PasswordResetToken[]
-  following                 Follow[]                 @relation("Following")
-  followers                 Follow[]                 @relation("Followers")
-  sentFollowRequests        FollowRequest[]          @relation("SentFollowRequests")
-  receivedFollowRequests    FollowRequest[]          @relation("ReceivedFollowRequests")
-  sentMessageRequests       MessageRequest[]         @relation("SentMessageRequests")
-  receivedMessageRequests   MessageRequest[]         @relation("ReceivedMessageRequests")
-  chatProfileOverrides      ChatProfileOverride[]    @relation("ChatProfileOverrideOwners")
-  chatProfileOverridePeers  ChatProfileOverride[]    @relation("ChatProfileOverridePeers")
+  following                 Follow[]                  @relation("Following")
+  followers                 Follow[]                  @relation("Followers")
+  sentFollowRequests        FollowRequest[]           @relation("SentFollowRequests")
+  receivedFollowRequests    FollowRequest[]           @relation("ReceivedFollowRequests")
+  sentMessageRequests       MessageRequest[]          @relation("SentMessageRequests")
+  receivedMessageRequests   MessageRequest[]          @relation("ReceivedMessageRequests")
+  chatProfileOverrides      ChatProfileOverride[]     @relation("ChatProfileOverrideOwners")
+  chatProfileOverridePeers  ChatProfileOverride[]     @relation("ChatProfileOverridePeers")
   groupMembers              GroupMember[]
-  createdBuddyGroupChats    BuddyGroupChat[]         @relation("BuddyGroupChatCreators")
+  groupChatReadStates       GroupChatReadState[]
+  createdBuddyGroupChats    BuddyGroupChat[]          @relation("BuddyGroupChatCreators")
   buddyGroupChatMemberships BuddyGroupChatMember[]
-  createdGroupChannels      GroupChatChannel[]       @relation("GroupChatChannelCreators")
+  buddyGroupChatReadStates  BuddyGroupChatReadState[]
+  createdGroupChannels      GroupChatChannel[]        @relation("GroupChatChannelCreators")
   groupChannelMemberships   GroupChatChannelMember[]
   groupPosts                GroupPost[]
-  sentMessages              Message[]                @relation("SentMessages")
-  receivedMessages          Message[]                @relation("ReceivedMessages")
+  sentMessages              Message[]                 @relation("SentMessages")
+  receivedMessages          Message[]                 @relation("ReceivedMessages")
   buddySession              BuddySession?
-  createdBuddyRooms         BuddyRoom[]              @relation("BuddyRoomCreators")
+  createdBuddyRooms         BuddyRoom[]               @relation("BuddyRoomCreators")
   buddyRoomParticipants     BuddyRoomParticipant[]
-  closeBuddies              CloseBuddy[]             @relation("CloseBuddyOwners")
-  closeBuddyOf              CloseBuddy[]             @relation("CloseBuddyMembers")
+  closeBuddies              CloseBuddy[]              @relation("CloseBuddyOwners")
+  closeBuddyOf              CloseBuddy[]              @relation("CloseBuddyMembers")
   externalIntegrations      ExternalIntegration[]
   activities                Activity[]
   activityPersonas          UserActivityPersona[]
@@ -705,21 +754,23 @@ model Comment {
 }
 
 model Group {
-  id                  String             @id @default(uuid())
+  id                  String               @id @default(uuid())
   name                String
-  slug                String             @unique
+  slug                String               @unique
   description         String?
-  profileImageUrl     String?            @map("profile_image_url")
-  coverImageUrl       String?            @map("cover_image_url")
-  visibility          GroupVisibility    @default(public)
-  inviteCode          String?            @unique @map("invite_code")
-  allowAnonymousPosts Boolean            @default(false) @map("allow_anonymous_posts")
-  createdAt           DateTime           @default(now()) @map("created_at")
+  profileImageUrl     String?              @map("profile_image_url")
+  coverImageUrl       String?              @map("cover_image_url")
+  visibility          GroupVisibility      @default(public)
+  inviteCode          String?              @unique @map("invite_code")
+  allowAnonymousPosts Boolean              @default(false) @map("allow_anonymous_posts")
+  createdAt           DateTime             @default(now()) @map("created_at")
   members             GroupMember[]
+  readStates          GroupChatReadState[]
   chatChannels        GroupChatChannel[]
   messages            Message[]
   posts               Post[]
   legacyPosts         GroupPost[]
+  reports             GroupReport[]
   buddyRooms          BuddyRoom[]
 
   @@index([visibility, createdAt])
@@ -752,6 +803,7 @@ model GroupChatChannel {
   creator       User                          @relation("GroupChatChannelCreators", fields: [creatorId], references: [id], onDelete: Cascade)
   allowedUsers  GroupChatChannelMember[]
   messages      Message[]
+  readStates    GroupChatReadState[]
 
   @@unique([groupId, name])
   @@index([groupId, createdAt])
@@ -759,14 +811,15 @@ model GroupChatChannel {
 }
 
 model BuddyGroupChat {
-  id          String                 @id @default(uuid())
-  creatorId   String                 @map("creator_id")
+  id          String                    @id @default(uuid())
+  creatorId   String                    @map("creator_id")
   name        String
   description String?
-  createdAt   DateTime               @default(now()) @map("created_at")
-  updatedAt   DateTime               @updatedAt @map("updated_at")
-  creator     User                   @relation("BuddyGroupChatCreators", fields: [creatorId], references: [id], onDelete: Cascade)
+  createdAt   DateTime                  @default(now()) @map("created_at")
+  updatedAt   DateTime                  @updatedAt @map("updated_at")
+  creator     User                      @relation("BuddyGroupChatCreators", fields: [creatorId], references: [id], onDelete: Cascade)
   members     BuddyGroupChatMember[]
+  readStates  BuddyGroupChatReadState[]
   messages    Message[]
 
   @@index([creatorId, createdAt])
@@ -796,6 +849,34 @@ model GroupChatChannelMember {
   @@id([channelId, userId])
   @@index([userId])
   @@map("group_chat_channel_members")
+}
+
+model GroupChatReadState {
+  userId     String           @map("user_id")
+  groupId    String           @map("group_id")
+  channelId  String           @map("channel_id")
+  lastReadAt DateTime         @map("last_read_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group      Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  channel    GroupChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelId])
+  @@index([groupId, channelId])
+  @@map("group_chat_read_states")
+}
+
+model BuddyGroupChatReadState {
+  userId           String         @map("user_id")
+  buddyGroupChatId String         @map("buddy_group_chat_id")
+  lastReadAt       DateTime       @map("last_read_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  buddyGroupChat   BuddyGroupChat @relation(fields: [buddyGroupChatId], references: [id], onDelete: Cascade)
+
+  @@id([userId, buddyGroupChatId])
+  @@index([buddyGroupChatId])
+  @@map("buddy_group_chat_read_states")
 }
 
 model MessageReaction {
@@ -985,35 +1066,81 @@ model HiddenPost {
 }
 
 model PostReport {
-  id        String           @id @default(uuid())
-  postId    String           @map("post_id")
-  userId    String           @map("user_id")
-  reason    PostReportReason @default(other)
-  note      String?
-  createdAt DateTime         @default(now()) @map("created_at")
-  post      Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String           @id @default(uuid())
+  postId         String           @map("post_id")
+  userId         String           @map("user_id")
+  reason         PostReportReason @default(other)
+  category       ReportCategory   @default(other)
+  note           String?
+  details        String?
+  status         ReportStatus     @default(open)
+  priority       Int              @default(0)
+  reviewedAt     DateTime?        @map("reviewed_at")
+  reviewedById   String?          @map("reviewed_by_id")
+  actionTaken    String?          @map("action_taken")
+  resolutionNote String?          @map("resolution_note")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  post           Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([postId, userId])
+  @@index([status, category, createdAt])
   @@index([postId, createdAt])
   @@index([userId, createdAt])
   @@map("post_reports")
 }
 
 model UserReport {
-  id         String           @id @default(uuid())
-  reportedId String           @map("reported_id")
-  reporterId String           @map("reporter_id")
-  reason     UserReportReason @default(other)
-  note       String?
-  createdAt  DateTime         @default(now()) @map("created_at")
-  reported   User             @relation("UserReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
-  reporter   User             @relation("UserReportsSent", fields: [reporterId], references: [id], onDelete: Cascade)
+  id             String           @id @default(uuid())
+  reportedId     String           @map("reported_id")
+  reporterId     String           @map("reporter_id")
+  reason         UserReportReason @default(other)
+  category       ReportCategory   @default(other)
+  note           String?
+  details        String?
+  status         ReportStatus     @default(open)
+  priority       Int              @default(0)
+  reviewedAt     DateTime?        @map("reviewed_at")
+  reviewedById   String?          @map("reviewed_by_id")
+  actionTaken    String?          @map("action_taken")
+  resolutionNote String?          @map("resolution_note")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+  reported       User             @relation("UserReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
+  reporter       User             @relation("UserReportsSent", fields: [reporterId], references: [id], onDelete: Cascade)
 
   @@unique([reportedId, reporterId])
+  @@index([status, category, createdAt])
   @@index([reportedId, createdAt])
   @@index([reporterId, createdAt])
   @@map("user_reports")
+}
+
+model GroupReport {
+  id             String            @id @default(uuid())
+  groupId        String            @map("group_id")
+  userId         String            @map("user_id")
+  reason         GroupReportReason @default(other)
+  category       ReportCategory    @default(other)
+  note           String?
+  details        String?
+  status         ReportStatus      @default(open)
+  priority       Int               @default(0)
+  reviewedAt     DateTime?         @map("reviewed_at")
+  reviewedById   String?           @map("reviewed_by_id")
+  actionTaken    String?           @map("action_taken")
+  resolutionNote String?           @map("resolution_note")
+  createdAt      DateTime          @default(now()) @map("created_at")
+  updatedAt      DateTime          @updatedAt @map("updated_at")
+  group          Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, userId])
+  @@index([status, category, createdAt])
+  @@index([groupId, createdAt])
+  @@index([userId, createdAt])
+  @@map("group_reports")
 }
 
 model Block {
