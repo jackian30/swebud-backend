@@ -144,7 +144,7 @@ export class UsersService {
     });
     return { ...exposeProfileBadges(exposeActivityPersonas(profile)), posts, isFollowing: Boolean(isFollowing), followsMe: Boolean(followsMe), isCloseBuddy: Boolean(isCloseBuddy), isPrivateLocked: false, isBlockedByMe, hasBlockedMe, followRequestStatus: pendingFollowRequest?.status ?? null };
   }
-  search(viewerId: string, q = '') {
+  search(viewerId: string, q = '', options: { take?: number; cursor?: number } = {}) {
     const query = q.trim();
     const filters: Prisma.UserWhereInput[] = [
       { id: { not: viewerId } },
@@ -160,7 +160,15 @@ export class UsersService {
         ],
       });
     }
-    return this.prisma.user.findMany({ where: { AND: filters }, take: 25, orderBy: { createdAt: 'desc' }, select: this.publicSelect() }).then((users) => users.map((user) => exposeProfileBadges(exposeActivityPersonas(user))));
+    const take = this.listTake(options.take) ?? 25;
+    const cursor = this.listCursor(options.cursor);
+    return this.prisma.user.findMany({
+      where: { AND: filters },
+      take,
+      ...(cursor ? { skip: cursor } : {}),
+      orderBy: { createdAt: 'desc' },
+      select: this.publicSelect(),
+    }).then((users) => users.map((user) => exposeProfileBadges(exposeActivityPersonas(user))));
   }
   async follow(userId: string, identifier: string) {
     const targetId = await this.resolveUserId(identifier);
@@ -289,5 +297,15 @@ export class UsersService {
     });
     if (!user) throw new NotFoundException('User not found');
     return user.id;
+  }
+
+  private listTake(value?: number) {
+    if (!Number.isFinite(value)) return undefined;
+    return Math.min(Math.max(Math.trunc(value ?? 0), 1), 50);
+  }
+
+  private listCursor(value?: number) {
+    if (!Number.isFinite(value)) return undefined;
+    return Math.max(Math.trunc(value ?? 0), 0);
   }
 }

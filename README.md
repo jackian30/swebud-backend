@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.2 beta**
+Current release: **0.2.13-beta**
 
 ## Stack
 
@@ -269,16 +269,16 @@ Render's free web service has an ephemeral filesystem and sleeps when idle, so p
 
 Use separate public hosts for the portal and API:
 
-- Portal: `https://asdasd.com`
-- API: `https://api.asdasd.com`
+- Portal: `https://swebudd.com`
+- API: `https://api.swebudd.com`
 
 Deployment env should use:
 
 ```text
-FRONTEND_ORIGIN=https://asdasd.com
-API_BASE_URL=https://api.asdasd.com
-GOOGLE_CALLBACK_URL=https://api.asdasd.com/auth/google/callback
-GOOGLE_OAUTH_REDIRECT_URI=https://asdasd.com/auth/google/callback
+FRONTEND_ORIGIN=https://swebudd.com
+API_BASE_URL=https://api.swebudd.com
+GOOGLE_CALLBACK_URL=https://api.swebudd.com/auth/google/callback
+GOOGLE_OAUTH_REDIRECT_URI=https://swebudd.com/auth/google/callback
 ```
 
 For a Netlify-hosted frontend, set `FRONTEND_ORIGIN` to the Netlify production URL and any preview URLs that should be allowed, separated by commas. Set the frontend's `VITE_API_BASE_URL` to this API origin.
@@ -444,8 +444,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.12-beta -m "v0.2.12-beta"
-git push origin v0.2.12-beta
+git tag -a v0.2.13-beta -m "v0.2.13-beta"
+git push origin v0.2.13-beta
 ```
 
 ## Beta caveats
@@ -453,4 +453,4 @@ git push origin v0.2.12-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.12-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.13-beta flows, but production release still needs broader end-to-end coverage.

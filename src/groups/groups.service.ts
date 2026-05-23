@@ -5,6 +5,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateGroupChannelDto, CreateGroupDto, GroupMessageDto, GroupPostDto, ReportGroupDto, UpdateGroupSettingsDto } from './dto';
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
+type GroupListOptions = { take?: number; cursor?: number; discoverOnly?: boolean };
 const DEFAULT_GROUP_CHANNEL_NAME = 'main';
 const DEFAULT_GROUP_CHANNEL_DESCRIPTION = 'Main channel';
 
@@ -28,10 +29,17 @@ export class GroupsService {
     return { ...group, isMember: true, capabilities: this.capabilities('owner') };
   }
 
-  async list(userId?: string) {
+  async list(userId?: string, options: GroupListOptions = {}) {
+    const take = this.listTake(options.take);
+    const cursor = this.listCursor(options.cursor);
+    const where: Prisma.GroupWhereInput = options.discoverOnly && userId
+      ? { visibility: 'public', members: { none: { userId } } }
+      : { OR: [{ visibility: 'public' }, ...(userId ? [{ members: { some: { userId } } }] : [])] };
     const groups = await this.prisma.group.findMany({
-      where: { OR: [{ visibility: 'public' }, ...(userId ? [{ members: { some: { userId } } }] : [])] },
+      where,
       orderBy: { createdAt: 'desc' },
+      ...(take ? { take } : {}),
+      ...(cursor ? { skip: cursor } : {}),
       include: this.include(Boolean(userId)),
     });
     const unreadByGroup = userId ? await this.unreadCountByGroup(userId) : new Map<string, number>();
@@ -46,11 +54,15 @@ export class GroupsService {
     }));
   }
 
-  async mine(userId: string) {
+  async mine(userId: string, options: GroupListOptions = {}) {
+    const take = this.listTake(options.take);
+    const cursor = this.listCursor(options.cursor);
     const [groups, unreadByGroup] = await Promise.all([
       this.prisma.group.findMany({
       where: { members: { some: { userId } } },
       orderBy: { createdAt: 'desc' },
+      ...(take ? { take } : {}),
+      ...(cursor ? { skip: cursor } : {}),
       include: this.include(true),
       }),
       this.unreadCountByGroup(userId),
@@ -300,6 +312,16 @@ export class GroupsService {
 
   private sortGroupsByActivity<T extends { createdAt?: Date; lastMessage?: { createdAt: Date } | null }>(groups: T[]) {
     return [...groups].sort((left, right) => this.groupActivityTime(right) - this.groupActivityTime(left));
+  }
+
+  private listTake(value?: number) {
+    if (!Number.isFinite(value)) return undefined;
+    return Math.min(Math.max(Math.trunc(value ?? 0), 1), 50);
+  }
+
+  private listCursor(value?: number) {
+    if (!Number.isFinite(value)) return undefined;
+    return Math.max(Math.trunc(value ?? 0), 0);
   }
 
   private groupActivityTime(group: { createdAt?: Date; lastMessage?: { createdAt: Date } | null }) {

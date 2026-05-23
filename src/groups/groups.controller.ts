@@ -10,8 +10,16 @@ import { ChatGateway } from '../chat/chat.gateway';
 export class GroupsController {
   constructor(private groups: GroupsService, private chatGateway: ChatGateway) {}
   @Post() create(@CurrentUser() user: AuthUser, @Body() dto: CreateGroupDto) { return this.groups.create(user.id, dto); }
-  @Get() list(@CurrentUser() user: AuthUser) { return this.groups.list(user.id); }
-  @Get('mine') mine(@CurrentUser() user: AuthUser) { return this.groups.mine(user.id); }
+  @Get() list(@CurrentUser() user: AuthUser, @Query('take') take?: string, @Query('cursor') cursor?: string, @Query('discover') discover?: string) {
+    return this.groups.list(user.id, {
+      take: this.parsePositiveInt(take),
+      cursor: this.parsePositiveInt(cursor),
+      discoverOnly: discover === 'true',
+    });
+  }
+  @Get('mine') mine(@CurrentUser() user: AuthUser, @Query('take') take?: string, @Query('cursor') cursor?: string) {
+    return this.groups.mine(user.id, { take: this.parsePositiveInt(take), cursor: this.parsePositiveInt(cursor) });
+  }
   @Get('invite/:code') joinByInvite(@CurrentUser() user: AuthUser, @Param('code') code: string) { return this.groups.joinByInvite(user.id, code); }
   @Get(':slug') get(@CurrentUser() user: AuthUser, @Param('slug') slug: string) { return this.groups.get(user.id, slug); }
   @Post(':id/join') join(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.groups.join(user.id, id); }
@@ -58,5 +66,10 @@ export class GroupsController {
     const recipients = await this.groups.messageRecipients(id, message.channelId ?? '');
     for (const recipientId of recipients) this.chatGateway.emitMessage(recipientId, 'chat:group-message', message);
     return message;
+  }
+
+  private parsePositiveInt(value?: string) {
+    const parsed = value ? Number.parseInt(value, 10) : undefined;
+    return parsed !== undefined && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
   }
 }

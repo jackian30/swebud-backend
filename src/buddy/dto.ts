@@ -24,7 +24,7 @@ export class NearbyBuddyQueryDto {
 }
 
 export class CreateBuddyRoomDto {
-  @IsString() @MaxLength(80) name!: string;
+  @IsOptional() @IsString() @MaxLength(80) name?: string;
   @IsOptional() @IsEnum(BuddySessionScope) scope?: BuddySessionScope;
   @IsOptional() @IsEnum(BuddySessionVisibility) visibility?: BuddySessionVisibility;
   @IsOptional() @IsUUID() groupId?: string;

@@ -18,12 +18,19 @@ describe('profile badges', () => {
     expect(profileBadgesFor({
       betaUser: true,
       hiddenProfileBadgeCodes: ['beta_user'],
-      badges: [{ badge: { code: 'app_creator', label: 'App Creator', description: 'Creator of SweBudd', iconUrl: '/icons/profile-badges/app-creator.svg', active: true } }],
-    })).toEqual([{ code: 'app_creator', label: 'App Creator', description: 'Creator of SweBudd', iconUrl: '/icons/profile-badges/app-creator.svg' }]);
+      badges: [{ badge: { code: 'founding_member', label: 'Founding Member', description: 'Original SweBudd member', iconUrl: '/icons/profile-badges/founding-member.svg', active: true } }],
+    })).toEqual([{ code: 'founding_member', label: 'Founding Member', description: 'Original SweBudd member', iconUrl: '/icons/profile-badges/founding-member.svg' }]);
   });
 
   it('can list available badges even when profile badges are hidden', () => {
     expect(availableProfileBadgesFor({ betaUser: true, hideProfileBadges: true }).map((badge) => badge.code)).toContain('beta_user');
+  });
+
+  it('respects inactive database-backed beta badge metadata', () => {
+    expect(profileBadgesFor({
+      betaUser: true,
+      badges: [{ badge: { code: 'beta_user', label: 'Beta User', description: 'Early SweBudd beta user', iconUrl: '/icons/profile-badges/beta-user.svg', active: false } }],
+    })).toEqual([]);
   });
 
   it('does not expose the internal beta flag', () => {
@@ -40,7 +47,7 @@ describe('profile badges', () => {
 
   it('uses database-backed badge metadata', () => {
     expect(profileBadgesFor({
-      badges: [{ badge: { code: 'app_creator', label: 'App Creator', description: 'Creator of SweBudd', iconUrl: '/icons/profile-badges/app-creator.svg', active: true } }],
-    })).toEqual([{ code: 'app_creator', label: 'App Creator', description: 'Creator of SweBudd', iconUrl: '/icons/profile-badges/app-creator.svg' }]);
+      badges: [{ badge: { code: 'founding_member', label: 'Founding Member', description: 'Original SweBudd member', iconUrl: '/icons/profile-badges/founding-member.svg', active: true } }],
+    })).toEqual([{ code: 'founding_member', label: 'Founding Member', description: 'Original SweBudd member', iconUrl: '/icons/profile-badges/founding-member.svg' }]);
   });
 });

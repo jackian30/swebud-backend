@@ -1,5 +1,5 @@
 import { ConfigService } from '@nestjs/config';
-import { assertProductionConfig, bearerCorsOptions, isAllowedOrigin, websocketAllowRequest } from './security';
+import { RateLimitMiddleware, assertProductionConfig, bearerCorsOptions, isAllowedOrigin, websocketAllowRequest } from './security';
 
 function config(values: Record<string, string | undefined>) {
   return {
@@ -12,6 +12,7 @@ describe('security helpers', () => {
 
   afterEach(() => {
     process.env.NODE_ENV = originalNodeEnv;
+    jest.restoreAllMocks();
   });
 
   it('uses bearer-only CORS credentials', () => {
@@ -64,4 +65,23 @@ describe('security helpers', () => {
 
     expect(() => assertProductionConfig(cfg)).toThrow('Missing required S3 media env');
   });
+
+  it('prunes expired rate-limit buckets during request handling', () => {
+    const middleware = new RateLimitMiddleware();
+    const now = jest.spyOn(Date, 'now');
+
+    now.mockReturnValue(0);
+    middleware.use(rateLimitReq('10.0.0.1'), {} as any, jest.fn());
+    expect((middleware as any).buckets.has('10.0.0.1:api')).toBe(true);
+
+    now.mockReturnValue(60_001);
+    middleware.use(rateLimitReq('10.0.0.2'), {} as any, jest.fn());
+
+    expect((middleware as any).buckets.has('10.0.0.1:api')).toBe(false);
+    expect((middleware as any).buckets.has('10.0.0.2:api')).toBe(true);
+  });
 });
+
+function rateLimitReq(ip: string) {
+  return { path: '/api/posts', url: '/api/posts', ip, socket: { remoteAddress: ip } } as any;
+}

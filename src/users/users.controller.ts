@@ -25,7 +25,12 @@ export class UsersController {
   @Post('me/follow-requests/:id/accept') acceptFollowRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.acceptFollowRequest(user.id, id); }
   @Post('me/follow-requests/:id/decline') declineFollowRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.declineFollowRequest(user.id, id); }
   @Delete('me/follow-requests/:id') cancelFollowRequest(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.cancelFollowRequest(user.id, id); }
-  @Get() search(@CurrentUser() user: AuthUser, @Query('q') q?: string) { return this.users.search(user.id, q); }
+  @Get() search(@CurrentUser() user: AuthUser, @Query('q') q?: string, @Query('take') take?: string, @Query('cursor') cursor?: string) {
+    return this.users.search(user.id, q, {
+      take: this.parsePositiveInt(take),
+      cursor: this.parsePositiveInt(cursor),
+    });
+  }
   @Post(':id/close-buddy') addCloseBuddy(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.addCloseBuddy(user.id, id); }
   @Delete(':id/close-buddy') removeCloseBuddy(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.removeCloseBuddy(user.id, id); }
   @Get(':id/followers') profileFollowers(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.profileFollowers(id, user.id); }
@@ -36,4 +41,9 @@ export class UsersController {
   @Delete(':id/block') unblock(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.unblock(user.id, id); }
   @Post(':id/report') report(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ReportUserDto) { return this.users.report(user.id, id, dto); }
   @Get(':id') profile(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.profile(user.id, id); }
+
+  private parsePositiveInt(value?: string) {
+    const parsed = value ? Number.parseInt(value, 10) : undefined;
+    return parsed !== undefined && Number.isFinite(parsed) && parsed >= 0 ? parsed : undefined;
+  }
 }

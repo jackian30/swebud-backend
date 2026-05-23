@@ -113,9 +113,13 @@ type RateLimitBucket = {
   resetAt: number;
 };
 
+const RATE_LIMIT_PRUNE_INTERVAL_MS = 60_000;
+const RATE_LIMIT_MAX_BUCKETS = 10_000;
+
 @Injectable()
 export class RateLimitMiddleware implements NestMiddleware {
   private buckets = new Map<string, RateLimitBucket>();
+  private lastPruneAt = 0;
 
   use(req: Request, _res: Response, next: NextFunction) {
     const path = req.path || req.url || '/';
@@ -127,6 +131,7 @@ export class RateLimitMiddleware implements NestMiddleware {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const key = `${ip}:${isAuth ? path : isUpload ? 'uploads' : 'api'}`;
     const now = Date.now();
+    this.pruneBuckets(now);
     const existing = this.buckets.get(key);
     if (!existing || existing.resetAt <= now) {
       this.buckets.set(key, { count: 1, resetAt: now + windowMs });
@@ -135,5 +140,21 @@ export class RateLimitMiddleware implements NestMiddleware {
     existing.count += 1;
     if (existing.count > limit) throw new HttpException('Too many requests. Please slow down and try again.', HttpStatus.TOO_MANY_REQUESTS);
     next();
+  }
+
+  private pruneBuckets(now: number) {
+    if (now - this.lastPruneAt < RATE_LIMIT_PRUNE_INTERVAL_MS && this.buckets.size <= RATE_LIMIT_MAX_BUCKETS) return;
+    this.lastPruneAt = now;
+    for (const [key, bucket] of this.buckets) {
+      if (bucket.resetAt <= now) this.buckets.delete(key);
+    }
+    if (this.buckets.size <= RATE_LIMIT_MAX_BUCKETS) return;
+
+    let overflow = this.buckets.size - RATE_LIMIT_MAX_BUCKETS;
+    for (const key of this.buckets.keys()) {
+      this.buckets.delete(key);
+      overflow -= 1;
+      if (overflow <= 0) break;
+    }
   }
 }
