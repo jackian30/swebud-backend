@@ -1,21 +1,21 @@
 # Example host-level nginx reverse proxy for:
-# - portal: https://asdasd.com
-# - API:    https://api.asdasd.com
+# - portal: https://swebudd.com
+# - API:    https://api.swebudd.com
 #
 # Replace domain names and certificate paths before using.
 
 server {
   listen 80;
-  server_name asdasd.com api.asdasd.com;
+  server_name swebudd.com api.swebudd.com;
   return 301 https://$host$request_uri;
 }
 
 server {
   listen 443 ssl http2;
-  server_name asdasd.com;
+  server_name swebudd.com;
 
-  ssl_certificate /etc/letsencrypt/live/asdasd.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/asdasd.com/privkey.pem;
+  ssl_certificate /etc/letsencrypt/live/swebudd.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/swebudd.com/privkey.pem;
 
   client_max_body_size 110m;
 
@@ -31,10 +31,10 @@ server {
 
 server {
   listen 443 ssl http2;
-  server_name api.asdasd.com;
+  server_name api.swebudd.com;
 
-  ssl_certificate /etc/letsencrypt/live/api.asdasd.com/fullchain.pem;
-  ssl_certificate_key /etc/letsencrypt/live/api.asdasd.com/privkey.pem;
+  ssl_certificate /etc/letsencrypt/live/api.swebudd.com/fullchain.pem;
+  ssl_certificate_key /etc/letsencrypt/live/api.swebudd.com/privkey.pem;
 
   client_max_body_size 110m;
 
