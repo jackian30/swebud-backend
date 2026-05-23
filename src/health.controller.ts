@@ -1,7 +1,7 @@
 import { Controller, Get } from '@nestjs/common';
 import { PrismaService } from './prisma/prisma.service';
 
-const appVersion = process.env.APP_VERSION || '0.2.12-beta';
+const appVersion = process.env.APP_VERSION || '0.2.14-beta';
 
 @Controller('health')
 export class HealthController {

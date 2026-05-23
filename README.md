@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.13-beta**
+Current release: **0.2.14-beta**
 
 ## Stack
 
@@ -437,6 +437,7 @@ Then run the full Docker stack and API smokes from the workspace if available.
 - ActSnap reference context is only accepted from trusted ActSnap reply flows; generic chat sends ignore client-supplied ActSnap reference fields.
 - Google-created users do not bypass onboarding: auth responses include `requiresOnboarding` and `onboardingMissing` until username, date of birth, legal consent, and data consent are completed.
 - Turnstile is enforced on register/login when `CLOUDFLARE_TURNSTILE_SECRET_KEY` is set; with no secret it returns a local-dev skip and does not block.
+- While `APP_VERSION` contains `beta`, newly-created password and Google accounts are marked `betaUser` and assigned the `beta_user` profile badge automatically.
 - E2EE chat support is currently a foundation only. Direct buddy chats work across logged-in devices, but this is not a production-audited Signal-grade implementation.
 
 ## Release tags
@@ -444,8 +445,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.13-beta -m "v0.2.13-beta"
-git push origin v0.2.13-beta
+git tag -a v0.2.14-beta -m "v0.2.14-beta"
+git push origin v0.2.14-beta
 ```
 
 ## Beta caveats
@@ -453,4 +454,4 @@ git push origin v0.2.13-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.13-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.14-beta flows, but production release still needs broader end-to-end coverage.

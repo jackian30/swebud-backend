@@ -306,15 +306,19 @@ export class AuthService {
 
   private accessSecret() { return requiredSecret(this.config, 'JWT_SECRET', 'dev-secret'); }
   private refreshSecret() { return requiredSecret(this.config, 'JWT_REFRESH_SECRET', 'dev-refresh-secret'); }
-  private async shouldAssignBetaUser(tx: Prisma.TransactionClient) {
-    return await tx.user.count() < 300;
+  private shouldAssignBetaUser() {
+    return this.releaseVersion().includes('beta');
+  }
+  private releaseVersion() {
+    return (this.config.get<string>('APP_VERSION') ?? process.env.APP_VERSION ?? '').toLowerCase();
   }
   private async userCreateData(tx: Prisma.TransactionClient, data: Prisma.UserCreateInput): Promise<Prisma.UserCreateInput> {
-    const betaUser = await this.shouldAssignBetaUser(tx);
+    void tx;
+    const betaUser = this.shouldAssignBetaUser();
     return {
       ...data,
       betaUser,
-      badges: betaUser ? { create: { badge: { connect: { id: 'badge_beta_user' } }, note: 'Auto-assigned to early beta user' } } : undefined,
+      badges: betaUser ? { create: { badge: { connect: { id: 'badge_beta_user' } }, note: 'Auto-assigned during beta release' } } : undefined,
     };
   }
   private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true, betaUser: true, hideProfileBadges: true, moderationStatus: true, bannedAt: true, bannedUntil: true, banReason: true, badges: { select: profileBadgeSelect } } as const; }

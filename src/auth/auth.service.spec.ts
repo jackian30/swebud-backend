@@ -163,3 +163,32 @@ describe('AuthService password reset URLs', () => {
     expect(mail.sendPasswordResetEmail.mock.calls[0][0].resetUrl).not.toContain(',');
   });
 });
+
+describe('AuthService beta release badge assignment', () => {
+  function serviceForVersion(version?: string) {
+    return new AuthService(
+      {} as any,
+      {} as any,
+      { get: jest.fn((key: string) => key === 'APP_VERSION' ? version : undefined) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    ) as any;
+  }
+
+  it('marks all new users as beta users while the app version is beta', async () => {
+    await expect(serviceForVersion('0.2.14-beta').userCreateData({} as any, { email: 'user@example.com' })).resolves.toEqual(expect.objectContaining({
+      email: 'user@example.com',
+      betaUser: true,
+      badges: { create: { badge: { connect: { id: 'badge_beta_user' } }, note: 'Auto-assigned during beta release' } },
+    }));
+  });
+
+  it('does not auto-assign beta badges after the beta release phase', async () => {
+    await expect(serviceForVersion('1.0.0').userCreateData({} as any, { email: 'user@example.com' })).resolves.toEqual(expect.objectContaining({
+      email: 'user@example.com',
+      betaUser: false,
+      badges: undefined,
+    }));
+  });
+});

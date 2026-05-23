@@ -2,7 +2,7 @@
 
 This document describes the current SweBudd chat feature and the beta end-to-end encryption foundation.
 
-Current status: `0.2.13-beta`
+Current status: `0.2.14-beta`
 
 ## Chat surfaces
 
