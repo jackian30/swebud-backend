@@ -13,6 +13,7 @@ import { allowedOrigins, requiredSecret } from '../common/security';
 import { activityPersonaLinkSelect, createActivityPersonaLinks, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
 import { exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
 import { normalizeUsername } from '../common/usernames';
+import * as appRelease from '../common/app-version';
 
 export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
 const RESET_TTL_MS = 1000 * 60 * 30;
@@ -307,10 +308,7 @@ export class AuthService {
   private accessSecret() { return requiredSecret(this.config, 'JWT_SECRET', 'dev-secret'); }
   private refreshSecret() { return requiredSecret(this.config, 'JWT_REFRESH_SECRET', 'dev-refresh-secret'); }
   private shouldAssignBetaUser() {
-    return this.releaseVersion().includes('beta');
-  }
-  private releaseVersion() {
-    return (this.config.get<string>('APP_VERSION') ?? process.env.APP_VERSION ?? '').toLowerCase();
+    return appRelease.isBetaReleaseVersion(appRelease.appVersion());
   }
   private async userCreateData(tx: Prisma.TransactionClient, data: Prisma.UserCreateInput): Promise<Prisma.UserCreateInput> {
     void tx;

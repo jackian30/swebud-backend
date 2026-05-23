@@ -1,4 +1,5 @@
 import { AuthService } from './auth.service';
+import * as appRelease from '../common/app-version';
 
 describe('AuthService Google login', () => {
   const originalFetch = global.fetch;
@@ -166,18 +167,23 @@ describe('AuthService password reset URLs', () => {
 
 describe('AuthService beta release badge assignment', () => {
   function serviceForVersion(version?: string) {
+    jest.spyOn(appRelease, 'appVersion').mockReturnValue(version ?? '0.0.0');
     return new AuthService(
       {} as any,
       {} as any,
-      { get: jest.fn((key: string) => key === 'APP_VERSION' ? version : undefined) } as any,
+      { get: jest.fn() } as any,
       {} as any,
       {} as any,
       {} as any,
     ) as any;
   }
 
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('marks all new users as beta users while the app version is beta', async () => {
-    await expect(serviceForVersion('0.2.14-beta').userCreateData({} as any, { email: 'user@example.com' })).resolves.toEqual(expect.objectContaining({
+    await expect(serviceForVersion('0.2.15-beta').userCreateData({} as any, { email: 'user@example.com' })).resolves.toEqual(expect.objectContaining({
       email: 'user@example.com',
       betaUser: true,
       badges: { create: { badge: { connect: { id: 'badge_beta_user' } }, note: 'Auto-assigned during beta release' } },

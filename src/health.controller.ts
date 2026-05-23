@@ -1,7 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { PrismaService } from './prisma/prisma.service';
-
-const appVersion = process.env.APP_VERSION || '0.2.14-beta';
+import { appVersion } from './common/app-version';
 
 @Controller('health')
 export class HealthController {
@@ -11,7 +10,7 @@ export class HealthController {
   live() {
     return {
       ok: true,
-      version: appVersion,
+      version: appVersion(),
       uptime: Math.round(process.uptime()),
       timestamp: new Date().toISOString(),
     };
@@ -23,7 +22,7 @@ export class HealthController {
     return {
       ok: true,
       database: 'ok',
-      version: appVersion,
+      version: appVersion(),
       timestamp: new Date().toISOString(),
     };
   }
