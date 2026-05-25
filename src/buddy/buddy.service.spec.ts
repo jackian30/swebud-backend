@@ -65,8 +65,14 @@ describe('BuddyService', () => {
       }),
       select: { userId: true },
     }));
-    expect(prisma.buddyRoomParticipant.deleteMany).toHaveBeenCalledWith({ where: { userId, roomId: { not: 'room-1' } } });
-    expect(realtime.emitToUser).toHaveBeenCalledTimes(1);
+    expect(prisma.buddyRoomParticipant.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.buddySessionMessage.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ roomId: 'room-1', senderId: userId, kind: 'joined' }),
+    }));
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-message', expect.objectContaining({
+      roomId: 'room-1',
+      message: expect.objectContaining({ kind: 'joined', senderId: userId }),
+    }));
     expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-joined', expect.objectContaining({
       roomId: 'room-1',
       session: expect.objectContaining({ userId, roomId: 'room-1' }),
@@ -84,7 +90,47 @@ describe('BuddyService', () => {
     expect(realtime.emitToUser).not.toHaveBeenCalled();
   });
 
-  it('only removes expired room participants when the matching session delete wins', async () => {
+  it('emits a socket event to active participants when a user leaves a room', async () => {
+    const realtime = { emitToUser: jest.fn() };
+    prisma.user.findUnique = jest.fn().mockResolvedValue({ id: userId, displayName: 'Fit Master', username: 'fitmaster', profileImageUrl: null });
+    prisma.buddySession = {
+      findUnique: jest.fn().mockResolvedValue({ roomId: 'room-1' }),
+      delete: jest.fn().mockResolvedValue({}),
+      findMany: jest.fn().mockResolvedValue([{ userId: 'user-2' }]),
+      count: jest.fn().mockResolvedValue(1),
+    };
+    prisma.buddySessionMessage = {
+      create: jest.fn().mockResolvedValue({
+        id: 'message-left',
+        roomId: 'room-1',
+        senderId: userId,
+        kind: 'left',
+        body: 'left',
+        createdAt: new Date('2026-05-23T00:02:00.000Z'),
+        sender: { id: userId, displayName: 'Fit Master', username: 'fitmaster', profileImageUrl: null },
+      }),
+    };
+    prisma.buddyRoomParticipant = { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) };
+    service = new BuddyService(prisma, moduleRef(realtime) as any);
+
+    await service.stop(userId);
+
+    expect(prisma.buddyRoomParticipant.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.buddySessionMessage.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ roomId: 'room-1', senderId: userId, kind: 'left' }),
+    }));
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-message', expect.objectContaining({
+      roomId: 'room-1',
+      message: expect.objectContaining({ kind: 'left', senderId: userId }),
+    }));
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-left', expect.objectContaining({
+      roomId: 'room-1',
+      userId,
+      user: expect.objectContaining({ username: 'fitmaster' }),
+    }));
+  });
+
+  it('keeps expired room participant records so private members can return', async () => {
     prisma.buddySession = {
       findMany: jest.fn().mockResolvedValue([
         { userId: 'user-2', roomId: 'room-1' },
@@ -99,8 +145,7 @@ describe('BuddyService', () => {
 
     await (service as any).cleanupExpiredBuddyData();
 
-    expect(prisma.buddyRoomParticipant.deleteMany).toHaveBeenCalledTimes(1);
-    expect(prisma.buddyRoomParticipant.deleteMany).toHaveBeenCalledWith({ where: { roomId: 'room-1', userId: 'user-2' } });
+    expect(prisma.buddyRoomParticipant.deleteMany).not.toHaveBeenCalled();
   });
 
   function configureJoinRoomMocks(previousSession: { roomId: string | null; expiresAt: Date } | null) {
@@ -147,6 +192,17 @@ describe('BuddyService', () => {
         updatedAt: new Date('2026-05-23T00:01:00.000Z'),
       })),
       count: jest.fn().mockResolvedValue(1),
+    };
+    prisma.buddySessionMessage = {
+      create: jest.fn().mockResolvedValue({
+        id: 'message-joined',
+        roomId: 'room-1',
+        senderId: userId,
+        kind: 'joined',
+        body: 'joined',
+        createdAt: new Date('2026-05-23T00:02:00.000Z'),
+        sender: { id: userId, displayName: 'Fit Master', username: 'fitmaster', profileImageUrl: null },
+      }),
     };
   }
 

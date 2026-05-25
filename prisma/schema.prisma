@@ -123,29 +123,6 @@ enum ActivityPersona {
   @@map("activity_persona")
 }
 
-enum BuddyActivity {
-  running
-  gym
-  cycling
-  yoga
-  walking
-  swimming
-  hiking
-  climbing
-  martial_arts
-  dance
-  pilates
-  calisthenics
-  rowing
-  triathlon
-  soccer
-  basketball
-  sports
-  other
-
-  @@map("buddy_activity")
-}
-
 enum BuddySessionScope {
   public
   group
@@ -166,6 +143,17 @@ enum BuddyDiscoveryAudience {
   close_buddies
 
   @@map("buddy_discovery_audience")
+}
+
+enum BuddySessionMessageKind {
+  text
+  gif
+  sticker
+  joined
+  left
+  kicked
+
+  @@map("buddy_session_message_kind")
 }
 
 enum PostReportReason {
@@ -348,6 +336,8 @@ model User {
   groupPosts                GroupPost[]
   sentMessages              Message[]                 @relation("SentMessages")
   receivedMessages          Message[]                 @relation("ReceivedMessages")
+  sentBuddySessionMessages  BuddySessionMessage[]     @relation("SentBuddySessionMessages")
+  buddySessionReadStates    BuddySessionReadState[]
   buddySession              BuddySession?
   createdBuddyRooms         BuddyRoom[]               @relation("BuddyRoomCreators")
   buddyRoomParticipants     BuddyRoomParticipant[]
@@ -414,7 +404,7 @@ model BuddySession {
   id          String                 @id @default(uuid())
   userId      String                 @unique @map("user_id")
   roomId      String?                @map("room_id")
-  activity    BuddyActivity?
+  activity    String?
   subActivity String?                @map("sub_activity")
   note        String?
   visibleTo   BuddyDiscoveryAudience @default(public) @map("visible_to")
@@ -443,7 +433,7 @@ model BuddyRoom {
   code         String                 @unique
   groupId      String?                @map("group_id")
   creatorId    String                 @map("creator_id")
-  activity     BuddyActivity?
+  activity     String?
   subActivity  String?                @map("sub_activity")
   expiresAt    DateTime               @map("expires_at")
   createdAt    DateTime               @default(now()) @map("created_at")
@@ -452,21 +442,66 @@ model BuddyRoom {
   creator      User                   @relation("BuddyRoomCreators", fields: [creatorId], references: [id], onDelete: Cascade)
   sessions     BuddySession[]
   participants BuddyRoomParticipant[]
+  messages     BuddySessionMessage[]
+  readStates   BuddySessionReadState[]
 
   @@index([scope, visibility, expiresAt])
   @@index([groupId, expiresAt])
   @@map("buddy_rooms")
 }
 
+model BuddyActivityOption {
+  activity      String        @id
+  label         String
+  subActivities String[]      @default([]) @map("sub_activities")
+  sortOrder     Int           @default(0) @map("sort_order")
+  enabled       Boolean       @default(true)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+
+  @@index([enabled, sortOrder])
+  @@map("buddy_activity_options")
+}
+
+model BuddySessionMessage {
+  id        String                  @id @default(uuid())
+  roomId    String                  @map("room_id")
+  senderId  String                  @map("sender_id")
+  kind      BuddySessionMessageKind @default(text)
+  body      String
+  createdAt DateTime                @default(now()) @map("created_at")
+  room      BuddyRoom               @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender    User                    @relation("SentBuddySessionMessages", fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@index([roomId, createdAt])
+  @@index([senderId, createdAt])
+  @@map("buddy_session_messages")
+}
+
+model BuddySessionReadState {
+  roomId     String    @map("room_id")
+  userId     String    @map("user_id")
+  lastReadAt DateTime  @map("last_read_at")
+  room       BuddyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([roomId, userId])
+  @@index([userId, lastReadAt])
+  @@map("buddy_session_read_states")
+}
+
 model BuddyRoomParticipant {
-  roomId   String    @map("room_id")
-  userId   String    @map("user_id")
-  joinedAt DateTime  @default(now()) @map("joined_at")
-  room     BuddyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roomId     String    @map("room_id")
+  userId     String    @map("user_id")
+  joinedAt   DateTime  @default(now()) @map("joined_at")
+  kickedAt   DateTime? @map("kicked_at")
+  kickedById String?   @map("kicked_by_id")
+  room       BuddyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([roomId, userId])
   @@index([userId])
+  @@index([kickedById])
   @@map("buddy_room_participants")
 }
 

@@ -1,9 +1,9 @@
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { BuddyActivity, BuddyDiscoveryAudience, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
+import { BuddyDiscoveryAudience, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 
 export class UpsertBuddySessionDto {
-  @IsOptional() @IsEnum(BuddyActivity) activity?: BuddyActivity;
+  @IsOptional() @IsString() @MaxLength(60) activity?: string;
   @IsOptional() @IsString() @MaxLength(60) subActivity?: string;
   @IsOptional() @IsString() @MaxLength(120) note?: string;
   @IsOptional() @IsEnum(BuddyDiscoveryAudience) visibleTo?: BuddyDiscoveryAudience;
@@ -15,7 +15,7 @@ export class UpsertBuddySessionDto {
 }
 
 export class NearbyBuddyQueryDto {
-  @IsOptional() @IsEnum(BuddyActivity) activity?: BuddyActivity;
+  @IsOptional() @IsString() @MaxLength(60) activity?: string;
   @IsOptional() @IsUUID() roomId?: string;
   @Type(() => Number) @IsNumber() @Min(-90) @Max(90) lat!: number;
   @Type(() => Number) @IsNumber() @Min(-180) @Max(180) lng!: number;
@@ -28,7 +28,7 @@ export class CreateBuddyRoomDto {
   @IsOptional() @IsEnum(BuddySessionScope) scope?: BuddySessionScope;
   @IsOptional() @IsEnum(BuddySessionVisibility) visibility?: BuddySessionVisibility;
   @IsOptional() @IsUUID() groupId?: string;
-  @IsOptional() @IsEnum(BuddyActivity) activity?: BuddyActivity;
+  @IsOptional() @IsString() @MaxLength(60) activity?: string;
   @IsOptional() @IsString() @MaxLength(60) subActivity?: string;
   @IsOptional() @IsNumber() @Min(15) @Max(360) ttlMinutes?: number;
 }
@@ -48,4 +48,13 @@ export class JoinBuddyRoomDto {
 export class InviteBuddyRoomDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @IsUUID(undefined, { each: true }) recipientIds!: string[];
   @IsOptional() @IsString() @MaxLength(1000) inviteUrl?: string;
+}
+
+export class SendBuddySessionMessageDto {
+  @IsOptional() @IsEnum(BuddySessionMessageKind) kind?: BuddySessionMessageKind;
+  @IsString() @MaxLength(1000) body!: string;
+}
+
+export class KickBuddyRoomParticipantDto {
+  @IsOptional() @IsString() @MaxLength(240) reason?: string;
 }

@@ -33,11 +33,11 @@ export class KlipyService {
       configured: true,
       next: page && lastPage && page < lastPage ? String(page + 1) : null,
       source: 'klipy',
-      results: items.map((item: any) => this.toMedia(item)).filter((item: any) => item.url),
+      results: items.map((item: any) => this.toMedia(item, kind)).filter((item: any) => item.url),
     };
   }
 
-  private toMedia(item: any) {
+  private toMedia(item: any, kind: KlipyType) {
     const file = item?.file ?? item?.files ?? {};
     const original = this.pickFormat(file, ['md', 'hd', 'sm', 'xs']);
     const preview = this.pickFormat(file, ['sm', 'xs', 'md', 'hd']);
@@ -53,6 +53,7 @@ export class KlipyService {
       width,
       height,
       source: 'klipy',
+      kind,
     };
   }
 

@@ -249,7 +249,7 @@ describe('ChatService', () => {
   it('marks unread messages from the active peer as read and returns total unread count', async () => {
     prisma.message.count.mockResolvedValue(4);
 
-    await expect(service.markRead(userId, peerId)).resolves.toEqual({ count: 4 });
+    await expect(service.markRead(userId, peerId)).resolves.toEqual({ count: 4, readAt: expect.any(Date), readCount: 0 });
 
     expect(prisma.message.updateMany).toHaveBeenCalledWith({
       where: { senderId: peerId, recipientId: userId, readAt: null },

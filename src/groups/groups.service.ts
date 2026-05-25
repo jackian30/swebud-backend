@@ -6,6 +6,11 @@ import { CreateGroupChannelDto, CreateGroupDto, GroupMessageDto, GroupPostDto, R
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
 type GroupListOptions = { take?: number; cursor?: number; discoverOnly?: boolean };
+type GroupChatReadStateWithUser = {
+  userId: string;
+  lastReadAt: Date;
+  user: { id: string; displayName: string | null; username: string | null; profileImageUrl: string | null };
+};
 const DEFAULT_GROUP_CHANNEL_NAME = 'main';
 const DEFAULT_GROUP_CHANNEL_DESCRIPTION = 'Main channel';
 
@@ -259,9 +264,12 @@ export class GroupsService {
   async messages(userId: string, groupId: string, channelId?: string) {
     await this.ensureMember(userId, groupId);
     const channel = channelId ? await this.ensureChannelAccess(userId, groupId, channelId) : await this.defaultChannel(groupId, userId);
-    const messages = await this.prisma.message.findMany({ where: { groupId, channelId: channel.id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() });
     await this.markChannelRead(userId, groupId, channel.id);
-    return messages;
+    const [messages, readStates] = await Promise.all([
+      this.prisma.message.findMany({ where: { groupId, channelId: channel.id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() }),
+      this.channelReadStates(channel.id),
+    ]);
+    return messages.map((message) => this.withReadBy(message, readStates));
   }
 
   async sendMessage(userId: string, groupId: string, channelId: string | undefined, dto: GroupMessageDto) {
@@ -274,7 +282,8 @@ export class GroupsService {
     const body = dto.body.trim();
     if (!body) throw new BadRequestException('Message cannot be empty');
     const referenceData = await this.messageReferenceData(groupId, channel.id, dto);
-    return this.prisma.message.create({ data: { senderId: userId, groupId, channelId: channel.id, body, ...referenceData }, include: this.messageInclude() });
+    const message = await this.prisma.message.create({ data: { senderId: userId, groupId, channelId: channel.id, body, ...referenceData }, include: this.messageInclude() });
+    return this.withReadBy(message, []);
   }
 
   async messageRecipients(groupId: string, channelId: string) {
@@ -328,12 +337,17 @@ export class GroupsService {
     return (group.lastMessage?.createdAt ?? group.createdAt ?? new Date(0)).getTime();
   }
 
-  private async markChannelRead(userId: string, groupId: string, channelId: string) {
-    await this.prisma.groupChatReadState.upsert({
+  async markChannelRead(userId: string, groupId: string, channelId: string) {
+    await this.ensureMember(userId, groupId);
+    await this.ensureChannelAccess(userId, groupId, channelId);
+    const readAt = new Date();
+    const state = await this.prisma.groupChatReadState.upsert({
       where: { userId_channelId: { userId, channelId } },
-      create: { userId, groupId, channelId, lastReadAt: new Date() },
-      update: { groupId, lastReadAt: new Date() },
+      create: { userId, groupId, channelId, lastReadAt: readAt },
+      update: { groupId, lastReadAt: readAt },
+      include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } },
     });
+    return { groupId, channelId, userId, readAt: state.lastReadAt, user: state.user };
   }
 
   private async unreadCountByGroup(userId: string) {
@@ -497,6 +511,22 @@ export class GroupsService {
 
   private messageInclude() {
     return { sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, channel: true, reactions: true } as const;
+  }
+
+  private async channelReadStates(channelId: string) {
+    return this.prisma.groupChatReadState.findMany({
+      where: { channelId },
+      include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } },
+    });
+  }
+
+  private withReadBy<T extends { senderId: string; createdAt: Date }>(message: T, readStates: GroupChatReadStateWithUser[]) {
+    return {
+      ...message,
+      readBy: readStates
+        .filter((state) => state.userId !== message.senderId && state.lastReadAt.getTime() >= message.createdAt.getTime())
+        .map((state) => ({ userId: state.userId, readAt: state.lastReadAt, user: state.user })),
+    };
   }
 
   private async messageReferenceData(groupId: string, channelId: string, dto: GroupMessageDto) {

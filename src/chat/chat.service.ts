@@ -237,8 +237,11 @@ export class ChatService {
   }
 
   async markRead(userId: string, peerId: string) {
-    await this.prisma.message.updateMany({ where: { senderId: peerId, recipientId: userId, readAt: null }, data: { readAt: new Date() } });
-    return this.unreadCount(userId);
+    if (userId === peerId) throw new BadRequestException('Cannot mark your own conversation read');
+    await this.ensureNotBlocked(userId, peerId);
+    const readAt = new Date();
+    const result = await this.prisma.message.updateMany({ where: { senderId: peerId, recipientId: userId, readAt: null }, data: { readAt } });
+    return { ...(await this.unreadCount(userId)), readAt, readCount: result.count };
   }
 
   async react(userId: string, messageId: string, dto: MessageReactionDto) {

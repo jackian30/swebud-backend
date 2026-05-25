@@ -55,5 +55,12 @@ export class ChatController {
   @Get('conversations') conversations(@CurrentUser() user: AuthUser) { return this.chat.conversations(user.id); }
   @Get('conversations/:peerId') conversation(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.conversation(user.id, peerId); }
   @Get('unread-count') unreadCount(@CurrentUser() user: AuthUser) { return this.chat.unreadCount(user.id); }
-  @Patch('conversations/:peerId/read') markRead(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.markRead(user.id, peerId); }
+  @Patch('conversations/:peerId/read') async markRead(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) {
+    const result = await this.chat.markRead(user.id, peerId);
+    if (result.readCount > 0) {
+      this.gateway.emitMessage(peerId, 'chat:read', { readerId: user.id, peerId, readAt: result.readAt });
+      this.gateway.emitMessage(user.id, 'chat:read', { readerId: user.id, peerId, readAt: result.readAt });
+    }
+    return result;
+  }
 }

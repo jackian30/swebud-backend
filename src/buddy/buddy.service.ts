@@ -1,9 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { randomBytes } from 'crypto';
-import { BuddyActivity, BuddyDiscoveryAudience, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
+import { BuddyDiscoveryAudience, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { BuddyRoomQueryDto, CreateBuddyRoomDto, InviteBuddyRoomDto, JoinBuddyRoomDto, NearbyBuddyQueryDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, CreateBuddyRoomDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, SendBuddySessionMessageDto, UpsertBuddySessionDto } from './dto';
 import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/activity-personas';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
@@ -35,6 +35,7 @@ export class BuddyService {
 
   async upsert(userId: string, dto: UpsertBuddySessionDto) {
     const room = dto.roomId ? await this.ensureCanJoinRoom(userId, { roomId: dto.roomId }) : null;
+    if (!room) await this.ensureActivityOption(dto.activity);
     return this.saveSession(userId, dto, room);
   }
 
@@ -43,7 +44,7 @@ export class BuddyService {
     const wasActiveInRoom = Boolean(room?.id && previousSession && previousSession.roomId === room.id && previousSession.expiresAt > new Date());
     const ttlMinutes = Math.min(Math.max(dto.ttlMinutes ?? DEFAULT_TTL_MINUTES, 5), 120);
     const expiresAt = new Date(Date.now() + ttlMinutes * 60_000);
-    const activity = room?.activity ?? dto.activity ?? null;
+    const activity = room?.activity ?? dto.activity?.trim() ?? null;
     const subActivity = (room?.subActivity ?? dto.subActivity)?.trim() || null;
     const note = dto.note?.trim() || null;
     const visibleTo = dto.visibleTo ?? BuddyDiscoveryAudience.public;
@@ -69,20 +70,21 @@ export class BuddyService {
         await tx.buddyRoomParticipant.upsert({
           where: { roomId_userId: { roomId: room.id, userId } },
           create: { roomId: room.id, userId },
-          update: {},
+          update: { kickedAt: null, kickedById: null },
         });
-        await tx.buddyRoomParticipant.deleteMany({ where: { userId, roomId: { not: room.id } } });
         await tx.buddyRoom.updateMany({ where: { id: room.id }, data: { expiresAt: this.roomExpiresAt() } });
-      } else {
-        await tx.buddyRoomParticipant.deleteMany({ where: { userId } });
       }
       return saved;
     });
     if (previousSession?.roomId && previousSession.roomId !== room?.id) {
+      await this.emitRoomLeft(userId, previousSession.roomId).catch(() => undefined);
       await this.closeRoomIfNoActiveParticipants(previousSession.roomId);
     }
     const buddy = this.toBuddy(session, dto.latitude, dto.longitude);
-    if (room?.id && !wasActiveInRoom) await this.emitRoomJoined(userId, room.id, buddy).catch(() => undefined);
+    if (room?.id && !wasActiveInRoom) {
+      await this.createRoomEventMessage(room.id, userId, BuddySessionMessageKind.joined).catch(() => undefined);
+      await this.emitRoomJoined(userId, room.id, buddy).catch(() => undefined);
+    }
     return buddy;
   }
 
@@ -90,7 +92,8 @@ export class BuddyService {
     const session = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true } });
     await this.prisma.buddySession.delete({ where: { userId } }).catch(() => null);
     if (session?.roomId) {
-      await this.prisma.buddyRoomParticipant.deleteMany({ where: { roomId: session.roomId, userId } });
+      await this.createRoomEventMessage(session.roomId, userId, BuddySessionMessageKind.left).catch(() => undefined);
+      await this.emitRoomLeft(userId, session.roomId).catch(() => undefined);
       await this.closeRoomIfNoActiveParticipants(session.roomId);
     }
     return { ok: true };
@@ -98,6 +101,8 @@ export class BuddyService {
 
   async nearby(userId: string, query: NearbyBuddyQueryDto) {
     this.scheduleExpiredDataCleanup();
+    const queryActivity = query.activity?.trim() || null;
+    await this.ensureActivityOption(queryActivity);
     const now = new Date();
     const radiusKm = query.radiusKm ?? DEFAULT_RADIUS_KM;
     const take = query.take ?? DEFAULT_TAKE;
@@ -109,7 +114,7 @@ export class BuddyService {
       where: {
         userId: { not: userId, notIn: blocked },
         roomId: room ? room.id : null,
-        ...(query.activity && !room ? { activity: query.activity } : {}),
+        ...(queryActivity && !room ? { activity: queryActivity } : {}),
         expiresAt: { gt: now },
         ...(!room ? this.nearbyBoundsWhere(query.lat, query.lng, radiusKm) : {}),
         ...(!room ? {
@@ -145,9 +150,10 @@ export class BuddyService {
       baseWhere.scope = 'public';
       baseWhere.OR = [
         { creatorId: userId },
-        { participants: { some: { userId } } },
+        { participants: { some: { userId, kickedAt: null } } },
       ];
     }
+    baseWhere.NOT = { participants: { some: { userId, kickedAt: { not: null } } } };
     const where = { ...baseWhere, sessions: { some: { expiresAt: { gt: now } } } };
     const rooms = await this.prisma.buddyRoom.findMany({ where, orderBy: { createdAt: 'desc' }, include: this.roomInclude(now) });
     await this.closeInactiveRoomsForList(baseWhere, now);
@@ -161,6 +167,7 @@ export class BuddyService {
   }
 
   async createRoom(userId: string, dto: CreateBuddyRoomDto) {
+    await this.ensureActivityOption(dto.activity);
     const scope = dto.groupId ? BuddySessionScope.group : (dto.scope ?? BuddySessionScope.public);
     if (scope === BuddySessionScope.group) {
       if (!dto.groupId) throw new BadRequestException('Group buddy sessions need a group.');
@@ -175,7 +182,7 @@ export class BuddyService {
         code: await this.uniqueRoomCode(),
         groupId: scope === BuddySessionScope.group ? dto.groupId : null,
         creatorId: userId,
-        activity: dto.activity ?? null,
+        activity: dto.activity?.trim() || null,
         subActivity: dto.subActivity?.trim() || null,
         expiresAt: this.roomExpiresAt(),
         participants: { create: { userId } },
@@ -227,6 +234,122 @@ export class BuddyService {
     };
   }
 
+  async roomMessages(userId: string, roomId: string) {
+    await this.ensureActiveRoomParticipant(userId, roomId);
+    const [messages, participants, readStates] = await Promise.all([
+      this.prisma.buddySessionMessage.findMany({
+        where: { roomId },
+        orderBy: { createdAt: 'desc' },
+        take: 100,
+        include: this.sessionMessageInclude(),
+      }),
+      this.prisma.buddyRoomParticipant.findMany({
+        where: { roomId, kickedAt: null },
+        select: {
+          userId: true,
+          joinedAt: true,
+          user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
+        },
+      }),
+      this.prisma.buddySessionReadState.findMany({
+        where: { roomId },
+        include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } },
+      }),
+    ]);
+    const joinedMessageUserIds = new Set(messages.filter((message) => message.kind === BuddySessionMessageKind.joined).map((message) => message.senderId));
+    const syntheticJoinedMessages = participants
+      .filter((participant) => !joinedMessageUserIds.has(participant.userId))
+      .map((participant) => ({
+        id: `participant:${roomId}:${participant.userId}:joined`,
+        roomId,
+        senderId: participant.userId,
+        kind: BuddySessionMessageKind.joined,
+        body: BuddySessionMessageKind.joined,
+        createdAt: participant.joinedAt,
+        sender: participant.user,
+      }));
+    return [...messages.map((message) => this.toSessionMessage(message, readStates)), ...syntheticJoinedMessages]
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      .slice(-100);
+  }
+
+  async sendRoomMessage(userId: string, roomId: string, dto: SendBuddySessionMessageDto) {
+    await this.ensureActiveRoomParticipant(userId, roomId);
+    const body = dto.body.trim();
+    if (!body) throw new BadRequestException('Message cannot be empty.');
+    const kind = dto.kind ?? BuddySessionMessageKind.text;
+    const userMessageKinds: BuddySessionMessageKind[] = [BuddySessionMessageKind.text, BuddySessionMessageKind.gif, BuddySessionMessageKind.sticker];
+    if (!userMessageKinds.includes(kind)) {
+      throw new BadRequestException('Unsupported session message kind.');
+    }
+    if ((kind === BuddySessionMessageKind.gif || kind === BuddySessionMessageKind.sticker) && !this.isTrustedSessionMediaUrl(body)) {
+      throw new BadRequestException('GIF or sticker message must use a trusted media URL.');
+    }
+    const message = await this.prisma.buddySessionMessage.create({
+      data: { roomId, senderId: userId, kind, body },
+      include: this.sessionMessageInclude(),
+    });
+    const payload = this.toSessionMessage(message);
+    await this.emitRoomMessage(roomId, payload).catch(() => undefined);
+    return payload;
+  }
+
+  async markRoomMessagesRead(userId: string, roomId: string) {
+    await this.ensureActiveRoomParticipant(userId, roomId);
+    const readAt = new Date();
+    const [state, user] = await Promise.all([
+      this.prisma.buddySessionReadState.upsert({
+        where: { roomId_userId: { roomId, userId } },
+        create: { roomId, userId, lastReadAt: readAt },
+        update: { lastReadAt: readAt },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, displayName: true, username: true, profileImageUrl: true },
+      }),
+    ]);
+    const payload = { roomId, userId, readAt: state.lastReadAt, user };
+    await this.emitRoomRead(roomId, payload).catch(() => undefined);
+    return { ok: true, ...payload };
+  }
+
+  async kickRoomParticipant(userId: string, roomId: string, targetUserId: string, dto: KickBuddyRoomParticipantDto = {}) {
+    if (userId === targetUserId) throw new BadRequestException('You cannot kick yourself from the session.');
+    const room = await this.prisma.buddyRoom.findUnique({
+      where: { id: roomId },
+      include: {
+        participants: { select: { userId: true, kickedAt: true } },
+      },
+    });
+    if (!room || room.expiresAt <= new Date()) throw new NotFoundException('Buddy session not found');
+    if (room.creatorId !== userId) throw new ForbiddenException('Only the creator can kick people from this buddy session.');
+    if (room.creatorId === targetUserId) throw new BadRequestException('The session creator cannot be kicked.');
+    const participant = room.participants.find((item) => item.userId === targetUserId);
+    if (!participant || participant.kickedAt) throw new NotFoundException('Participant not found in this buddy session.');
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, displayName: true, username: true, profileImageUrl: true },
+    });
+    if (!target) throw new NotFoundException('Participant not found.');
+    const kickedAt = new Date();
+    const reason = dto.reason?.trim() || null;
+    const message = await this.prisma.$transaction(async (tx) => {
+      await tx.buddyRoomParticipant.update({
+        where: { roomId_userId: { roomId, userId: targetUserId } },
+        data: { kickedAt, kickedById: userId },
+      });
+      await tx.buddySession.deleteMany({ where: { roomId, userId: targetUserId } });
+      return tx.buddySessionMessage.create({
+        data: { roomId, senderId: targetUserId, kind: BuddySessionMessageKind.kicked, body: reason || BuddySessionMessageKind.kicked },
+        include: this.sessionMessageInclude(),
+      });
+    });
+    await this.emitRoomMessage(roomId, this.toSessionMessage(message)).catch(() => undefined);
+    await this.emitRoomKicked(roomId, targetUserId, target, userId, kickedAt).catch(() => undefined);
+    await this.closeRoomIfNoActiveParticipants(roomId);
+    return { ok: true };
+  }
+
   async closeRoom(userId: string, roomId: string) {
     const room = await this.prisma.buddyRoom.findUnique({ where: { id: roomId }, select: { creatorId: true } });
     if (!room) throw new NotFoundException('Buddy session not found');
@@ -242,7 +365,7 @@ export class BuddyService {
   private async closeRoomIfNoActiveParticipants(roomId: string) {
     const activeParticipants = await this.prisma.buddySession.count({ where: { roomId, expiresAt: { gt: new Date() } } });
     if (activeParticipants > 0) return;
-    await this.prisma.buddyRoom.deleteMany({ where: { id: roomId, expiresAt: { lte: new Date() } } }).catch(() => null);
+    await this.prisma.buddyRoom.deleteMany({ where: { id: roomId } }).catch(() => null);
   }
 
   private async closeInactiveRoomsForList(where: any, now = new Date()) {
@@ -270,6 +393,67 @@ export class BuddyService {
     for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-joined', event);
   }
 
+  private async emitRoomLeft(userId: string, roomId: string) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const [recipients, user] = await Promise.all([
+      this.prisma.buddySession.findMany({
+        where: { roomId, userId: { not: userId }, expiresAt: { gt: new Date() } },
+        select: { userId: true },
+      }),
+      this.prisma.user.findUnique({
+        where: { id: userId },
+        select: { id: true, displayName: true, username: true, profileImageUrl: true },
+      }),
+    ]);
+    if (!user) return;
+    const leftAt = new Date().toISOString();
+    const event = { id: `${roomId}:${userId}:left:${leftAt}`, roomId, userId, user, leftAt };
+    for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-left', event);
+  }
+
+  private async createRoomEventMessage(roomId: string, userId: string, kind: Extract<BuddySessionMessageKind, 'joined' | 'left' | 'kicked'>) {
+    const message = await this.prisma.buddySessionMessage.create({
+      data: { roomId, senderId: userId, kind, body: kind },
+      include: this.sessionMessageInclude(),
+    });
+    const payload = this.toSessionMessage(message);
+    await this.emitRoomMessage(roomId, payload).catch(() => undefined);
+    return payload;
+  }
+
+  private async emitRoomMessage(roomId: string, message: any) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const recipients = await this.prisma.buddySession.findMany({
+      where: { roomId, expiresAt: { gt: new Date() } },
+      select: { userId: true },
+    });
+    for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-message', { roomId, message });
+  }
+
+  private async emitRoomRead(roomId: string, payload: any) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const recipients = await this.prisma.buddySession.findMany({
+      where: { roomId, expiresAt: { gt: new Date() } },
+      select: { userId: true },
+    });
+    for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-read', payload);
+  }
+
+  private async emitRoomKicked(roomId: string, userId: string, user: any, kickedById: string, kickedAt: Date) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const recipients = await this.prisma.buddySession.findMany({
+      where: { roomId, userId: { not: userId }, expiresAt: { gt: new Date() } },
+      select: { userId: true },
+    });
+    const event = { id: `${roomId}:${userId}:kicked:${kickedAt.toISOString()}`, roomId, userId, user, kickedById, kickedAt: kickedAt.toISOString() };
+    for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-kicked', event);
+    realtime.emitToUser(userId, 'buddy:room-kicked', event);
+  }
+
   private scheduleExpiredDataCleanup() {
     const nowMs = Date.now();
     if (this.cleanupPromise || nowMs - this.lastCleanupAt < BUDDY_CLEANUP_INTERVAL_MS) return;
@@ -288,10 +472,7 @@ export class BuddyService {
         take: 500,
       });
       for (const session of expiredSessions) {
-        const deleted = await tx.buddySession.deleteMany({ where: { userId: session.userId, expiresAt: { lte: now } } });
-        if (deleted.count > 0 && session.roomId) {
-          await tx.buddyRoomParticipant.deleteMany({ where: { roomId: session.roomId, userId: session.userId } });
-        }
+        await tx.buddySession.deleteMany({ where: { userId: session.userId, expiresAt: { lte: now } } });
       }
       await tx.buddyRoom.deleteMany({
         where: {
@@ -312,8 +493,30 @@ export class BuddyService {
     return this.realtime;
   }
 
-  activityOptions() {
-    return Object.values(BuddyActivity);
+  async activityOptions() {
+    const options = await this.prisma.buddyActivityOption.findMany({
+      where: { enabled: true },
+      orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
+      select: { activity: true, label: true, subActivities: true },
+    });
+    if (options.length) {
+      return options.map((option) => ({
+        value: option.activity,
+        label: option.label,
+        subActivities: option.subActivities,
+      }));
+    }
+    return [];
+  }
+
+  private async ensureActivityOption(activity?: string | null) {
+    const trimmed = activity?.trim();
+    if (!trimmed) return;
+    const option = await this.prisma.buddyActivityOption.findFirst({
+      where: { activity: trimmed, enabled: true },
+      select: { activity: true },
+    });
+    if (!option) throw new BadRequestException('Unknown buddy activity.');
   }
 
   private async ensureCanJoinRoom(userId: string, dto: { roomId?: string; code?: string }) {
@@ -324,6 +527,7 @@ export class BuddyService {
     });
     if (!room || room.expiresAt <= new Date()) throw new NotFoundException('Buddy session not found');
     if (room.scope === BuddySessionScope.group) await this.ensureGroupMember(userId, room.groupId!);
+    if (this.isKickedFromRoom(userId, room)) throw new ForbiddenException('You were removed from this buddy session.');
     if (room.visibility === BuddySessionVisibility.private && !this.canAccessPrivateRoom(userId, room) && dto.code?.trim().toUpperCase() !== room.code) {
       throw new ForbiddenException('Enter the buddy session code to join.');
     }
@@ -340,6 +544,14 @@ export class BuddyService {
     return room;
   }
 
+  private async ensureActiveRoomParticipant(userId: string, roomId: string) {
+    const session = await this.prisma.buddySession.findFirst({
+      where: { userId, roomId, expiresAt: { gt: new Date() } },
+      select: { id: true },
+    });
+    if (!session) throw new ForbiddenException('Join this buddy session first.');
+  }
+
   private async inviteCandidateWhere(userId: string, room: any, options: { q?: string; recipientIds?: string[]; excludeParticipants?: boolean } = {}) {
     const filters: any[] = [
       { id: { not: userId } },
@@ -350,7 +562,7 @@ export class BuddyService {
     ];
     const blocked = await this.blockedUserIds(userId);
     if (blocked.length) filters.push({ id: { notIn: blocked } });
-    if (options.excludeParticipants) filters.push({ buddyRoomParticipants: { none: { roomId: room.id } } });
+    if (options.excludeParticipants) filters.push({ buddyRoomParticipants: { none: { roomId: room.id, kickedAt: null } } });
     if (room.scope === BuddySessionScope.group) filters.push({ groupMembers: { some: { groupId: room.groupId } } });
     if (options.recipientIds?.length) filters.push({ id: { in: options.recipientIds } });
     const q = options.q?.trim();
@@ -396,11 +608,24 @@ export class BuddyService {
   }
 
   private canAccessPrivateRoom(userId: string, room: any) {
-    return room.creatorId === userId || Boolean(room.participants?.some((participant: { userId: string }) => participant.userId === userId));
+    return room.creatorId === userId || Boolean(room.participants?.some((participant: { userId: string; kickedAt?: Date | string | null }) => participant.userId === userId && !participant.kickedAt));
+  }
+
+  private isKickedFromRoom(userId: string, room: any) {
+    return Boolean(room.participants?.some((participant: { userId: string; kickedAt?: Date | string | null }) => participant.userId === userId && participant.kickedAt));
   }
 
   private canRevealRoomCode(userId: string, room: any) {
     return room.creatorId === userId;
+  }
+
+  private isTrustedSessionMediaUrl(value: string) {
+    try {
+      const parsed = new URL(value);
+      return parsed.protocol === 'https:' && /\.(gif|png|jpe?g|webp|avif)(\?.*)?$/i.test(parsed.href);
+    } catch {
+      return false;
+    }
   }
 
   private activeRoomSessionCount(roomId: string) {
@@ -498,6 +723,25 @@ export class BuddyService {
     };
   }
 
+  private toSessionMessage(message: any, readStates: any[] = []) {
+    return {
+      id: message.id,
+      roomId: message.roomId,
+      senderId: message.senderId,
+      kind: message.kind,
+      body: message.body,
+      createdAt: message.createdAt,
+      sender: message.sender,
+      readBy: readStates
+        .filter((state) => state.userId !== message.senderId && state.lastReadAt >= message.createdAt)
+        .map((state) => ({
+          userId: state.userId,
+          readAt: state.lastReadAt,
+          user: state.user,
+        })),
+    };
+  }
+
   private sessionInclude() {
     return { user: { select: this.userSelect() }, room: { include: this.roomInclude() } } as const;
   }
@@ -540,7 +784,7 @@ export class BuddyService {
     return {
       group: { select: { id: true, name: true, slug: true } },
       creator: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
-      participants: { select: { userId: true } },
+      participants: { select: { userId: true, kickedAt: true } },
       _count: { select: { sessions: { where: { expiresAt: { gt: now } } } } },
     } as const;
   }
@@ -576,6 +820,12 @@ export class BuddyService {
       sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       recipient: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       reactions: true,
+    } as const;
+  }
+
+  private sessionMessageInclude() {
+    return {
+      sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
     } as const;
   }
 }

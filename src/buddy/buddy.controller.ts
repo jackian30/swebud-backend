@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } fro
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { BuddyService } from './buddy.service';
-import { BuddyRoomQueryDto, CreateBuddyRoomDto, InviteBuddyRoomDto, JoinBuddyRoomDto, NearbyBuddyQueryDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, CreateBuddyRoomDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, SendBuddySessionMessageDto, UpsertBuddySessionDto } from './dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('buddy')
@@ -25,6 +25,23 @@ export class BuddyController {
   @Post('rooms/:id/invites') async inviteRoom(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: InviteBuddyRoomDto) {
     const result = await this.buddy.inviteRoom(user.id, id, dto);
     return { sent: result.sent, recipients: result.recipients };
+  }
+  @Get('rooms/:id/messages') roomMessages(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.buddy.roomMessages(user.id, id);
+  }
+  @Post('rooms/:id/messages') sendRoomMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: SendBuddySessionMessageDto) {
+    return this.buddy.sendRoomMessage(user.id, id, dto);
+  }
+  @Post('rooms/:id/messages/read') markRoomMessagesRead(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.buddy.markRoomMessagesRead(user.id, id);
+  }
+  @Delete('rooms/:id/participants/:userId') kickRoomParticipant(
+    @CurrentUser() user: AuthUser,
+    @Param('id') id: string,
+    @Param('userId') targetUserId: string,
+    @Body() dto: KickBuddyRoomParticipantDto,
+  ) {
+    return this.buddy.kickRoomParticipant(user.id, id, targetUserId, dto);
   }
   @Delete('rooms/:id') closeRoom(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.buddy.closeRoom(user.id, id); }
 }

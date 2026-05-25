@@ -54,6 +54,12 @@ export class GroupsController {
   @Get(':id/channels') channels(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.groups.channels(user.id, id); }
   @Post(':id/channels') createChannel(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: CreateGroupChannelDto) { return this.groups.createChannel(user.id, id, dto); }
   @Get(':id/channels/:channelId/messages') channelMessages(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('channelId') channelId: string) { return this.groups.messages(user.id, id, channelId); }
+  @Patch(':id/channels/:channelId/read') async markChannelRead(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('channelId') channelId: string) {
+    const result = await this.groups.markChannelRead(user.id, id, channelId);
+    const recipients = await this.groups.messageRecipients(id, channelId);
+    for (const recipientId of recipients) this.chatGateway.emitMessage(recipientId, 'chat:group-read', result);
+    return result;
+  }
   @Post(':id/channels/:channelId/messages') async sendChannelMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('channelId') channelId: string, @Body() dto: GroupMessageDto) {
     const message = await this.groups.sendMessage(user.id, id, channelId, dto);
     const recipients = await this.groups.messageRecipients(id, message.channelId ?? channelId);
