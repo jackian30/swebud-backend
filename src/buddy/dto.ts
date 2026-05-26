@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
 import { BuddyDiscoveryAudience, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 
 export class UpsertBuddySessionDto {
@@ -19,8 +19,15 @@ export class NearbyBuddyQueryDto {
   @IsOptional() @IsUUID() roomId?: string;
   @Type(() => Number) @IsNumber() @Min(-90) @Max(90) lat!: number;
   @Type(() => Number) @IsNumber() @Min(-180) @Max(180) lng!: number;
-  @IsOptional() @Type(() => Number) @IsNumber() @Min(1) @Max(100) radiusKm?: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(0.1) @Max(100) radiusKm?: number;
   @IsOptional() @Type(() => Number) @IsNumber() @Min(1) @Max(100) take?: number;
+}
+
+export class DiscoverableBuddyQueryDto {
+  @IsOptional() @IsString() @MaxLength(60) activity?: string;
+  @Type(() => Number) @IsNumber() @Min(-90) @Max(90) lat!: number;
+  @Type(() => Number) @IsNumber() @Min(-180) @Max(180) lng!: number;
+  @IsOptional() @Type(() => Number) @IsNumber() @Min(1) @Max(500) take?: number;
 }
 
 export class CreateBuddyRoomDto {
@@ -53,6 +60,14 @@ export class InviteBuddyRoomDto {
 export class SendBuddySessionMessageDto {
   @IsOptional() @IsEnum(BuddySessionMessageKind) kind?: BuddySessionMessageKind;
   @IsString() @MaxLength(1000) body!: string;
+  @IsOptional() @IsIn(['message']) referenceType?: 'message';
+  @IsOptional() @IsString() @MaxLength(120) referenceId?: string;
+  @IsOptional() @IsString() @MaxLength(500) referenceText?: string;
+  @IsOptional() @IsString() @MaxLength(120) referenceAuthorName?: string;
+}
+
+export class BuddySessionMessageReactionDto {
+  @IsString() @MaxLength(32) emoji!: string;
 }
 
 export class KickBuddyRoomParticipantDto {

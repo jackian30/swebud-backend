@@ -337,6 +337,8 @@ model User {
   sentMessages              Message[]                 @relation("SentMessages")
   receivedMessages          Message[]                 @relation("ReceivedMessages")
   sentBuddySessionMessages  BuddySessionMessage[]     @relation("SentBuddySessionMessages")
+  buddySessionMessageReactions BuddySessionMessageReaction[]
+  hiddenBuddySessionMessages BuddySessionHiddenMessage[]
   buddySessionReadStates    BuddySessionReadState[]
   buddySession              BuddySession?
   createdBuddyRooms         BuddyRoom[]               @relation("BuddyRoomCreators")
@@ -464,18 +466,53 @@ model BuddyActivityOption {
 }
 
 model BuddySessionMessage {
-  id        String                  @id @default(uuid())
-  roomId    String                  @map("room_id")
-  senderId  String                  @map("sender_id")
-  kind      BuddySessionMessageKind @default(text)
-  body      String
-  createdAt DateTime                @default(now()) @map("created_at")
-  room      BuddyRoom               @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  sender    User                    @relation("SentBuddySessionMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  id                  String                        @id @default(uuid())
+  roomId              String                        @map("room_id")
+  senderId            String                        @map("sender_id")
+  kind                BuddySessionMessageKind       @default(text)
+  body                String
+  referenceType       String?                       @map("reference_type")
+  referenceId         String?                       @map("reference_id")
+  referenceText       String?                       @map("reference_text")
+  referenceAuthorName String?                       @map("reference_author_name")
+  deletedAt           DateTime?                     @map("deleted_at")
+  deletedById         String?                       @map("deleted_by_id")
+  createdAt           DateTime                      @default(now()) @map("created_at")
+  room                BuddyRoom                     @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  sender              User                          @relation("SentBuddySessionMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  reactions           BuddySessionMessageReaction[]
+  hiddenBy            BuddySessionHiddenMessage[]
 
   @@index([roomId, createdAt])
   @@index([senderId, createdAt])
   @@map("buddy_session_messages")
+}
+
+model BuddySessionHiddenMessage {
+  messageId String              @map("message_id")
+  userId    String              @map("user_id")
+  hiddenAt  DateTime            @default(now()) @map("hidden_at")
+  message   BuddySessionMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([messageId, userId])
+  @@index([userId, hiddenAt])
+  @@map("buddy_session_hidden_messages")
+}
+
+model BuddySessionMessageReaction {
+  id        String              @id @default(uuid())
+  messageId String              @map("message_id")
+  userId    String              @map("user_id")
+  emoji     String
+  createdAt DateTime            @default(now()) @map("created_at")
+  message   BuddySessionMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId, emoji])
+  @@unique([messageId, userId])
+  @@index([messageId])
+  @@map("buddy_session_message_reactions")
 }
 
 model BuddySessionReadState {

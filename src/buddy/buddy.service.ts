@@ -3,21 +3,27 @@ import { ModuleRef } from '@nestjs/core';
 import { randomBytes } from 'crypto';
 import { BuddyDiscoveryAudience, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { BuddyRoomQueryDto, CreateBuddyRoomDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, SendBuddySessionMessageDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, SendBuddySessionMessageDto, UpsertBuddySessionDto } from './dto';
 import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/activity-personas';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
 const DEFAULT_TTL_MINUTES = 60;
 const ROOM_INACTIVITY_MS = 60 * 60_000;
-const DEFAULT_RADIUS_KM = 100;
+const DEFAULT_RADIUS_KM = 5;
 const DEFAULT_TAKE = 50;
+const DEFAULT_DISCOVERABLE_TAKE = 250;
+const MAX_DISCOVERABLE_TAKE = 500;
 const BUDDY_CLEANUP_INTERVAL_MS = 5 * 60_000;
+const ROOM_LOCATION_EVENT_MIN_INTERVAL_MS = 1_000;
+const DISCOVERY_SESSION_EVENT_MIN_INTERVAL_MS = 2_000;
 
 @Injectable()
 export class BuddyService {
   private realtime: NotificationsGateway | null | undefined;
   private cleanupPromise: Promise<void> | null = null;
   private lastCleanupAt = 0;
+  private roomLocationEventAt = new Map<string, number>();
+  private discoverySessionEventAt = new Map<string, number>();
 
   constructor(private prisma: PrismaService, private moduleRef: ModuleRef) {}
 
@@ -40,7 +46,7 @@ export class BuddyService {
   }
 
   private async saveSession(userId: string, dto: UpsertBuddySessionDto, room: any) {
-    const previousSession = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true, expiresAt: true } });
+    const previousSession = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true, expiresAt: true, latitude: true, longitude: true } });
     const wasActiveInRoom = Boolean(room?.id && previousSession && previousSession.roomId === room.id && previousSession.expiresAt > new Date());
     const ttlMinutes = Math.min(Math.max(dto.ttlMinutes ?? DEFAULT_TTL_MINUTES, 5), 120);
     const expiresAt = new Date(Date.now() + ttlMinutes * 60_000);
@@ -80,21 +86,30 @@ export class BuddyService {
       await this.emitRoomLeft(userId, previousSession.roomId).catch(() => undefined);
       await this.closeRoomIfNoActiveParticipants(previousSession.roomId);
     }
+    if (previousSession && !previousSession.roomId && room?.id) {
+      await this.emitDiscoverySessionStopped(userId, previousSession).catch(() => undefined);
+    }
     const buddy = this.toBuddy(session, dto.latitude, dto.longitude);
     if (room?.id && !wasActiveInRoom) {
       await this.createRoomEventMessage(room.id, userId, BuddySessionMessageKind.joined).catch(() => undefined);
       await this.emitRoomJoined(userId, room.id, buddy).catch(() => undefined);
+    } else if (room?.id && wasActiveInRoom) {
+      await this.emitRoomLocationUpdated(userId, room.id, buddy).catch(() => undefined);
+    } else if (!room?.id) {
+      await this.emitDiscoverySessionUpdated(userId, buddy).catch(() => undefined);
     }
     return buddy;
   }
 
   async stop(userId: string) {
-    const session = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true } });
+    const session = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true, latitude: true, longitude: true } });
     await this.prisma.buddySession.delete({ where: { userId } }).catch(() => null);
     if (session?.roomId) {
       await this.createRoomEventMessage(session.roomId, userId, BuddySessionMessageKind.left).catch(() => undefined);
       await this.emitRoomLeft(userId, session.roomId).catch(() => undefined);
       await this.closeRoomIfNoActiveParticipants(session.roomId);
+    } else if (session) {
+      await this.emitDiscoverySessionStopped(userId, session).catch(() => undefined);
     }
     return { ok: true };
   }
@@ -132,6 +147,35 @@ export class BuddyService {
       .map((session) => this.toBuddy(session, query.lat, query.lng))
       .sort((a, b) => a.distanceKm - b.distanceKm);
     return room ? sorted : sorted.filter((session) => session.distanceKm <= radiusKm).slice(0, take);
+  }
+
+  async discoverable(userId: string, query: DiscoverableBuddyQueryDto) {
+    this.scheduleExpiredDataCleanup();
+    const queryActivity = query.activity?.trim() || null;
+    await this.ensureActivityOption(queryActivity);
+    const now = new Date();
+    const take = Math.min(Math.max(query.take ?? DEFAULT_DISCOVERABLE_TAKE, 1), MAX_DISCOVERABLE_TAKE);
+    const blocked = await this.blockedUserIds(userId);
+    const viewerSession = await this.prisma.buddySession.findUnique({ where: { userId }, select: { canSee: true, expiresAt: true } });
+    const canSee = viewerSession && viewerSession.expiresAt > now ? viewerSession.canSee : BuddyDiscoveryAudience.public;
+    const sessions = await this.prisma.buddySession.findMany({
+      where: {
+        userId: { not: userId, notIn: blocked },
+        roomId: null,
+        ...(queryActivity ? { activity: queryActivity } : {}),
+        expiresAt: { gt: now },
+        AND: [
+          this.visibleToViewerWhere(userId),
+          this.viewerCanSeeWhere(userId, canSee),
+        ],
+      },
+      include: this.sessionInclude(),
+      orderBy: { updatedAt: 'desc' },
+      take,
+    });
+    return sessions
+      .map((session) => this.toBuddy(session, query.lat, query.lng))
+      .sort((a, b) => a.distanceKm - b.distanceKm);
   }
 
   async rooms(userId: string, query: BuddyRoomQueryDto = {}) {
@@ -238,7 +282,7 @@ export class BuddyService {
     await this.ensureActiveRoomParticipant(userId, roomId);
     const [messages, participants, readStates] = await Promise.all([
       this.prisma.buddySessionMessage.findMany({
-        where: { roomId },
+        where: { roomId, hiddenBy: { none: { userId } } },
         orderBy: { createdAt: 'desc' },
         take: 100,
         include: this.sessionMessageInclude(),
@@ -278,20 +322,68 @@ export class BuddyService {
     const body = dto.body.trim();
     if (!body) throw new BadRequestException('Message cannot be empty.');
     const kind = dto.kind ?? BuddySessionMessageKind.text;
-    const userMessageKinds: BuddySessionMessageKind[] = [BuddySessionMessageKind.text, BuddySessionMessageKind.gif, BuddySessionMessageKind.sticker];
+    const userMessageKinds: BuddySessionMessageKind[] = [BuddySessionMessageKind.text, BuddySessionMessageKind.gif];
     if (!userMessageKinds.includes(kind)) {
       throw new BadRequestException('Unsupported session message kind.');
     }
-    if ((kind === BuddySessionMessageKind.gif || kind === BuddySessionMessageKind.sticker) && !this.isTrustedSessionMediaUrl(body)) {
-      throw new BadRequestException('GIF or sticker message must use a trusted media URL.');
+    if (kind === BuddySessionMessageKind.gif && !this.isTrustedSessionGifUrl(body)) {
+      throw new BadRequestException('GIF message must use a trusted GIF URL.');
     }
     const message = await this.prisma.buddySessionMessage.create({
-      data: { roomId, senderId: userId, kind, body },
+      data: { roomId, senderId: userId, kind, body, ...await this.roomMessageReferenceData(roomId, dto) },
       include: this.sessionMessageInclude(),
     });
     const payload = this.toSessionMessage(message);
     await this.emitRoomMessage(roomId, payload).catch(() => undefined);
     return payload;
+  }
+
+  async reactToRoomMessage(userId: string, roomId: string, messageId: string, dto: BuddySessionMessageReactionDto) {
+    const emoji = this.allowedReaction(dto.emoji);
+    await this.ensureCanAccessRoomMessage(userId, roomId, messageId);
+    await this.prisma.$transaction([
+      this.prisma.buddySessionMessageReaction.deleteMany({ where: { messageId, userId } }),
+      this.prisma.buddySessionMessageReaction.create({ data: { messageId, userId, emoji } }),
+    ]);
+    return this.emitUpdatedRoomMessage(roomId, messageId);
+  }
+
+  async unreactToRoomMessage(userId: string, roomId: string, messageId: string, emoji: string) {
+    await this.ensureCanAccessRoomMessage(userId, roomId, messageId);
+    await this.prisma.buddySessionMessageReaction.deleteMany({ where: { messageId, userId, emoji } });
+    return this.emitUpdatedRoomMessage(roomId, messageId);
+  }
+
+  async unsendRoomMessage(userId: string, roomId: string, messageId: string) {
+    const message = await this.ensureCanAccessRoomMessage(userId, roomId, messageId);
+    if (message.senderId !== userId) throw new ForbiddenException('Only the sender can unsend this message.');
+    await this.prisma.buddySessionMessageReaction.deleteMany({ where: { messageId } });
+    const updated = await this.prisma.buddySessionMessage.update({
+      where: { id: messageId },
+      data: {
+        body: '',
+        referenceType: null,
+        referenceId: null,
+        referenceText: null,
+        referenceAuthorName: null,
+        deletedAt: new Date(),
+        deletedById: userId,
+      },
+      include: this.sessionMessageInclude(),
+    });
+    const payload = this.toSessionMessage(updated);
+    await this.emitRoomMessage(roomId, payload).catch(() => undefined);
+    return payload;
+  }
+
+  async deleteRoomMessage(userId: string, roomId: string, messageId: string) {
+    await this.ensureCanAccessRoomMessage(userId, roomId, messageId);
+    await this.prisma.buddySessionHiddenMessage.upsert({
+      where: { messageId_userId: { messageId, userId } },
+      create: { messageId, userId },
+      update: {},
+    });
+    return { ok: true };
   }
 
   async markRoomMessagesRead(userId: string, roomId: string) {
@@ -410,6 +502,105 @@ export class BuddyService {
     const leftAt = new Date().toISOString();
     const event = { id: `${roomId}:${userId}:left:${leftAt}`, roomId, userId, user, leftAt };
     for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-left', event);
+  }
+
+  private async emitRoomLocationUpdated(userId: string, roomId: string, session: any) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const throttleKey = `${roomId}:${userId}`;
+    const nowMs = Date.now();
+    const lastEmitAt = this.roomLocationEventAt.get(throttleKey) ?? 0;
+    if (nowMs - lastEmitAt < ROOM_LOCATION_EVENT_MIN_INTERVAL_MS) return;
+    this.roomLocationEventAt.set(throttleKey, nowMs);
+    const recipients = await this.prisma.buddySession.findMany({
+      where: { roomId, userId: { not: userId }, expiresAt: { gt: new Date() } },
+      select: { userId: true },
+    });
+    const updatedAt = new Date().toISOString();
+    const event = {
+      id: `${roomId}:${userId}:location:${updatedAt}`,
+      roomId,
+      userId,
+      latitude: session.latitude,
+      longitude: session.longitude,
+      session,
+      updatedAt,
+    };
+    for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-location-updated', event);
+  }
+
+  private async emitDiscoverySessionUpdated(userId: string, session: any) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const nowMs = Date.now();
+    const lastEmitAt = this.discoverySessionEventAt.get(userId) ?? 0;
+    if (nowMs - lastEmitAt < DISCOVERY_SESSION_EVENT_MIN_INTERVAL_MS) return;
+    this.discoverySessionEventAt.set(userId, nowMs);
+
+    const now = new Date();
+    const candidates = await this.prisma.buddySession.findMany({
+      where: {
+        userId: { not: userId },
+        roomId: null,
+        expiresAt: { gt: now },
+        ...this.nearbyBoundsWhere(session.latitude, session.longitude, DEFAULT_RADIUS_KM),
+      },
+      select: { userId: true, latitude: true, longitude: true, canSee: true },
+      take: 250,
+    });
+    const updatedAt = new Date().toISOString();
+    for (const candidate of candidates) {
+      const blocked = await this.blockedUserIds(candidate.userId);
+      if (blocked.includes(userId)) continue;
+      const visibleSession = await this.prisma.buddySession.findFirst({
+        where: {
+          userId,
+          roomId: null,
+          expiresAt: { gt: now },
+          AND: [
+            this.visibleToViewerWhere(candidate.userId),
+            this.viewerCanSeeWhere(candidate.userId, candidate.canSee),
+          ],
+        },
+        include: this.sessionInclude(),
+      });
+      if (!visibleSession) continue;
+      const buddy = this.toBuddy(visibleSession, candidate.latitude, candidate.longitude);
+      if (buddy.distanceKm > DEFAULT_RADIUS_KM) continue;
+      realtime.emitToUser(candidate.userId, 'buddy:discovery-session-updated', {
+        id: `discovery:${userId}:${updatedAt}`,
+        userId,
+        session: buddy,
+        updatedAt,
+      });
+    }
+  }
+
+  private async emitDiscoverySessionStopped(userId: string, session: { latitude: number; longitude: number }) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const now = new Date();
+    const recipients = await this.prisma.buddySession.findMany({
+      where: {
+        userId: { not: userId },
+        roomId: null,
+        expiresAt: { gt: now },
+        ...this.nearbyBoundsWhere(session.latitude, session.longitude, DEFAULT_RADIUS_KM),
+      },
+      select: { userId: true, latitude: true, longitude: true },
+      take: 250,
+    });
+    const stoppedAt = new Date().toISOString();
+    for (const recipient of recipients) {
+      const blocked = await this.blockedUserIds(recipient.userId);
+      if (blocked.includes(userId)) continue;
+      if (this.distanceKm(recipient.latitude, recipient.longitude, session.latitude, session.longitude) > DEFAULT_RADIUS_KM) continue;
+      realtime.emitToUser(recipient.userId, 'buddy:discovery-session-stopped', {
+        id: `discovery:${userId}:stopped:${stoppedAt}`,
+        userId,
+        stoppedAt,
+      });
+    }
   }
 
   private async createRoomEventMessage(roomId: string, userId: string, kind: Extract<BuddySessionMessageKind, 'joined' | 'left' | 'kicked'>) {
@@ -552,6 +743,54 @@ export class BuddyService {
     if (!session) throw new ForbiddenException('Join this buddy session first.');
   }
 
+  private async ensureCanAccessRoomMessage(userId: string, roomId: string, messageId: string) {
+    await this.ensureActiveRoomParticipant(userId, roomId);
+    const message = await this.prisma.buddySessionMessage.findUniqueOrThrow({
+      where: { id: messageId },
+      select: { id: true, roomId: true, senderId: true, kind: true },
+    });
+    if (message.roomId !== roomId) throw new ForbiddenException();
+    if (message.kind === BuddySessionMessageKind.joined || message.kind === BuddySessionMessageKind.left || message.kind === BuddySessionMessageKind.kicked) {
+      throw new BadRequestException('Session event messages cannot be changed.');
+    }
+    return message;
+  }
+
+  private async emitUpdatedRoomMessage(roomId: string, messageId: string) {
+    const message = await this.prisma.buddySessionMessage.findUniqueOrThrow({ where: { id: messageId }, include: this.sessionMessageInclude() });
+    const payload = this.toSessionMessage(message);
+    await this.emitRoomMessage(roomId, payload).catch(() => undefined);
+    return payload;
+  }
+
+  private async roomMessageReferenceData(roomId: string, dto: SendBuddySessionMessageDto) {
+    if (dto.referenceType !== 'message' || !dto.referenceId) return {};
+    const referenced = await this.prisma.buddySessionMessage.findFirst({
+      where: { id: dto.referenceId, roomId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!referenced) return {};
+    return {
+      referenceType: 'message',
+      referenceId: dto.referenceId.trim(),
+      referenceText: dto.referenceText?.trim() || undefined,
+      referenceAuthorName: dto.referenceAuthorName?.trim() || undefined,
+    };
+  }
+
+  private allowedReaction(emoji: string) {
+    const value = emoji.trim();
+    const Segmenter = (Intl as typeof Intl & {
+      Segmenter: new (locale?: string, options?: { granularity: 'grapheme' }) => {
+        segment(input: string): Iterable<{ segment: string }>;
+      };
+    }).Segmenter;
+    const segments = [...new Segmenter(undefined, { granularity: 'grapheme' }).segment(value)];
+    const hasDisplayEmoji = /[\p{Extended_Pictographic}\p{Emoji_Presentation}\p{Regional_Indicator}\uFE0F\u20E3]/u.test(value);
+    if (!value || segments.length !== 1 || !hasDisplayEmoji) throw new BadRequestException('Unsupported reaction');
+    return value;
+  }
+
   private async inviteCandidateWhere(userId: string, room: any, options: { q?: string; recipientIds?: string[]; excludeParticipants?: boolean } = {}) {
     const filters: any[] = [
       { id: { not: userId } },
@@ -619,10 +858,10 @@ export class BuddyService {
     return room.creatorId === userId;
   }
 
-  private isTrustedSessionMediaUrl(value: string) {
+  private isTrustedSessionGifUrl(value: string) {
     try {
       const parsed = new URL(value);
-      return parsed.protocol === 'https:' && /\.(gif|png|jpe?g|webp|avif)(\?.*)?$/i.test(parsed.href);
+      return parsed.protocol === 'https:' && /\.gif(\?.*)?$/i.test(parsed.href);
     } catch {
       return false;
     }
@@ -720,6 +959,22 @@ export class BuddyService {
       expiresAt: room.expiresAt,
       createdAt: room.createdAt,
       participantCount: room._count?.sessions ?? 0,
+      participants: room.participants
+        ?.filter((participant: any) => !participant.kickedAt)
+        .map((participant: any) => this.toRoomParticipant(participant)) ?? [],
+      activeSessions: room.sessions
+        ?.filter((session: any) => session.expiresAt > new Date())
+        .map((session: any) => this.toBuddy(session, session.latitude, session.longitude)) ?? [],
+    };
+  }
+
+  private toRoomParticipant(participant: any) {
+    const age = participant.user?.dateOfBirth ? this.ageFromDate(participant.user.dateOfBirth) : null;
+    return {
+      userId: participant.userId,
+      joinedAt: participant.joinedAt,
+      kickedAt: participant.kickedAt,
+      user: participant.user ? { ...exposeActivityPersonas(participant.user), dateOfBirth: undefined, age } : null,
     };
   }
 
@@ -730,8 +985,15 @@ export class BuddyService {
       senderId: message.senderId,
       kind: message.kind,
       body: message.body,
+      referenceType: message.referenceType,
+      referenceId: message.referenceId,
+      referenceText: message.referenceText,
+      referenceAuthorName: message.referenceAuthorName,
+      deletedAt: message.deletedAt,
+      deletedById: message.deletedById,
       createdAt: message.createdAt,
       sender: message.sender,
+      reactions: message.reactions ?? [],
       readBy: readStates
         .filter((state) => state.userId !== message.senderId && state.lastReadAt >= message.createdAt)
         .map((state) => ({
@@ -784,7 +1046,20 @@ export class BuddyService {
     return {
       group: { select: { id: true, name: true, slug: true } },
       creator: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
-      participants: { select: { userId: true, kickedAt: true } },
+      sessions: {
+        where: { expiresAt: { gt: now } },
+        include: { user: { select: this.userSelect() } },
+        orderBy: { updatedAt: 'desc' },
+      },
+      participants: {
+        orderBy: { joinedAt: 'asc' },
+        select: {
+          userId: true,
+          joinedAt: true,
+          kickedAt: true,
+          user: { select: this.userSelect() },
+        },
+      },
       _count: { select: { sessions: { where: { expiresAt: { gt: now } } } } },
     } as const;
   }
@@ -826,6 +1101,7 @@ export class BuddyService {
   private sessionMessageInclude() {
     return {
       sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
+      reactions: true,
     } as const;
   }
 }

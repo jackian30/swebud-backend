@@ -1,4 +1,4 @@
-import { BuddySessionVisibility } from '@prisma/client';
+import { BuddyDiscoveryAudience, BuddySessionVisibility } from '@prisma/client';
 import { BuddyService } from './buddy.service';
 
 describe('BuddyService', () => {
@@ -79,15 +79,34 @@ describe('BuddyService', () => {
     }));
   });
 
-  it('does not emit a room joined event when the user is already active in that room', async () => {
+  it('emits a room location update instead of joined when the user is already active in that room', async () => {
     const realtime = { emitToUser: jest.fn() };
     configureJoinRoomMocks({ roomId: 'room-1', expiresAt: new Date(Date.now() + 60_000) });
     service = new BuddyService(prisma, moduleRef(realtime) as any);
 
     await service.joinRoom(userId, { roomId: 'room-1', latitude: 14.61, longitude: 121.03 });
 
-    expect(prisma.buddySession.findMany).not.toHaveBeenCalled();
-    expect(realtime.emitToUser).not.toHaveBeenCalled();
+    expect(prisma.buddySessionMessage.create).not.toHaveBeenCalled();
+    expect(prisma.buddySession.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        roomId: 'room-1',
+        userId: { not: userId },
+        expiresAt: { gt: expect.any(Date) },
+      }),
+      select: { userId: true },
+    }));
+    expect(realtime.emitToUser).not.toHaveBeenCalledWith(
+      'user-2',
+      'buddy:room-joined',
+      expect.anything(),
+    );
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-location-updated', expect.objectContaining({
+      roomId: 'room-1',
+      userId,
+      latitude: 14.61,
+      longitude: 121.03,
+      session: expect.objectContaining({ userId, roomId: 'room-1', latitude: 14.61, longitude: 121.03 }),
+    }));
   });
 
   it('emits a socket event to active participants when a user leaves a room', async () => {
@@ -146,6 +165,38 @@ describe('BuddyService', () => {
     await (service as any).cleanupExpiredBuddyData();
 
     expect(prisma.buddyRoomParticipant.deleteMany).not.toHaveBeenCalled();
+  });
+
+  it('returns discoverable Find Buddy sessions without applying radius bounds', async () => {
+    const now = new Date();
+    prisma.block = { findMany: jest.fn().mockResolvedValue([]) };
+    prisma.buddyActivityOption = {
+      findFirst: jest.fn().mockResolvedValue({ activity: 'running' }),
+    };
+    prisma.buddySession = {
+      findUnique: jest.fn().mockResolvedValue({
+        canSee: BuddyDiscoveryAudience.public,
+        expiresAt: new Date(now.getTime() + 60_000),
+      }),
+      findMany: jest.fn().mockResolvedValue([
+        createBuddySession('far-session', 'user-3', 14.61, 122.03, now),
+        createBuddySession('near-session', 'user-2', 14.62, 121.04, now),
+      ]),
+    };
+
+    const sessions = await service.discoverable(userId, { activity: ' running ', lat: 14.61, lng: 121.03 });
+
+    expect(prisma.buddySession.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        userId: { not: userId, notIn: [] },
+        roomId: null,
+        activity: 'running',
+        expiresAt: { gt: expect.any(Date) },
+      }),
+      take: 250,
+    }));
+    expect(prisma.buddySession.findMany.mock.calls[0][0].where).not.toHaveProperty('latitude');
+    expect(sessions.map((session) => session.id)).toEqual(['near-session', 'far-session']);
   });
 
   function configureJoinRoomMocks(previousSession: { roomId: string | null; expiresAt: Date } | null) {
@@ -208,5 +259,32 @@ describe('BuddyService', () => {
 
   function moduleRef(realtime = { emitToUser: jest.fn() }) {
     return { get: jest.fn().mockReturnValue(realtime) };
+  }
+
+  function createBuddySession(id: string, targetUserId: string, latitude: number, longitude: number, now: Date) {
+    return {
+      id,
+      userId: targetUserId,
+      roomId: null,
+      room: null,
+      activity: 'running',
+      subActivity: null,
+      note: null,
+      visibleTo: BuddyDiscoveryAudience.public,
+      canSee: BuddyDiscoveryAudience.public,
+      latitude,
+      longitude,
+      expiresAt: new Date(now.getTime() + 60_000),
+      updatedAt: now,
+      user: {
+        id: targetUserId,
+        displayName: null,
+        username: targetUserId,
+        profileImageUrl: null,
+        gender: null,
+        dateOfBirth: null,
+        activityPersonas: [],
+      },
+    };
   }
 });

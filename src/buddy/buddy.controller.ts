@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Post, Put, Query, UseGuards } fro
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { BuddyService } from './buddy.service';
-import { BuddyRoomQueryDto, CreateBuddyRoomDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, SendBuddySessionMessageDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, SendBuddySessionMessageDto, UpsertBuddySessionDto } from './dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('buddy')
@@ -14,6 +14,7 @@ export class BuddyController {
   @Put('session') upsert(@CurrentUser() user: AuthUser, @Body() dto: UpsertBuddySessionDto) { return this.buddy.upsert(user.id, dto); }
   @Delete('session') stop(@CurrentUser() user: AuthUser) { return this.buddy.stop(user.id); }
   @Get('nearby') nearby(@CurrentUser() user: AuthUser, @Query() query: NearbyBuddyQueryDto) { return this.buddy.nearby(user.id, query); }
+  @Get('discoverable') discoverable(@CurrentUser() user: AuthUser, @Query() query: DiscoverableBuddyQueryDto) { return this.buddy.discoverable(user.id, query); }
 
   @Get('rooms') rooms(@CurrentUser() user: AuthUser, @Query() query: BuddyRoomQueryDto) { return this.buddy.rooms(user.id, query); }
   @Get('rooms/:id') room(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.buddy.room(user.id, id); }
@@ -31,6 +32,18 @@ export class BuddyController {
   }
   @Post('rooms/:id/messages') sendRoomMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: SendBuddySessionMessageDto) {
     return this.buddy.sendRoomMessage(user.id, id, dto);
+  }
+  @Post('rooms/:id/messages/:messageId/reactions') reactToRoomMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string, @Body() dto: BuddySessionMessageReactionDto) {
+    return this.buddy.reactToRoomMessage(user.id, id, messageId, dto);
+  }
+  @Delete('rooms/:id/messages/:messageId/reactions') unreactToRoomMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string, @Query('emoji') emoji: string) {
+    return this.buddy.unreactToRoomMessage(user.id, id, messageId, emoji);
+  }
+  @Post('rooms/:id/messages/:messageId/unsend') unsendRoomMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    return this.buddy.unsendRoomMessage(user.id, id, messageId);
+  }
+  @Delete('rooms/:id/messages/:messageId') deleteRoomMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('messageId') messageId: string) {
+    return this.buddy.deleteRoomMessage(user.id, id, messageId);
   }
   @Post('rooms/:id/messages/read') markRoomMessagesRead(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.buddy.markRoomMessagesRead(user.id, id);
