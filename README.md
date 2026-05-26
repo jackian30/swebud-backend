@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.16-beta**
+Current release: **0.2.17-beta**
 
 ## Stack
 
@@ -27,9 +27,20 @@ Current release: **0.2.16-beta**
 - Hashtags: search endpoint with post counts for composer suggestions
 - Profiles/social graph: username, bio, avatar/cover, follow/unfollow, searchable profile followers/following, mutual/non-followback
 - Groups: public/private groups, membership, group posts as regular posts, group feed filtering/pagination
-- Chat: message requests, direct/group chat, typing/unread/reactions, validated ActSnap reply references, multi-device friendly E2EE foundation fields
+- Chat: message requests, direct/group chat, typing/unread/reactions, validated ActSnap reply references, buddy-session message actions, and multi-device friendly E2EE foundation fields
+- Find Buddy: discoverable nearby sessions, buddy rooms, participant rosters, room chat, movement-aware session updates, and realtime map location events
 - Notifications: login, salute, comment, reply, mention, follow, message request
 - Uploads: MediaLibrary-style collections with local storage by default and S3-ready driver config
+
+## Current beta notes
+
+0.2.17-beta focuses on Find Buddy/session-map performance and buddy-session chat actions:
+
+- `buddy_session_messages` now support reply/reference metadata plus soft-delete ownership fields.
+- Buddy-session messages support one visible reaction per user and per-user hidden/deleted message state.
+- Active room participants receive throttled `buddy:room-location-updated` realtime events after accepted location updates.
+- Discovery listeners receive throttled `buddy:discovery-session-updated` / `buddy:discovery-session-stopped` events for nearby active sessions.
+- Local deploys include migration `20260526194500_add_buddy_session_message_actions`.
 
 ## Tags and discovery
 
@@ -403,6 +414,20 @@ Key endpoints:
 - `POST /chat/buddy-groups/:id/participants`
 - `GET /chat/buddy-groups/:id/messages`
 - `POST /chat/buddy-groups/:id/messages`
+- `GET /buddy/activities`
+- `PUT /buddy/session`
+- `DELETE /buddy/session`
+- `GET /buddy/nearby`
+- `GET /buddy/discoverable`
+- `GET /buddy/rooms`
+- `POST /buddy/rooms`
+- `POST /buddy/rooms/join`
+- `GET /buddy/rooms/:id/messages`
+- `POST /buddy/rooms/:id/messages`
+- `POST /buddy/rooms/:id/messages/:messageId/reactions`
+- `DELETE /buddy/rooms/:id/messages/:messageId/reactions`
+- `DELETE /buddy/rooms/:id/messages/:messageId`
+- `POST /buddy/rooms/:id/messages/read`
 - `GET /chat/unread-count`
 - `GET /notifications`
 - `POST /uploads/profile-photo`
@@ -445,8 +470,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.16-beta -m "v0.2.16-beta"
-git push origin v0.2.16-beta
+git tag -a v0.2.17-beta -m "v0.2.17-beta"
+git push origin v0.2.17-beta
 ```
 
 ## Beta caveats
@@ -454,4 +479,4 @@ git push origin v0.2.16-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.16-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.17-beta flows, but production release still needs broader end-to-end coverage.
