@@ -2,7 +2,7 @@
 
 This document describes the current SweBudd chat feature and the beta end-to-end encryption foundation.
 
-Current status: `0.2.15-beta`
+Current status: `0.2.22-beta`
 
 ## Chat surfaces
 
@@ -13,6 +13,8 @@ SweBudd currently has three chat surfaces:
 - Group buddies chats created from selected participants.
 
 Group community chats also exist under groups/channels and use the group APIs, but the encrypted direct-message foundation described here is implemented on the direct buddy chat path.
+
+The frontend Chat page also exposes this explanation in-app from the encryption info button so testers can read the same practical summary without opening repository docs.
 
 ## Direct buddy chat flow
 
@@ -107,6 +109,20 @@ The backend does not decrypt encrypted direct messages. It stores and relays enc
 If encryption is not ready because the browser does not expose Web Crypto, the frontend currently falls back to plaintext direct send except for errors that mean a message request is required.
 
 If decryption fails, the frontend displays `[cannot decrypt]`.
+
+## What is and is not protected
+
+Protected by the current foundation:
+
+- Direct buddy chat message text when browser Web Crypto is available.
+- Stored direct-message body content for encrypted direct messages; the backend receives ciphertext plus nonce, not the readable text body.
+
+Not protected by the current foundation:
+
+- Direct-chat participants, timestamps, read state, reactions, deletion state, request status, and other message metadata.
+- Chat media attachments and ActSnap reference media/text.
+- Buddy group chats, group/channel chats, and buddy session room chats.
+- Any plaintext fallback message sent when Web Crypto is unavailable or encryption fails.
 
 ## Important limitations
 

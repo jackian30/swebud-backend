@@ -1,6 +1,6 @@
 {
   "name": "swebudd-backend",
-  "version": "0.2.21-beta",
+  "version": "0.2.22-beta",
   "private": true,
   "description": "SweBudd NestJS backend",
   "scripts": {

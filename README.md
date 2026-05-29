@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.17-beta**
+Current release: **0.2.22-beta**
 
 ## Stack
 
@@ -13,7 +13,7 @@ Current release: **0.2.17-beta**
 - JWT auth with DB-backed sliding sessions
 - Docker local deployment
 - Render free web service deployment config
-- MailHog for local email testing
+- Nodemailer SMTP email delivery with MailHog for local testing
 
 ## Main features
 
@@ -34,13 +34,12 @@ Current release: **0.2.17-beta**
 
 ## Current beta notes
 
-0.2.17-beta focuses on Find Buddy/session-map performance and buddy-session chat actions:
+0.2.22-beta focuses on email delivery reliability and release documentation:
 
-- `buddy_session_messages` now support reply/reference metadata plus soft-delete ownership fields.
-- Buddy-session messages support one visible reaction per user and per-user hidden/deleted message state.
-- Active room participants receive throttled `buddy:room-location-updated` realtime events after accepted location updates.
-- Discovery listeners receive throttled `buddy:discovery-session-updated` / `buddy:discovery-session-stopped` events for nearby active sessions.
-- Local deploys include migration `20260526194500_add_buddy_session_message_actions`.
+- Forgot-password email dispatch is non-blocking, so reset requests do not hang if the email provider is slow or offline.
+- SMTP transport now supports explicit TLS/auth settings, timeout controls, and IPv4/IPv6 family selection.
+- Local MailHog remains the default zero-config email target; production can use any SMTP-compatible provider with env config.
+- Chat/E2EE documentation has been refreshed for the current direct-chat encryption foundation.
 
 ## Tags and discovery
 
@@ -102,7 +101,7 @@ Important variables:
 - `FRONTEND_ORIGIN`
 - `ALLOW_LOCAL_ORIGINS` — set to `true` only for local/LAN deployments that need `localhost` or private IP browser origins in addition to `FRONTEND_ORIGIN`
 - `BACKEND_PORT`
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_IGNORE_TLS`, `SMTP_REQUIRE_TLS`, `SMTP_TLS_REJECT_UNAUTHORIZED`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` — SMTP delivery and TLS/auth settings; MailHog local dev uses plaintext, production SMTP should set TLS/auth explicitly
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_IGNORE_TLS`, `SMTP_REQUIRE_TLS`, `SMTP_TLS_REJECT_UNAUTHORIZED`, `SMTP_USER`, `SMTP_PASS`, `SMTP_CONNECTION_TIMEOUT_MS`, `SMTP_GREETING_TIMEOUT_MS`, `SMTP_SOCKET_TIMEOUT_MS`, `SMTP_IP_FAMILY`, `MAIL_FROM` — Nodemailer SMTP delivery settings; MailHog local dev uses plaintext, production SMTP should set TLS/auth explicitly
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` / `GOOGLE_OAUTH_REDIRECT_URI` — Google auth placeholders; `POST /auth/google` verifies Google ID tokens and returns onboarding status
 - `CLOUDFLARE_TURNSTILE_SITE_KEY` / `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY`, `CLOUDFLARE_TURNSTILE_SECRET_KEY` — Turnstile captcha config; backend skips verification in local dev when the secret is empty
 - `KLIPY_API_KEY`, `KLIPY_CLIENT_KEY` — GIF search/provider placeholders
@@ -470,13 +469,13 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.17-beta -m "v0.2.17-beta"
-git push origin v0.2.17-beta
+git tag -a v0.2.22-beta -m "v0.2.22-beta"
+git push origin v0.2.22-beta
 ```
 
 ## Beta caveats
 
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
-- Email delivery is configured for MailHog locally.
+- Email delivery is configured for MailHog locally. Production email uses SMTP env settings through Nodemailer.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.17-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.22-beta flows, but production release still needs broader end-to-end coverage.
