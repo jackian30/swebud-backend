@@ -26,6 +26,7 @@ export class MailService {
     const connectionTimeout = this.numericConfig('SMTP_CONNECTION_TIMEOUT_MS', 10_000);
     const greetingTimeout = this.numericConfig('SMTP_GREETING_TIMEOUT_MS', 10_000);
     const socketTimeout = this.numericConfig('SMTP_SOCKET_TIMEOUT_MS', 20_000);
+    const family = this.ipFamilyConfig('SMTP_IP_FAMILY', 4);
     const options: Record<string, unknown> = {
       host,
       port,
@@ -37,6 +38,7 @@ export class MailService {
       socketTimeout,
       tls: { rejectUnauthorized },
     };
+    if (family != null) options.family = family;
     if (user || pass) options.auth = { user, pass };
     return options;
   }
@@ -46,6 +48,15 @@ export class MailService {
     if (raw == null || raw === '') return fallback;
     const value = Number(raw);
     return Number.isInteger(value) && value > 0 ? value : fallback;
+  }
+
+  private ipFamilyConfig(key: string, fallback: 4 | 6) {
+    const raw = this.config.get<string | number>(key);
+    if (raw == null || raw === '') return fallback;
+    if (raw === 4 || raw === '4') return 4;
+    if (raw === 6 || raw === '6') return 6;
+    if (String(raw).toLowerCase() === 'auto' || raw === 0 || raw === '0') return null;
+    return fallback;
   }
 
   async sendWelcomeEmail(input: { to: string; displayName?: string | null }) {

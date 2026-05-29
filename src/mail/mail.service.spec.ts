@@ -26,6 +26,7 @@ describe('MailService', () => {
       secure: false,
       ignoreTLS: true,
       requireTLS: false,
+      family: 4,
       tls: { rejectUnauthorized: true },
     }));
   });
@@ -41,6 +42,7 @@ describe('MailService', () => {
       SMTP_CONNECTION_TIMEOUT_MS: '7000',
       SMTP_GREETING_TIMEOUT_MS: '8000',
       SMTP_SOCKET_TIMEOUT_MS: '9000',
+      SMTP_IP_FAMILY: '6',
       SMTP_USER: 'user',
       SMTP_PASS: 'pass',
     }));
@@ -54,8 +56,21 @@ describe('MailService', () => {
       connectionTimeout: 7000,
       greetingTimeout: 8000,
       socketTimeout: 9000,
+      family: 6,
       tls: { rejectUnauthorized: false },
       auth: { user: 'user', pass: 'pass' },
+    }));
+  });
+
+  it('can use the system default IP family when configured', () => {
+    new MailService(config({
+      SMTP_HOST: 'smtp.example.com',
+      SMTP_PORT: 465,
+      SMTP_IP_FAMILY: 'auto',
+    }));
+
+    expect(nodemailer.createTransport).toHaveBeenCalledWith(expect.not.objectContaining({
+      family: expect.any(Number),
     }));
   });
 });
