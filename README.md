@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.22-beta**
+Current release: **0.2.23-beta**
 
 ## Stack
 
@@ -34,7 +34,7 @@ Current release: **0.2.22-beta**
 
 ## Current beta notes
 
-0.2.22-beta focuses on email delivery reliability and release documentation:
+0.2.23-beta focuses on email delivery reliability and release documentation:
 
 - Forgot-password email dispatch is non-blocking, so reset requests do not hang if the email provider is slow or offline.
 - SMTP transport now supports explicit TLS/auth settings, timeout controls, and IPv4/IPv6 family selection.
@@ -469,8 +469,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.22-beta -m "v0.2.22-beta"
-git push origin v0.2.22-beta
+git tag -a v0.2.23-beta -m "v0.2.23-beta"
+git push origin v0.2.23-beta
 ```
 
 ## Beta caveats
@@ -478,4 +478,4 @@ git push origin v0.2.22-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally. Production email uses SMTP env settings through Nodemailer.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.22-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.23-beta flows, but production release still needs broader end-to-end coverage.

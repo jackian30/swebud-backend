@@ -1,6 +1,6 @@
 # Release Audit 2026-05-29
 
-Release candidate: `0.2.22-beta`
+Release candidate: `0.2.23-beta`
 
 ## Scope
 
@@ -13,6 +13,7 @@ Release candidate: `0.2.22-beta`
 - Password reset email dispatch no longer blocks the forgot-password response path.
 - Nodemailer SMTP transport supports explicit TLS/auth flags, connection/greeting/socket timeouts, and IP family selection.
 - Local email still defaults to MailHog with plaintext local delivery.
+- Frontend runtime version defaults in the backend Docker compose stack now align with the release version.
 - No Prisma schema or migration changes are included in this release.
 
 ## Verification
@@ -24,6 +25,7 @@ Release candidate: `0.2.22-beta`
 - `npx prisma validate` passed.
 - `npx prisma migrate status` passed against local Postgres; schema is up to date.
 - `npm audit --audit-level=high` passed with 0 vulnerabilities.
+- Local Docker smoke caught stale frontend runtime version defaults before final tagging; those defaults were corrected for `0.2.23-beta`.
 
 ## Residual Risks
 
@@ -33,4 +35,4 @@ Release candidate: `0.2.22-beta`
 
 ## Decision
 
-Ready to tag and push as `v0.2.22-beta`.
+Ready to tag and push as `v0.2.23-beta`.
