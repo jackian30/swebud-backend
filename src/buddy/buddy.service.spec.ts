@@ -292,7 +292,7 @@ describe('BuddyService', () => {
     expect(prisma.buddyRoomParticipant.deleteMany).not.toHaveBeenCalled();
   });
 
-  it('returns discoverable Find Buddy sessions without applying radius bounds', async () => {
+  it('returns discoverable Find Buddy sessions inside radius bounds', async () => {
     const now = new Date();
     prisma.block = { findMany: jest.fn().mockResolvedValue([]) };
     prisma.buddyActivityOption = {
@@ -309,7 +309,7 @@ describe('BuddyService', () => {
       ]),
     };
 
-    const sessions = await service.discoverable(userId, { activity: ' running ', lat: 14.61, lng: 121.03 });
+    const sessions = await service.discoverable(userId, { activity: ' running ', lat: 14.61, lng: 121.03, radiusKm: 5 });
 
     expect(prisma.buddySession.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
@@ -317,11 +317,73 @@ describe('BuddyService', () => {
         roomId: null,
         activity: 'running',
         expiresAt: { gt: expect.any(Date) },
+        latitude: expect.objectContaining({ gte: expect.any(Number), lte: expect.any(Number) }),
+        longitude: expect.objectContaining({ gte: expect.any(Number), lte: expect.any(Number) }),
       }),
       take: 250,
     }));
-    expect(prisma.buddySession.findMany.mock.calls[0][0].where).not.toHaveProperty('latitude');
-    expect(sessions.map((session) => session.id)).toEqual(['near-session', 'far-session']);
+    expect(sessions.map((session) => session.id)).toEqual(['near-session']);
+    expect(sessions[0]?.user).toEqual({
+      id: 'user-2',
+      displayName: null,
+      username: 'user-2',
+      profileImageUrl: null,
+      age: null,
+    });
+    expect(sessions[0]?.user).not.toHaveProperty('activityPersonas');
+    expect(prisma.buddySession.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: {
+        user: {
+          select: {
+            id: true,
+            displayName: true,
+            username: true,
+            profileImageUrl: true,
+            dateOfBirth: true,
+          },
+        },
+      },
+    }));
+  });
+
+  it('returns lean buddy room summaries for session lists', async () => {
+    const now = new Date('2026-05-23T00:00:00.000Z');
+    prisma.buddyRoom.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([{
+        id: 'room-1',
+        name: 'Sunday run',
+        scope: 'public',
+        visibility: BuddySessionVisibility.private,
+        code: 'ABC123',
+        groupId: null,
+        group: null,
+        creatorId: userId,
+        activity: 'running',
+        subActivity: null,
+        expiresAt: new Date(now.getTime() + 60_000),
+        createdAt: now,
+        participants: [{ userId, role: BuddyRoomParticipantRole.owner, leftAt: null, kickedAt: null }],
+        sessions: [{ id: 'session-1' }],
+        _count: { sessions: 1 },
+      }]);
+
+    const rooms = await service.rooms(userId);
+
+    expect(rooms[0]).toEqual(expect.objectContaining({
+      id: 'room-1',
+      name: 'Sunday run',
+      participantCount: 1,
+      code: 'ABC123',
+    }));
+    expect(rooms[0]).not.toHaveProperty('participants');
+    expect(rooms[0]).not.toHaveProperty('activeSessions');
+    expect(rooms[0]).not.toHaveProperty('sessions');
+    expect(prisma.buddyRoom.findMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      include: expect.not.objectContaining({
+        sessions: expect.anything(),
+      }),
+    }));
   });
 
   function configureJoinRoomMocks(previousSession: { roomId: string | null; expiresAt: Date } | null) {

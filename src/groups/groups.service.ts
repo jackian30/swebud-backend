@@ -6,6 +6,7 @@ import { CreateGroupChannelDto, CreateGroupDto, GroupMessageDto, GroupPostDto, R
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
 type GroupListOptions = { take?: number; cursor?: number; discoverOnly?: boolean };
+type GroupGetOptions = { summaryOnly?: boolean };
 type GroupChatReadStateWithUser = {
   userId: string;
   lastReadAt: Date;
@@ -85,11 +86,43 @@ export class GroupsService {
     }));
   }
 
-  async get(userId: string, slug: string) {
+  async get(userId: string, slug: string, options: GroupGetOptions = {}) {
+    if (options.summaryOnly) return this.getSummary(userId, slug);
     const group = await this.prisma.group.findUniqueOrThrow({ where: { slug }, include: this.include(true) });
     const isMember = group.members.some((member) => member.userId === userId);
     if (group.visibility === 'private' && !isMember) throw new ForbiddenException('Join this private group by invite first');
     return { ...group, isMember, capabilities: this.capabilities(group.members.find((member) => member.userId === userId)?.role) };
+  }
+
+  private async getSummary(userId: string, slug: string) {
+    const group = await this.prisma.group.findUniqueOrThrow({
+      where: { slug },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        visibility: true,
+        profileImageUrl: true,
+        members: {
+          where: { userId },
+          take: 1,
+          select: { userId: true, role: true },
+        },
+        _count: { select: { members: true, messages: true, posts: true, chatChannels: true } },
+      },
+    });
+    const member = group.members[0];
+    if (group.visibility === 'private' && !member) throw new ForbiddenException('Join this private group by invite first');
+    return {
+      id: group.id,
+      name: group.name,
+      slug: group.slug,
+      visibility: group.visibility,
+      profileImageUrl: group.profileImageUrl,
+      _count: group._count,
+      isMember: Boolean(member),
+      capabilities: this.capabilities(member?.role),
+    };
   }
 
   async join(userId: string, groupId: string) {

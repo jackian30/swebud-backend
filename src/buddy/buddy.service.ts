@@ -177,7 +177,7 @@ export class BuddyService {
           ],
         } : {}),
       },
-      include: this.sessionInclude(),
+      include: this.buddySessionInclude(),
       orderBy: { updatedAt: 'desc' },
       take: 250,
     });
@@ -192,6 +192,7 @@ export class BuddyService {
     const queryActivity = query.activity?.trim() || null;
     await this.ensureActivityOption(queryActivity);
     const now = new Date();
+    const radiusKm = query.radiusKm ?? DEFAULT_RADIUS_KM;
     const take = Math.min(Math.max(query.take ?? DEFAULT_DISCOVERABLE_TAKE, 1), MAX_DISCOVERABLE_TAKE);
     const blocked = await this.blockedUserIds(userId);
     const viewerSession = await this.prisma.buddySession.findUnique({ where: { userId }, select: { canSee: true, expiresAt: true } });
@@ -202,18 +203,21 @@ export class BuddyService {
         roomId: null,
         ...(queryActivity ? { activity: queryActivity } : {}),
         expiresAt: { gt: now },
+        ...this.nearbyBoundsWhere(query.lat, query.lng, radiusKm),
         AND: [
           this.visibleToViewerWhere(userId),
           this.viewerCanSeeWhere(userId, canSee),
         ],
       },
-      include: this.sessionInclude(),
+      include: this.buddySessionInclude(),
       orderBy: { updatedAt: 'desc' },
       take,
     });
     return sessions
       .map((session) => this.toBuddy(session, query.lat, query.lng))
-      .sort((a, b) => a.distanceKm - b.distanceKm);
+      .sort((a, b) => a.distanceKm - b.distanceKm)
+      .filter((session) => session.distanceKm <= radiusKm)
+      .slice(0, take);
   }
 
   async rooms(userId: string, query: BuddyRoomQueryDto = {}) {
@@ -234,8 +238,8 @@ export class BuddyService {
     }
     baseWhere.NOT = { participants: { some: { userId, kickedAt: { not: null } } } };
     await this.closeInactiveRoomsForList(baseWhere, now);
-    const rooms = await this.prisma.buddyRoom.findMany({ where: baseWhere, orderBy: { createdAt: 'desc' }, include: this.roomInclude(now) });
-    return rooms.map((room) => this.toRoom(room, this.canRevealRoomCode(userId, room)));
+    const rooms = await this.prisma.buddyRoom.findMany({ where: baseWhere, orderBy: { createdAt: 'desc' }, include: this.roomListInclude(now) });
+    return rooms.map((room) => this.toRoomSummary(room, this.canRevealRoomCode(userId, room)));
   }
 
   async room(userId: string, roomId: string) {
@@ -716,7 +720,7 @@ export class BuddyService {
             this.viewerCanSeeWhere(candidate.userId, candidate.canSee),
           ],
         },
-        include: this.sessionInclude(),
+        include: this.buddySessionInclude(),
       });
       if (!visibleSession) continue;
       const buddy = this.toBuddy(visibleSession, candidate.latitude, candidate.longitude);
@@ -1104,7 +1108,6 @@ export class BuddyService {
   }
 
   private toBuddy(session: any, lat: number, lng: number) {
-    const age = session.user.dateOfBirth ? this.ageFromDate(session.user.dateOfBirth) : null;
     return {
       id: session.id,
       userId: session.userId,
@@ -1120,7 +1123,18 @@ export class BuddyService {
       expiresAt: session.expiresAt,
       updatedAt: session.updatedAt,
       distanceKm: this.distanceKm(lat, lng, session.latitude, session.longitude),
-      user: { ...exposeActivityPersonas(session.user), dateOfBirth: undefined, age },
+      user: this.toBuddyUser(session.user),
+    };
+  }
+
+  private toBuddyUser(user: any) {
+    const age = user?.dateOfBirth ? this.ageFromDate(user.dateOfBirth) : null;
+    return {
+      id: user?.id,
+      displayName: user?.displayName ?? null,
+      username: user?.username ?? null,
+      profileImageUrl: user?.profileImageUrl ?? null,
+      age,
     };
   }
 
@@ -1149,8 +1163,25 @@ export class BuddyService {
     };
   }
 
+  private toRoomSummary(room: any, revealCode = false) {
+    return {
+      id: room.id,
+      name: room.name,
+      scope: room.scope,
+      visibility: room.visibility,
+      code: revealCode || room.visibility === BuddySessionVisibility.public ? room.code : undefined,
+      groupId: room.groupId,
+      group: room.group,
+      creatorId: room.creatorId,
+      activity: room.activity,
+      subActivity: room.subActivity,
+      expiresAt: room.expiresAt,
+      createdAt: room.createdAt,
+      participantCount: room._count?.sessions ?? 0,
+    };
+  }
+
   private toRoomParticipant(participant: any) {
-    const age = participant.user?.dateOfBirth ? this.ageFromDate(participant.user.dateOfBirth) : null;
     return {
       userId: participant.userId,
       role: participant.role,
@@ -1158,7 +1189,7 @@ export class BuddyService {
       lastActivityAt: participant.lastActivityAt,
       leftAt: participant.leftAt,
       kickedAt: participant.kickedAt,
-      user: participant.user ? { ...exposeActivityPersonas(participant.user), dateOfBirth: undefined, age } : null,
+      user: participant.user ? this.toBuddyUser(participant.user) : null,
     };
   }
 
@@ -1189,7 +1220,11 @@ export class BuddyService {
   }
 
   private sessionInclude() {
-    return { user: { select: this.userSelect() }, room: { include: this.roomInclude() } } as const;
+    return { user: { select: this.buddyUserSelect() }, room: { include: this.roomInclude() } } as const;
+  }
+
+  private buddySessionInclude() {
+    return { user: { select: this.buddyUserSelect() } } as const;
   }
 
   private visibleToViewerWhere(viewerId: string) {
@@ -1232,7 +1267,7 @@ export class BuddyService {
       creator: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       sessions: {
         where: { expiresAt: { gt: now } },
-        include: { user: { select: this.userSelect() } },
+        include: this.buddySessionInclude(),
         orderBy: { updatedAt: 'desc' },
       },
       participants: {
@@ -1245,8 +1280,19 @@ export class BuddyService {
           lastActivityAt: true,
           leftAt: true,
           kickedAt: true,
-          user: { select: this.userSelect() },
+          user: { select: this.buddyUserSelect() },
         },
+      },
+      _count: { select: { sessions: { where: { expiresAt: { gt: now } } } } },
+    } as const;
+  }
+
+  private roomListInclude(now = new Date()) {
+    return {
+      group: { select: { id: true, name: true, slug: true } },
+      participants: {
+        where: { kickedAt: null, leftAt: null },
+        select: { userId: true, role: true, leftAt: true, kickedAt: true },
       },
       _count: { select: { sessions: { where: { expiresAt: { gt: now } } } } },
     } as const;
@@ -1270,8 +1316,8 @@ export class BuddyService {
     return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
-  private userSelect() {
-    return { id: true, displayName: true, username: true, profileImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect } as const;
+  private buddyUserSelect() {
+    return { id: true, displayName: true, username: true, profileImageUrl: true, dateOfBirth: true } as const;
   }
 
   private inviteUserSelect() {

@@ -109,4 +109,36 @@ describe('GroupsService', () => {
       }),
     }));
   });
+
+  it('returns a lean group summary for buddy session pages', async () => {
+    prisma.group.findUniqueOrThrow.mockResolvedValueOnce({
+      id: groupId,
+      name: 'Morning Runners',
+      slug: 'morning-runners',
+      visibility: 'public',
+      profileImageUrl: null,
+      members: [{ userId, role: 'member' }],
+      _count: { members: 4, messages: 0, posts: 0, chatChannels: 1 },
+    });
+
+    const group = await service.get(userId, 'morning-runners', { summaryOnly: true });
+
+    expect(group).toEqual(expect.objectContaining({
+      id: groupId,
+      name: 'Morning Runners',
+      slug: 'morning-runners',
+      isMember: true,
+    }));
+    expect(group).not.toHaveProperty('members');
+    expect(group).not.toHaveProperty('posts');
+    expect(group).not.toHaveProperty('chatChannels');
+    expect(prisma.group.findUniqueOrThrow).toHaveBeenCalledWith(expect.objectContaining({
+      select: expect.objectContaining({
+        members: expect.objectContaining({
+          where: { userId },
+          take: 1,
+        }),
+      }),
+    }));
+  });
 });

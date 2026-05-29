@@ -21,7 +21,9 @@ export class GroupsController {
     return this.groups.mine(user.id, { take: this.parsePositiveInt(take), cursor: this.parsePositiveInt(cursor) });
   }
   @Get('invite/:code') joinByInvite(@CurrentUser() user: AuthUser, @Param('code') code: string) { return this.groups.joinByInvite(user.id, code); }
-  @Get(':slug') get(@CurrentUser() user: AuthUser, @Param('slug') slug: string) { return this.groups.get(user.id, slug); }
+  @Get(':slug') get(@CurrentUser() user: AuthUser, @Param('slug') slug: string, @Query('summary') summary?: string) {
+    return this.groups.get(user.id, slug, { summaryOnly: summary === 'true' });
+  }
   @Post(':id/join') join(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.groups.join(user.id, id); }
   @Patch(':id/settings') updateSettings(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateGroupSettingsDto) { return this.groups.updateSettings(user.id, id, dto); }
   @Post(':id/report') report(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ReportGroupDto) { return this.groups.report(user.id, id, dto); }
