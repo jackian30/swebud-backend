@@ -137,6 +137,14 @@ enum BuddySessionVisibility {
   @@map("buddy_session_visibility")
 }
 
+enum BuddyRoomParticipantRole {
+  owner
+  admin
+  member
+
+  @@map("buddy_room_participant_role")
+}
+
 enum BuddyDiscoveryAudience {
   public
   mutuals
@@ -295,63 +303,63 @@ model User {
   createdAt               DateTime             @default(now()) @map("created_at")
   updatedAt               DateTime             @updatedAt @map("updated_at")
 
-  posts                     Post[]
-  wallPosts                 Post[]                    @relation("ProfileWallPosts")
-  taggedPosts               PostTag[]                 @relation("PostTaggedUsers")
-  comments                  Comment[]
-  likes                     PostLike[]
-  commentLikes              CommentLike[]
-  savedPosts                PostSave[]
-  viewedPosts               PostView[]
-  reposts                   Repost[]
-  repostLikes               RepostLike[]
-  hiddenPosts               HiddenPost[]
-  hiddenMessages            HiddenMessage[]
-  postReports               PostReport[]
-  groupReports              GroupReport[]
-  userReportsSent           UserReport[]              @relation("UserReportsSent")
-  userReportsReceived       UserReport[]              @relation("UserReportsReceived")
-  blocksSent                Block[]                   @relation("BlocksSent")
-  blocksReceived            Block[]                   @relation("BlocksReceived")
-  notifications             Notification[]            @relation("NotificationsReceived")
-  notificationActors        Notification[]            @relation("NotificationActors")
-  theme                     UserTheme?
-  refreshTokens             RefreshToken[]
-  passwordResetTokens       PasswordResetToken[]
-  following                 Follow[]                  @relation("Following")
-  followers                 Follow[]                  @relation("Followers")
-  sentFollowRequests        FollowRequest[]           @relation("SentFollowRequests")
-  receivedFollowRequests    FollowRequest[]           @relation("ReceivedFollowRequests")
-  sentMessageRequests       MessageRequest[]          @relation("SentMessageRequests")
-  receivedMessageRequests   MessageRequest[]          @relation("ReceivedMessageRequests")
-  chatProfileOverrides      ChatProfileOverride[]     @relation("ChatProfileOverrideOwners")
-  chatProfileOverridePeers  ChatProfileOverride[]     @relation("ChatProfileOverridePeers")
-  groupMembers              GroupMember[]
-  groupChatReadStates       GroupChatReadState[]
-  createdBuddyGroupChats    BuddyGroupChat[]          @relation("BuddyGroupChatCreators")
-  buddyGroupChatMemberships BuddyGroupChatMember[]
-  buddyGroupChatReadStates  BuddyGroupChatReadState[]
-  createdGroupChannels      GroupChatChannel[]        @relation("GroupChatChannelCreators")
-  groupChannelMemberships   GroupChatChannelMember[]
-  groupPosts                GroupPost[]
-  sentMessages              Message[]                 @relation("SentMessages")
-  receivedMessages          Message[]                 @relation("ReceivedMessages")
-  sentBuddySessionMessages  BuddySessionMessage[]     @relation("SentBuddySessionMessages")
+  posts                        Post[]
+  wallPosts                    Post[]                        @relation("ProfileWallPosts")
+  taggedPosts                  PostTag[]                     @relation("PostTaggedUsers")
+  comments                     Comment[]
+  likes                        PostLike[]
+  commentLikes                 CommentLike[]
+  savedPosts                   PostSave[]
+  viewedPosts                  PostView[]
+  reposts                      Repost[]
+  repostLikes                  RepostLike[]
+  hiddenPosts                  HiddenPost[]
+  hiddenMessages               HiddenMessage[]
+  postReports                  PostReport[]
+  groupReports                 GroupReport[]
+  userReportsSent              UserReport[]                  @relation("UserReportsSent")
+  userReportsReceived          UserReport[]                  @relation("UserReportsReceived")
+  blocksSent                   Block[]                       @relation("BlocksSent")
+  blocksReceived               Block[]                       @relation("BlocksReceived")
+  notifications                Notification[]                @relation("NotificationsReceived")
+  notificationActors           Notification[]                @relation("NotificationActors")
+  theme                        UserTheme?
+  refreshTokens                RefreshToken[]
+  passwordResetTokens          PasswordResetToken[]
+  following                    Follow[]                      @relation("Following")
+  followers                    Follow[]                      @relation("Followers")
+  sentFollowRequests           FollowRequest[]               @relation("SentFollowRequests")
+  receivedFollowRequests       FollowRequest[]               @relation("ReceivedFollowRequests")
+  sentMessageRequests          MessageRequest[]              @relation("SentMessageRequests")
+  receivedMessageRequests      MessageRequest[]              @relation("ReceivedMessageRequests")
+  chatProfileOverrides         ChatProfileOverride[]         @relation("ChatProfileOverrideOwners")
+  chatProfileOverridePeers     ChatProfileOverride[]         @relation("ChatProfileOverridePeers")
+  groupMembers                 GroupMember[]
+  groupChatReadStates          GroupChatReadState[]
+  createdBuddyGroupChats       BuddyGroupChat[]              @relation("BuddyGroupChatCreators")
+  buddyGroupChatMemberships    BuddyGroupChatMember[]
+  buddyGroupChatReadStates     BuddyGroupChatReadState[]
+  createdGroupChannels         GroupChatChannel[]            @relation("GroupChatChannelCreators")
+  groupChannelMemberships      GroupChatChannelMember[]
+  groupPosts                   GroupPost[]
+  sentMessages                 Message[]                     @relation("SentMessages")
+  receivedMessages             Message[]                     @relation("ReceivedMessages")
+  sentBuddySessionMessages     BuddySessionMessage[]         @relation("SentBuddySessionMessages")
   buddySessionMessageReactions BuddySessionMessageReaction[]
-  hiddenBuddySessionMessages BuddySessionHiddenMessage[]
-  buddySessionReadStates    BuddySessionReadState[]
-  buddySession              BuddySession?
-  createdBuddyRooms         BuddyRoom[]               @relation("BuddyRoomCreators")
-  buddyRoomParticipants     BuddyRoomParticipant[]
-  closeBuddies              CloseBuddy[]              @relation("CloseBuddyOwners")
-  closeBuddyOf              CloseBuddy[]              @relation("CloseBuddyMembers")
-  externalIntegrations      ExternalIntegration[]
-  activities                Activity[]
-  activityPersonas          UserActivityPersona[]
-  stories                   Story[]
-  storyViews                StoryView[]
-  storyReactions            StoryReaction[]
-  badges                    UserBadge[]
+  hiddenBuddySessionMessages   BuddySessionHiddenMessage[]
+  buddySessionReadStates       BuddySessionReadState[]
+  buddySession                 BuddySession?
+  createdBuddyRooms            BuddyRoom[]                   @relation("BuddyRoomCreators")
+  buddyRoomParticipants        BuddyRoomParticipant[]
+  closeBuddies                 CloseBuddy[]                  @relation("CloseBuddyOwners")
+  closeBuddyOf                 CloseBuddy[]                  @relation("CloseBuddyMembers")
+  externalIntegrations         ExternalIntegration[]
+  activities                   Activity[]
+  activityPersonas             UserActivityPersona[]
+  stories                      Story[]
+  storyViews                   StoryView[]
+  storyReactions               StoryReaction[]
+  badges                       UserBadge[]
 
   @@index([latitude, longitude])
   @@index([createdAt])
@@ -428,20 +436,20 @@ model BuddySession {
 }
 
 model BuddyRoom {
-  id           String                 @id @default(uuid())
+  id           String                  @id @default(uuid())
   name         String
-  scope        BuddySessionScope      @default(public)
-  visibility   BuddySessionVisibility @default(public)
-  code         String                 @unique
-  groupId      String?                @map("group_id")
-  creatorId    String                 @map("creator_id")
+  scope        BuddySessionScope       @default(public)
+  visibility   BuddySessionVisibility  @default(public)
+  code         String                  @unique
+  groupId      String?                 @map("group_id")
+  creatorId    String                  @map("creator_id")
   activity     String?
-  subActivity  String?                @map("sub_activity")
-  expiresAt    DateTime               @map("expires_at")
-  createdAt    DateTime               @default(now()) @map("created_at")
-  updatedAt    DateTime               @updatedAt @map("updated_at")
-  group        Group?                 @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  creator      User                   @relation("BuddyRoomCreators", fields: [creatorId], references: [id], onDelete: Cascade)
+  subActivity  String?                 @map("sub_activity")
+  expiresAt    DateTime                @map("expires_at")
+  createdAt    DateTime                @default(now()) @map("created_at")
+  updatedAt    DateTime                @updatedAt @map("updated_at")
+  group        Group?                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator      User                    @relation("BuddyRoomCreators", fields: [creatorId], references: [id], onDelete: Cascade)
   sessions     BuddySession[]
   participants BuddyRoomParticipant[]
   messages     BuddySessionMessage[]
@@ -453,13 +461,13 @@ model BuddyRoom {
 }
 
 model BuddyActivityOption {
-  activity      String        @id
+  activity      String   @id
   label         String
-  subActivities String[]      @default([]) @map("sub_activities")
-  sortOrder     Int           @default(0) @map("sort_order")
-  enabled       Boolean       @default(true)
-  createdAt     DateTime      @default(now()) @map("created_at")
-  updatedAt     DateTime      @updatedAt @map("updated_at")
+  subActivities String[] @default([]) @map("sub_activities")
+  sortOrder     Int      @default(0) @map("sort_order")
+  enabled       Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   @@index([enabled, sortOrder])
   @@map("buddy_activity_options")
@@ -528,16 +536,20 @@ model BuddySessionReadState {
 }
 
 model BuddyRoomParticipant {
-  roomId     String    @map("room_id")
-  userId     String    @map("user_id")
-  joinedAt   DateTime  @default(now()) @map("joined_at")
-  kickedAt   DateTime? @map("kicked_at")
-  kickedById String?   @map("kicked_by_id")
-  room       BuddyRoom @relation(fields: [roomId], references: [id], onDelete: Cascade)
-  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roomId         String                   @map("room_id")
+  userId         String                   @map("user_id")
+  role           BuddyRoomParticipantRole @default(member)
+  joinedAt       DateTime                 @default(now()) @map("joined_at")
+  lastActivityAt DateTime                 @default(now()) @map("last_activity_at")
+  leftAt         DateTime?                @map("left_at")
+  kickedAt       DateTime?                @map("kicked_at")
+  kickedById     String?                  @map("kicked_by_id")
+  room           BuddyRoom                @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  user           User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([roomId, userId])
   @@index([userId])
+  @@index([roomId, role, lastActivityAt])
   @@index([kickedById])
   @@map("buddy_room_participants")
 }

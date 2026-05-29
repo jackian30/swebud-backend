@@ -1,4 +1,4 @@
-import { BuddyDiscoveryAudience, BuddySessionVisibility } from '@prisma/client';
+import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionVisibility } from '@prisma/client';
 import { BuddyService } from './buddy.service';
 
 describe('BuddyService', () => {
@@ -13,6 +13,10 @@ describe('BuddyService', () => {
       },
       buddyRoom: {
         findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
+        delete: jest.fn().mockResolvedValue({}),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({
           id: 'room-1',
           ...data,
@@ -115,6 +119,7 @@ describe('BuddyService', () => {
     prisma.buddySession = {
       findUnique: jest.fn().mockResolvedValue({ roomId: 'room-1' }),
       delete: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
       findMany: jest.fn().mockResolvedValue([{ userId: 'user-2' }]),
       count: jest.fn().mockResolvedValue(1),
     };
@@ -129,7 +134,13 @@ describe('BuddyService', () => {
         sender: { id: userId, displayName: 'Fit Master', username: 'fitmaster', profileImageUrl: null },
       }),
     };
-    prisma.buddyRoomParticipant = { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) };
+    prisma.buddyRoom.deleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    prisma.buddyRoom.delete = jest.fn().mockResolvedValue({});
+    prisma.buddyRoomParticipant = {
+      findMany: jest.fn().mockResolvedValue([{ userId: 'owner-2' }]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    };
     service = new BuddyService(prisma, moduleRef(realtime) as any);
 
     await service.stop(userId);
@@ -147,6 +158,117 @@ describe('BuddyService', () => {
       userId,
       user: expect.objectContaining({ username: 'fitmaster' }),
     }));
+    expect(prisma.buddyRoom.delete).not.toHaveBeenCalled();
+  });
+
+  it('keeps room live presence and the last pin when the app closes', async () => {
+    const realtime = { emitToUser: jest.fn() };
+    prisma.buddySession = {
+      findUnique: jest.fn().mockResolvedValue({ roomId: 'room-1', latitude: 14.61, longitude: 121.03 }),
+      deleteMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([{ userId: 'user-2' }]),
+    };
+    prisma.buddySessionMessage = {
+      create: jest.fn(),
+    };
+    prisma.buddyRoom.findFirst = jest.fn().mockResolvedValue(null);
+    prisma.buddyRoomParticipant = {
+      updateMany: jest.fn(),
+      deleteMany: jest.fn(),
+    };
+    service = new BuddyService(prisma, moduleRef(realtime) as any);
+
+    await service.stopPresence(userId);
+
+    expect(prisma.buddySession.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.buddyRoomParticipant.updateMany).not.toHaveBeenCalled();
+    expect(prisma.buddyRoomParticipant.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.buddySessionMessage.create).not.toHaveBeenCalled();
+    expect(realtime.emitToUser).not.toHaveBeenCalledWith('user-2', 'buddy:room-presence-stopped', expect.anything());
+    expect(prisma.buddyRoom.delete).not.toHaveBeenCalled();
+  });
+
+  it('stops discovery presence when the app closes outside a room', async () => {
+    const realtime = { emitToUser: jest.fn() };
+    prisma.block = { findMany: jest.fn().mockResolvedValue([]) };
+    prisma.buddySession = {
+      findUnique: jest.fn().mockResolvedValue({ roomId: null, latitude: 14.61, longitude: 121.03 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findMany: jest.fn().mockResolvedValue([{ userId: 'user-2', latitude: 14.62, longitude: 121.04 }]),
+    };
+    service = new BuddyService(prisma, moduleRef(realtime) as any);
+
+    await service.stopPresence(userId);
+
+    expect(prisma.buddySession.deleteMany).toHaveBeenCalledWith({ where: { userId } });
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:discovery-session-stopped', expect.objectContaining({
+      userId,
+    }));
+  });
+
+  it('closes a room when the last owner or admin exits deliberately', async () => {
+    prisma.user.findUnique = jest.fn().mockResolvedValue({ id: userId, displayName: 'Fit Master', username: 'fitmaster', profileImageUrl: null });
+    prisma.buddySession = {
+      findUnique: jest.fn().mockResolvedValue({ roomId: 'room-1' }),
+      delete: jest.fn().mockResolvedValue({}),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    };
+    prisma.buddySessionMessage = {
+      create: jest.fn().mockResolvedValue({
+        id: 'message-left',
+        roomId: 'room-1',
+        senderId: userId,
+        kind: 'left',
+        body: 'left',
+        createdAt: new Date('2026-05-23T00:02:00.000Z'),
+        sender: { id: userId, displayName: 'Fit Master', username: 'fitmaster', profileImageUrl: null },
+      }),
+    };
+    prisma.buddyRoom.deleteMany = jest.fn().mockResolvedValue({ count: 0 });
+    prisma.buddyRoom.delete = jest.fn().mockResolvedValue({});
+    prisma.buddyRoomParticipant = {
+      findMany: jest.fn().mockResolvedValue([{ userId, role: BuddyRoomParticipantRole.owner }]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
+    };
+
+    await service.stop(userId);
+
+    expect(prisma.buddySession.count).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        roomId: 'room-1',
+        userId: { in: [userId] },
+        expiresAt: { gt: expect.any(Date) },
+      }),
+    }));
+    expect(prisma.buddyRoom.delete).toHaveBeenCalledWith({ where: { id: 'room-1' } });
+  });
+
+  it('notifies active participants when a room is stopped', async () => {
+    const realtime = { emitToUser: jest.fn() };
+    prisma.buddyRoom.findUnique = jest.fn().mockResolvedValue({
+      id: 'room-1',
+      creatorId: userId,
+      participants: [
+        { userId, role: BuddyRoomParticipantRole.owner, kickedAt: null },
+        { userId: 'user-2', role: BuddyRoomParticipantRole.member, kickedAt: null },
+      ],
+    });
+    prisma.buddyRoom.delete = jest.fn().mockResolvedValue({});
+    prisma.buddyRoomParticipant = { deleteMany: jest.fn().mockResolvedValue({ count: 2 }) };
+    prisma.buddySession = {
+      findMany: jest.fn().mockResolvedValue([{ userId }, { userId: 'user-2' }]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 2 }),
+    };
+    service = new BuddyService(prisma, moduleRef(realtime) as any);
+
+    await service.closeRoom(userId, 'room-1');
+
+    expect(prisma.buddyRoom.delete).toHaveBeenCalledWith({ where: { id: 'room-1' } });
+    expect(realtime.emitToUser).toHaveBeenCalledWith(userId, 'buddy:room-closed', expect.objectContaining({ roomId: 'room-1' }));
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-closed', expect.objectContaining({ roomId: 'room-1' }));
   });
 
   it('keeps expired room participant records so private members can return', async () => {
@@ -160,7 +282,10 @@ describe('BuddyService', () => {
         .mockResolvedValueOnce({ count: 0 }),
     };
     prisma.buddyRoomParticipant = { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) };
-    prisma.buddyRoom = { deleteMany: jest.fn().mockResolvedValue({ count: 0 }) };
+    prisma.buddyRoom = {
+      findMany: jest.fn().mockResolvedValue([]),
+      deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+    };
 
     await (service as any).cleanupExpiredBuddyData();
 

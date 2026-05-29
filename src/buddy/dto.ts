@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { BuddyDiscoveryAudience, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
+import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 
 export class UpsertBuddySessionDto {
   @IsOptional() @IsString() @MaxLength(60) activity?: string;
@@ -72,4 +72,9 @@ export class BuddySessionMessageReactionDto {
 
 export class KickBuddyRoomParticipantDto {
   @IsOptional() @IsString() @MaxLength(240) reason?: string;
+}
+
+export class UpdateBuddyRoomParticipantRoleDto {
+  @IsIn([BuddyRoomParticipantRole.admin, BuddyRoomParticipantRole.member])
+  role!: Exclude<BuddyRoomParticipantRole, 'owner'>;
 }
