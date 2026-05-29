@@ -23,16 +23,29 @@ export class MailService {
     const rejectUnauthorized = booleanConfig(this.config, 'SMTP_TLS_REJECT_UNAUTHORIZED', true);
     const user = this.config.get<string>('SMTP_USER');
     const pass = this.config.get<string>('SMTP_PASS');
+    const connectionTimeout = this.numericConfig('SMTP_CONNECTION_TIMEOUT_MS', 10_000);
+    const greetingTimeout = this.numericConfig('SMTP_GREETING_TIMEOUT_MS', 10_000);
+    const socketTimeout = this.numericConfig('SMTP_SOCKET_TIMEOUT_MS', 20_000);
     const options: Record<string, unknown> = {
       host,
       port,
       secure,
       ignoreTLS,
       requireTLS,
+      connectionTimeout,
+      greetingTimeout,
+      socketTimeout,
       tls: { rejectUnauthorized },
     };
     if (user || pass) options.auth = { user, pass };
     return options;
+  }
+
+  private numericConfig(key: string, fallback: number) {
+    const raw = this.config.get<string | number>(key);
+    if (raw == null || raw === '') return fallback;
+    const value = Number(raw);
+    return Number.isInteger(value) && value > 0 ? value : fallback;
   }
 
   async sendWelcomeEmail(input: { to: string; displayName?: string | null }) {

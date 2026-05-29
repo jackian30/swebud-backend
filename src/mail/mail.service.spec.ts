@@ -38,6 +38,9 @@ describe('MailService', () => {
       SMTP_IGNORE_TLS: 'false',
       SMTP_REQUIRE_TLS: 'true',
       SMTP_TLS_REJECT_UNAUTHORIZED: 'false',
+      SMTP_CONNECTION_TIMEOUT_MS: '7000',
+      SMTP_GREETING_TIMEOUT_MS: '8000',
+      SMTP_SOCKET_TIMEOUT_MS: '9000',
       SMTP_USER: 'user',
       SMTP_PASS: 'pass',
     }));
@@ -48,6 +51,9 @@ describe('MailService', () => {
       secure: false,
       ignoreTLS: false,
       requireTLS: true,
+      connectionTimeout: 7000,
+      greetingTimeout: 8000,
+      socketTimeout: 9000,
       tls: { rejectUnauthorized: false },
       auth: { user: 'user', pass: 'pass' },
     }));

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
@@ -58,6 +58,8 @@ type GoogleTokenInfo = {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     private prisma: PrismaService,
     private jwt: JwtService,
@@ -211,7 +213,8 @@ export class AuthService {
     });
 
     const origin = allowedOrigins(this.config)[0] ?? 'http://localhost:9000';
-    await this.mail.sendPasswordResetEmail({ to: user.email, resetUrl: `${origin}/auth?mode=reset&token=${token}` });
+    void this.mail.sendPasswordResetEmail({ to: user.email, resetUrl: `${origin}/auth?mode=reset&token=${token}` })
+      .catch((error) => this.logger.warn(`Password reset email dispatch failed: ${error instanceof Error ? error.message : 'unknown error'}`));
     return { ok: true };
   }
 

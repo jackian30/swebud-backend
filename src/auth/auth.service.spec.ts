@@ -163,6 +163,32 @@ describe('AuthService password reset URLs', () => {
     }));
     expect(mail.sendPasswordResetEmail.mock.calls[0][0].resetUrl).not.toContain(',');
   });
+
+  it('does not wait for reset email delivery before returning', async () => {
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'user-1', email: 'user@example.com' }),
+      },
+      passwordResetToken: {
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        create: jest.fn().mockResolvedValue({ id: 'token-1' }),
+      },
+    };
+    const mail = { sendPasswordResetEmail: jest.fn(() => new Promise(() => undefined)) };
+    const config = { get: jest.fn((key: string) => key === 'FRONTEND_ORIGIN' ? 'https://swebudd.com' : undefined) };
+    const service = new AuthService(
+      prisma as any,
+      {} as any,
+      config as any,
+      mail as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(service.forgotPassword('user@example.com')).resolves.toEqual({ ok: true });
+
+    expect(mail.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('AuthService beta release badge assignment', () => {
