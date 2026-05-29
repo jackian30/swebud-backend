@@ -64,6 +64,7 @@ export function bearerCorsOptions(config: ConfigService) {
   return {
     origin: corsOrigin(config),
     credentials: false,
+    maxAge: 600,
   };
 }
 

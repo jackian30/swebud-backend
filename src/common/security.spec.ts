@@ -19,6 +19,7 @@ describe('security helpers', () => {
     const options = bearerCorsOptions(config({ FRONTEND_ORIGIN: 'https://app.example.com' }));
 
     expect(options.credentials).toBe(false);
+    expect(options.maxAge).toBe(600);
   });
 
   it('allows configured origins and rejects unknown WebSocket handshake origins', () => {
