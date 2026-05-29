@@ -346,6 +346,15 @@ describe('BuddyService', () => {
     }));
   });
 
+  it('rejects discoverable Find Buddy sessions without an explicit radius', async () => {
+    prisma.buddyActivityOption = {
+      findFirst: jest.fn().mockResolvedValue(null),
+    };
+
+    await expect(service.discoverable(userId, { lat: 14.61, lng: 121.03 } as any))
+      .rejects.toThrow('radiusKm is required for buddy discovery.');
+  });
+
   it('returns lean buddy room summaries for session lists', async () => {
     const now = new Date('2026-05-23T00:00:00.000Z');
     prisma.buddyRoom.findMany

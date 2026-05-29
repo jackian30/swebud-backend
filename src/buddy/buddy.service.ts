@@ -192,7 +192,10 @@ export class BuddyService {
     const queryActivity = query.activity?.trim() || null;
     await this.ensureActivityOption(queryActivity);
     const now = new Date();
-    const radiusKm = query.radiusKm ?? DEFAULT_RADIUS_KM;
+    const radiusKm = query.radiusKm;
+    if (typeof radiusKm !== 'number' || !Number.isFinite(radiusKm)) {
+      throw new BadRequestException('radiusKm is required for buddy discovery.');
+    }
     const take = Math.min(Math.max(query.take ?? DEFAULT_DISCOVERABLE_TAKE, 1), MAX_DISCOVERABLE_TAKE);
     const blocked = await this.blockedUserIds(userId);
     const viewerSession = await this.prisma.buddySession.findUnique({ where: { userId }, select: { canSee: true, expiresAt: true } });
