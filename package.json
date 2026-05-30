@@ -1,12 +1,12 @@
 {
   "name": "swebudd-backend",
-  "version": "0.2.25-beta",
+  "version": "0.2.24-beta",
   "private": true,
   "description": "SweBudd NestJS backend",
   "scripts": {
     "dev": "nest start --watch",
     "start": "node dist/src/main.js",
-    "start:render": "sh -c 'MIGRATION_DATABASE_URL=\"${DIRECT_URL:-$DATABASE_URL}\"; if [ -z \"$MIGRATION_DATABASE_URL\" ]; then echo \"DATABASE_URL or DIRECT_URL is required for Prisma migrations\" >&2; exit 1; fi; if [ -z \"$DIRECT_URL\" ]; then echo \"DIRECT_URL not set; using DATABASE_URL for Prisma migrations\" >&2; fi; DATABASE_URL=\"$MIGRATION_DATABASE_URL\" npm run prisma:deploy && node dist/src/main.js'",
+    "start:render": "sh -c 'if [ -z \"$DIRECT_URL\" ]; then echo \"DIRECT_URL is required for Prisma migrations; use the Supabase direct/session connection, not the transaction pooler\" >&2; exit 1; fi; DATABASE_URL=\"$DIRECT_URL\" npm run prisma:deploy && node dist/src/main.js'",
     "build": "nest build",
     "test": "jest --passWithNoTests",
     "lint": "eslint \"src/**/*.ts\"",
