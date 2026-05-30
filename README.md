@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.23-beta**
+Current release: **0.2.24-beta**
 
 ## Stack
 
@@ -34,12 +34,11 @@ Current release: **0.2.23-beta**
 
 ## Current beta notes
 
-0.2.23-beta focuses on email delivery reliability and release documentation:
+0.2.24-beta focuses on split Docker deployment ownership and local dev startup:
 
-- Forgot-password email dispatch is non-blocking, so reset requests do not hang if the email provider is slow or offline.
-- SMTP transport now supports explicit TLS/auth settings, timeout controls, and IPv4/IPv6 family selection.
-- Local MailHog remains the default zero-config email target; production can use any SMTP-compatible provider with env config.
-- Chat/E2EE documentation has been refreshed for the current direct-chat encryption foundation.
+- Backend compose now owns only product Postgres, MailHog, Prisma migration, backend API, and uploads.
+- Local backend deploy defaults to a dev compose file with source mounts and `npm run dev`.
+- Production compose keeps the one-shot Prisma `migrate` service and waits for it before starting the API.
 
 ## Tags and discovery
 
@@ -65,13 +64,14 @@ Detailed chat behavior, data flow, realtime events, and the current multi-device
 
 ## Local URLs
 
-When using the full local Docker stack:
+When the local Docker apps are running:
 
 - Frontend: `http://swebud.loc` or `https://localhost:9443`
 - Phone/LAN HTTPS frontend: `https://192.168.18.50:9443`
 - Backend through frontend proxy: `http://swebud.loc/api` or `https://localhost:9443/api`
 - Backend direct host port: `http://localhost:3002`
 - MailHog UI: `http://localhost:8126`
+- Admin: `http://localhost:9100` when the admin repo compose is running
 
 Make sure `/etc/hosts` contains:
 
@@ -103,13 +103,11 @@ Important variables:
 - `BACKEND_PORT`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_IGNORE_TLS`, `SMTP_REQUIRE_TLS`, `SMTP_TLS_REJECT_UNAUTHORIZED`, `SMTP_USER`, `SMTP_PASS`, `SMTP_CONNECTION_TIMEOUT_MS`, `SMTP_GREETING_TIMEOUT_MS`, `SMTP_SOCKET_TIMEOUT_MS`, `SMTP_IP_FAMILY`, `MAIL_FROM` — Nodemailer SMTP delivery settings; MailHog local dev uses plaintext, production SMTP should set TLS/auth explicitly
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` / `GOOGLE_OAUTH_REDIRECT_URI` — Google auth placeholders; `POST /auth/google` verifies Google ID tokens and returns onboarding status
-- `CLOUDFLARE_TURNSTILE_SITE_KEY` / `VITE_CLOUDFLARE_TURNSTILE_SITE_KEY`, `CLOUDFLARE_TURNSTILE_SECRET_KEY` — Turnstile captcha config; backend skips verification in local dev when the secret is empty
+- `CLOUDFLARE_TURNSTILE_SITE_KEY`, `CLOUDFLARE_TURNSTILE_SECRET_KEY` — Turnstile captcha config; backend skips verification in local dev when the secret is empty
 - `KLIPY_API_KEY`, `KLIPY_CLIENT_KEY` — GIF search/provider placeholders
-- `LEGAL_TERMS_URL`, `LEGAL_PRIVACY_URL` — legal metadata passed through the local Docker stack
 - `MEDIA_STORAGE_DRIVER=local|s3`, `MEDIA_S3_BUCKET`, `MEDIA_PUBLIC_BASE_URL`, `AWS_REGION`, `AWS_S3_ENDPOINT`, `AWS_S3_FORCE_PATH_STYLE` — media storage driver and S3-compatible storage config
 - `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` — reserved for Strava OAuth/webhook integration
 - `GARMIN_CONSUMER_KEY`, `GARMIN_CONSUMER_SECRET` — reserved for Garmin OAuth integration
-- `MAP_STYLE_URL` — frontend MapLibre/OpenFreeMap style URL used by the Docker stack
 
 Do not commit real `.env` files.
 
@@ -142,6 +140,8 @@ npm run prisma:generate
 
 ## Docker/local deployment
 
+This repo owns only backend deployment: product Postgres, MailHog, the Prisma migration job, backend API, and the uploads volume.
+
 From this repo:
 
 ```bash
@@ -168,9 +168,11 @@ Backend code is baked into the Docker image. After backend code or dependency ch
 docker compose --env-file deployment/.env -f deployment/docker-compose.yml up -d --build backend
 ```
 
+The `migrate` compose service is a one-shot Prisma runner. It waits for product Postgres, runs `npx prisma migrate deploy` against `DIRECT_URL`, exits, and only then lets the backend container start. Keep it in the backend repo because the backend owns `prisma/schema.prisma` and all product DB migrations.
+
 Database schema changes still need Prisma migrations (`npm run prisma:migrate` locally, `npm run prisma:deploy` for deploy flows).
 
-The deployment compose file includes a one-shot `migrate` service that runs `npx prisma migrate deploy` before the backend starts. The backend also exposes:
+The backend exposes:
 
 ```text
 GET /health/live
@@ -297,7 +299,7 @@ For future iOS/Android clients, keep the same bearer-token API contract and use 
 
 The backend CORS and Socket.IO handshake checks are bearer-token oriented and do not enable browser credential/cookie CORS. Browser and native clients should send `Authorization: Bearer <token>` for HTTP and the Socket.IO `auth.token` value for realtime namespaces.
 
-The frontend container serves the SPA on `FRONTEND_PORT`; the backend container serves the API on `BACKEND_PORT`. Put a host-level reverse proxy in front of both ports. A starting nginx config is available at `deployment/reverse-proxy.nginx.conf.example`.
+The backend container serves the API on `BACKEND_PORT`. Frontend and admin have their own compose files in their own repos and attach to the same `SWEBUD_NETWORK` Docker network. Put a host-level reverse proxy in front of the public ports for production. A starting nginx config is available at `deployment/reverse-proxy.nginx.conf.example`.
 
 ## Deployment readiness checks
 
@@ -469,8 +471,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.23-beta -m "v0.2.23-beta"
-git push origin v0.2.23-beta
+git tag -a v0.2.24-beta -m "v0.2.24-beta"
+git push origin v0.2.24-beta
 ```
 
 ## Beta caveats
@@ -478,4 +480,4 @@ git push origin v0.2.23-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally. Production email uses SMTP env settings through Nodemailer.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.23-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.24-beta flows, but production release still needs broader end-to-end coverage.
