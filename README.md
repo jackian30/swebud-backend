@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.24-beta**
+Current release: **0.2.26-beta**
 
 ## Stack
 
@@ -34,7 +34,7 @@ Current release: **0.2.24-beta**
 
 ## Current beta notes
 
-0.2.24-beta focuses on split Docker deployment ownership and local dev startup:
+0.2.26-beta focuses on coordinated beta release readiness and backend metadata alignment:
 
 - Backend compose now owns only product Postgres, MailHog, Prisma migration, backend API, and uploads.
 - Local backend deploy defaults to a dev compose file with source mounts and `npm run dev`.
@@ -471,8 +471,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.24-beta -m "v0.2.24-beta"
-git push origin v0.2.24-beta
+git tag -a v0.2.26-beta -m "v0.2.26-beta"
+git push origin v0.2.26-beta
 ```
 
 ## Beta caveats
@@ -480,4 +480,4 @@ git push origin v0.2.24-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally. Production email uses SMTP env settings through Nodemailer.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.24-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.26-beta flows, but production release still needs broader end-to-end coverage.
