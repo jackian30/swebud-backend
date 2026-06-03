@@ -2,11 +2,12 @@ const { spawn } = require('node:child_process');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function addDefaultSearchParam(value, key, defaultValue) {
+function withMaxSearchParam(value, key, maxValue) {
   try {
     const url = new URL(value);
-    if (!url.searchParams.has(key)) {
-      url.searchParams.set(key, defaultValue);
+    const currentValue = Number.parseInt(url.searchParams.get(key) || '', 10);
+    if (!Number.isFinite(currentValue) || currentValue < 1 || currentValue > maxValue) {
+      url.searchParams.set(key, String(maxValue));
     }
     return url.toString();
   } catch {
@@ -48,13 +49,13 @@ async function main() {
 
   const migrationEnv = {
     ...process.env,
-    DATABASE_URL: addDefaultSearchParam(process.env.DIRECT_URL, 'connection_limit', '1'),
+    DATABASE_URL: withMaxSearchParam(process.env.DIRECT_URL, 'connection_limit', 1),
   };
   await deployMigrations(migrationEnv);
 
   const appEnv = {
     ...process.env,
-    DATABASE_URL: addDefaultSearchParam(process.env.DATABASE_URL, 'connection_limit', '3'),
+    DATABASE_URL: withMaxSearchParam(process.env.DATABASE_URL, 'connection_limit', 3),
   };
   const app = spawn('node', ['dist/src/main.js'], { stdio: 'inherit', env: appEnv });
   for (const signal of ['SIGINT', 'SIGTERM']) {
