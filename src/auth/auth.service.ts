@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcryptjs';
 import { randomBytes } from 'crypto';
+import type { Request } from 'express';
 import { ActivityPersona, Prisma } from '@prisma/client';
 import { MailService } from '../mail/mail.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -56,6 +57,18 @@ type GoogleTokenInfo = {
   aud?: string;
 };
 
+export type SessionMetadata = {
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  deviceLabel?: string | null;
+  locationLabel?: string | null;
+};
+
+type TokenIssueOptions = {
+  metadata?: SessionMetadata;
+  loginSessionId?: string | null;
+};
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -69,8 +82,8 @@ export class AuthService {
     private turnstile: TurnstileService,
   ) {}
 
-  async register(dto: RegisterDto, remoteIp?: string) {
-    await this.turnstile.verify(dto.captchaToken, remoteIp, 'signup');
+  async register(dto: RegisterDto, metadata?: SessionMetadata) {
+    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'signup');
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
     if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
 
@@ -100,11 +113,11 @@ export class AuthService {
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     void this.mail.sendWelcomeEmail({ to: user.email, displayName: user.displayName });
-    return this.issueTokens(user);
+    return this.issueTokens(user, { metadata });
   }
 
-  async login(dto: LoginDto, remoteIp?: string) {
-    await this.turnstile.verify(dto.captchaToken, remoteIp, 'login');
+  async login(dto: LoginDto, metadata?: SessionMetadata) {
+    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'login');
     const identifier = dto.email.toLowerCase().trim();
     const user = await this.prisma.user.findFirst({
       where: {
@@ -117,14 +130,14 @@ export class AuthService {
     });
     if (!user || !(await bcrypt.compare(dto.password, user.passwordHash))) throw new UnauthorizedException('Invalid credentials');
     this.assertAccountAllowed(user);
-    const activeSessions = await this.prisma.refreshToken.count({ where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } } });
+    const activeSessions = await this.prisma.loginSession.count({ where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } } });
     const safeUser = Object.fromEntries(Object.entries(user).filter(([key]) => key !== 'passwordHash')) as unknown as SafeUser;
-    const tokens = await this.issueTokens(safeUser);
+    const tokens = await this.issueTokens(safeUser, { metadata });
     if (activeSessions > 0) void this.notifications.create({ userId: user.id, actorId: user.id, type: 'login', message: 'New login detected on another device.' } as any);
     return tokens;
   }
 
-  async googleLogin(dto: GoogleLoginDto) {
+  async googleLogin(dto: GoogleLoginDto, metadata?: SessionMetadata) {
     const profile = await this.verifyGoogleIdToken(dto.idToken);
     const email = profile.email.toLowerCase().trim();
     const googleEmailVerified = profile.email_verified === true || profile.email_verified === 'true';
@@ -154,10 +167,10 @@ export class AuthService {
       }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     this.assertAccountAllowed(user);
-    return this.issueTokens(user);
+    return this.issueTokens(user, { metadata });
   }
 
-  async completeOnboarding(userId: string, dto: CompleteOnboardingDto) {
+  async completeOnboarding(userId: string, dto: CompleteOnboardingDto, metadata?: SessionMetadata, loginSessionId?: string | null) {
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException('Username is required');
@@ -177,11 +190,11 @@ export class AuthService {
       },
       select: this.safeUserSelect(),
     });
-    return this.issueTokens(user);
+    return this.issueTokens(user, { metadata, loginSessionId });
   }
 
-  async refresh(refreshToken: string) {
-    const payload = await this.jwt.verifyAsync<{ sub: string; email: string }>(refreshToken, { secret: this.refreshSecret() }).catch(() => null);
+  async refresh(refreshToken: string, metadata?: SessionMetadata) {
+    const payload = await this.jwt.verifyAsync<{ sub: string; email: string; sid?: string; lid?: string }>(refreshToken, { secret: this.refreshSecret() }).catch(() => null);
     if (!payload) throw new UnauthorizedException('Invalid refresh token');
 
     const storedTokens = await this.prisma.refreshToken.findMany({
@@ -195,7 +208,7 @@ export class AuthService {
     await this.prisma.refreshToken.update({ where: { id: match.id }, data: { revokedAt: new Date() } });
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: payload.sub }, select: this.safeUserSelect() });
     this.assertAccountAllowed(user);
-    return this.issueTokens(user);
+    return this.issueTokens(user, { metadata, loginSessionId: match.loginSessionId ?? payload.lid ?? null });
   }
 
   async forgotPassword(emailInput: string) {
@@ -231,30 +244,77 @@ export class AuthService {
       this.prisma.user.update({ where: { id: match.userId }, data: { passwordHash: await bcrypt.hash(password, 12) } }),
       this.prisma.passwordResetToken.update({ where: { id: match.id }, data: { usedAt: new Date() } }),
       this.prisma.refreshToken.updateMany({ where: { userId: match.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+      this.prisma.loginSession.updateMany({ where: { userId: match.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
     ]);
     return { ok: true };
   }
 
-  async logout(userId: string, refreshToken?: string) {
+  async logout(userId: string, refreshToken?: string, currentLoginSessionId?: string | null) {
     if (!refreshToken) {
-      await this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      if (currentLoginSessionId) {
+        await this.revokeLoginSession(userId, currentLoginSessionId);
+        return;
+      }
+      await this.prisma.$transaction([
+        this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+        this.prisma.loginSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+      ]);
       return;
     }
     const storedTokens = await this.prisma.refreshToken.findMany({ where: { userId, revokedAt: null } });
     const match = await this.findMatchingToken(storedTokens, refreshToken);
-    if (match) await this.prisma.refreshToken.update({ where: { id: match.id }, data: { revokedAt: new Date() } });
+    if (!match) return;
+    if (match.loginSessionId) await this.revokeLoginSession(userId, match.loginSessionId);
+    else await this.prisma.refreshToken.update({ where: { id: match.id }, data: { revokedAt: new Date() } });
   }
 
-  private async issueTokens(user: SafeUser) {
+  private async issueTokens(user: SafeUser, options: TokenIssueOptions = {}) {
     const onboarding = this.onboardingStatus(user);
     const sessionId = randomBytes(16).toString('hex');
-    const accessToken = await this.jwt.signAsync({ sub: user.id, email: user.email, sid: sessionId, onboarded: !onboarding.requiresOnboarding }, { secret: this.accessSecret(), expiresIn: '30d' });
-    const refreshToken = await this.jwt.signAsync({ sub: user.id, email: user.email, sid: sessionId, onboarded: !onboarding.requiresOnboarding }, { secret: this.refreshSecret(), expiresIn: '30d' });
+    const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+    const loginSessionId = await this.ensureLoginSession(user.id, expiresAt, options);
+    const tokenPayload = { sub: user.id, email: user.email, sid: sessionId, lid: loginSessionId, onboarded: !onboarding.requiresOnboarding };
+    const accessToken = await this.jwt.signAsync(tokenPayload, { secret: this.accessSecret(), expiresIn: '30d' });
+    const refreshToken = await this.jwt.signAsync(tokenPayload, { secret: this.refreshSecret(), expiresIn: '30d' });
     await this.prisma.refreshToken.create({
-      data: { id: sessionId, userId: user.id, tokenHash: await bcrypt.hash(refreshToken, 12), expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
+      data: {
+        id: sessionId,
+        userId: user.id,
+        loginSessionId,
+        tokenHash: await bcrypt.hash(refreshToken, 12),
+        expiresAt,
+      },
     });
     const normalizedUser = exposeProfileBadges(exposeActivityPersonas(user));
     return { user: { ...normalizedUser, ...onboarding }, accessToken, refreshToken, ...onboarding };
+  }
+
+  private async ensureLoginSession(userId: string, expiresAt: Date, options: TokenIssueOptions) {
+    if (options.loginSessionId) {
+      const updated = await this.prisma.loginSession.updateMany({
+        where: { id: options.loginSessionId, userId, revokedAt: null },
+        data: { expiresAt, ...sessionMetadataUpdateData(options.metadata) },
+      });
+      if (updated.count > 0) return options.loginSessionId;
+    }
+
+    const session = await this.prisma.loginSession.create({
+      data: {
+        userId,
+        expiresAt,
+        ...sessionMetadataCreateData(options.metadata),
+      },
+      select: { id: true },
+    });
+    return session.id;
+  }
+
+  private async revokeLoginSession(userId: string, loginSessionId: string) {
+    const revokedAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.loginSession.updateMany({ where: { id: loginSessionId, userId }, data: { revokedAt } }),
+      this.prisma.refreshToken.updateMany({ where: { userId, loginSessionId, revokedAt: null }, data: { revokedAt } }),
+    ]);
   }
 
   private onboardingStatus(user: SafeUser) {
@@ -323,4 +383,96 @@ export class AuthService {
     };
   }
   private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true, betaUser: true, hideProfileBadges: true, moderationStatus: true, bannedAt: true, bannedUntil: true, banReason: true, badges: { select: profileBadgeSelect } } as const; }
+}
+
+export function sessionMetadataFromRequest(req: Request): SessionMetadata {
+  const userAgent = firstHeader(req, 'user-agent');
+  const ipAddress = firstForwardedValue(firstHeader(req, 'x-forwarded-for'))
+    ?? cleanIpAddress(firstHeader(req, 'x-real-ip'))
+    ?? cleanIpAddress(req.ip)
+    ?? cleanIpAddress(req.socket.remoteAddress);
+  const locationLabel = locationLabelFromHeaders(req);
+  return {
+    ipAddress,
+    userAgent: cleanSessionText(userAgent, 500),
+    deviceLabel: deviceLabelFromUserAgent(userAgent),
+    locationLabel,
+  };
+}
+
+function locationLabelFromHeaders(req: Request) {
+  const city = decodeHeaderValue(firstHeader(req, 'cf-ipcity') ?? firstHeader(req, 'x-vercel-ip-city') ?? firstHeader(req, 'x-appengine-city'));
+  const region = decodeHeaderValue(firstHeader(req, 'cf-region') ?? firstHeader(req, 'x-vercel-ip-country-region') ?? firstHeader(req, 'x-appengine-region'));
+  const country = decodeHeaderValue(firstHeader(req, 'cf-ipcountry') ?? firstHeader(req, 'x-vercel-ip-country') ?? firstHeader(req, 'x-appengine-country'));
+  const parts = [city, region, normalizeCountry(country)].filter(Boolean);
+  return parts.length ? parts.join(', ') : null;
+}
+
+function deviceLabelFromUserAgent(userAgent?: string | null) {
+  const value = cleanSessionText(userAgent, 500);
+  if (!value) return null;
+  const ua = value.toLowerCase();
+  if (ua.includes('android')) return ua.includes('; wv') || ua.includes('version/4.0') ? 'Android app' : 'Android browser';
+  if (/iphone|ipad|ipod/.test(ua)) return 'iOS device';
+  if (ua.includes('windows')) return 'Windows browser';
+  if (ua.includes('macintosh') || ua.includes('mac os x')) return 'Mac browser';
+  if (ua.includes('linux')) return 'Linux browser';
+  if (ua.includes('mobile')) return 'Mobile browser';
+  return 'Web browser';
+}
+
+function firstHeader(req: Request, name: string) {
+  const value = req.headers[name.toLowerCase()];
+  if (Array.isArray(value)) return value[0]?.trim() || null;
+  return value?.trim() || null;
+}
+
+function firstForwardedValue(value?: string | null) {
+  if (!value) return null;
+  return cleanIpAddress(value.split(',')[0]);
+}
+
+function cleanIpAddress(value?: string | null) {
+  const cleaned = value?.trim().replace(/^\[|\]$/g, '').replace(/^::ffff:/, '');
+  if (!cleaned || cleaned.toLowerCase() === 'unknown') return null;
+  return cleaned.slice(0, 80);
+}
+
+function decodeHeaderValue(value?: string | null) {
+  const cleaned = cleanSessionText(value, 120);
+  if (!cleaned) return null;
+  try {
+    return decodeURIComponent(cleaned.replace(/\+/g, ' ')).trim() || null;
+  } catch {
+    return cleaned;
+  }
+}
+
+function normalizeCountry(value?: string | null) {
+  if (!value || value === 'XX') return null;
+  return value;
+}
+
+function sessionMetadataCreateData(metadata?: SessionMetadata) {
+  return {
+    deviceLabel: cleanSessionText(metadata?.deviceLabel, 80),
+    locationLabel: cleanSessionText(metadata?.locationLabel, 120),
+    ipAddress: cleanSessionText(metadata?.ipAddress, 80),
+    userAgent: cleanSessionText(metadata?.userAgent, 500),
+  };
+}
+
+function sessionMetadataUpdateData(metadata?: SessionMetadata) {
+  const data: Partial<ReturnType<typeof sessionMetadataCreateData>> = {};
+  const next = sessionMetadataCreateData(metadata);
+  if (next.deviceLabel) data.deviceLabel = next.deviceLabel;
+  if (next.locationLabel) data.locationLabel = next.locationLabel;
+  if (next.ipAddress) data.ipAddress = next.ipAddress;
+  if (next.userAgent) data.userAgent = next.userAgent;
+  return data;
+}
+
+function cleanSessionText(value?: string | null, maxLength = 120) {
+  const cleaned = value?.replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim();
+  return cleaned ? cleaned.slice(0, maxLength) : null;
 }

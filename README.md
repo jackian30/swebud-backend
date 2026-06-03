@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.27-beta**
+Current release: **0.2.28-beta**
 
 ## Stack
 
@@ -34,11 +34,12 @@ Current release: **0.2.27-beta**
 
 ## Current beta notes
 
-0.2.27-beta focuses on account deletion and message-request chat permissions:
+0.2.28-beta focuses on deploy hardening and login-session history:
 
-- Users can delete their own account after typing the required `delete @username` confirmation phrase.
-- Account deletion removes user-owned application data, scrubs nullable actor references, and recomputes affected counters.
-- Accepted message requests now permanently unlock direct chat between non-mutual users unless either user blocks the other.
+- Render startup enforces low Prisma connection caps for Supabase pooler deployments.
+- Login history uses a dedicated `login_sessions` table instead of displaying refresh-token rows.
+- Refresh-token rotation stays auth-internal and reuses the same visible login session.
+- Current devices and history can show device, location, IP, and user-agent metadata when request headers provide it.
 
 ## Tags and discovery
 
@@ -462,9 +463,9 @@ Then run the full Docker stack and API smokes from the workspace if available.
 
 - Protected controllers use `JwtAuthGuard`.
 - Helmet, CORS, and global validation pipe are enabled in `src/main.ts`.
-- JWTs include a session id (`sid`) checked against `RefreshToken` rows.
+- JWTs include a refresh session id (`sid`) checked against `RefreshToken` rows and a visible login session id (`lid`) linked to `LoginSession`.
 - Session expiry is sliding: authenticated API calls extend expiry to 7 days from that activity.
-- Refresh token rotation revokes the old stored token.
+- Refresh token rotation revokes the old stored token without creating a new visible login-history entry.
 - Public profile and post responses strip private account fields and exact user coordinates.
 - ActSnap reference context is only accepted from trusted ActSnap reply flows; generic chat sends ignore client-supplied ActSnap reference fields.
 - Google-created users do not bypass onboarding: auth responses include `requiresOnboarding` and `onboardingMissing` until username, date of birth, legal consent, and data consent are completed.
@@ -477,8 +478,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.27-beta -m "v0.2.27-beta"
-git push origin v0.2.27-beta
+git tag -a v0.2.28-beta -m "v0.2.28-beta"
+git push origin v0.2.28-beta
 ```
 
 ## Beta caveats
@@ -486,4 +487,4 @@ git push origin v0.2.27-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally. Production email uses SMTP env settings through Nodemailer.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.27-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.28-beta flows, but production release still needs broader end-to-end coverage.

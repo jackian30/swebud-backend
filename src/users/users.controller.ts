@@ -14,7 +14,7 @@ export class UsersController {
   @Patch('me/account') updateAccount(@CurrentUser() user: AuthUser, @Body() dto: UpdateAccountDto) { return this.users.updateAccount(user.id, dto); }
   @Patch('me/password') updatePassword(@CurrentUser() user: AuthUser, @Body() dto: UpdatePasswordDto) { return this.users.updatePassword(user.id, dto); }
   @Delete('me') deleteMe(@CurrentUser() user: AuthUser, @Body() dto: DeleteMeDto) { return this.users.deleteMe(user.id, dto); }
-  @Get('me/sessions') sessions(@CurrentUser() user: AuthUser) { return this.users.sessions(user.id, user.sessionId); }
+  @Get('me/sessions') sessions(@CurrentUser() user: AuthUser) { return this.users.sessions(user.id, user.loginSessionId); }
   @Delete('me/sessions/:id') revokeSession(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.revokeSession(user.id, id); }
   @Get('me/followers') followers(@CurrentUser() user: AuthUser) { return this.users.followers(user.id); }
   @Get('me/following') following(@CurrentUser() user: AuthUser, @Query('nonFollowback') nonFollowback?: string) { return this.users.following(user.id, nonFollowback); }

@@ -103,6 +103,71 @@ describe('UsersService profile reports', () => {
   });
 });
 
+describe('UsersService account sessions', () => {
+  it('returns login sessions with current and active flags', async () => {
+    const now = Date.now();
+    jest.useFakeTimers().setSystemTime(new Date(now));
+    const prisma = {
+      loginSession: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'login-session-current',
+            createdAt: new Date(now - 1000),
+            expiresAt: new Date(now + 1000),
+            revokedAt: null,
+            deviceLabel: 'Android app',
+            locationLabel: 'Makati, PH',
+            ipAddress: '203.0.113.10',
+            userAgent: 'Android WebView',
+          },
+          {
+            id: 'login-session-revoked',
+            createdAt: new Date(now - 2000),
+            expiresAt: new Date(now + 1000),
+            revokedAt: new Date(now - 500),
+            deviceLabel: 'Web browser',
+            locationLabel: null,
+            ipAddress: null,
+            userAgent: null,
+          },
+        ]),
+      },
+    };
+    const service = new UsersService(prisma as any, { create: jest.fn() } as any);
+
+    await expect(service.sessions('user-1', 'login-session-current')).resolves.toEqual([
+      expect.objectContaining({ id: 'login-session-current', current: true, active: true, locationLabel: 'Makati, PH' }),
+      expect.objectContaining({ id: 'login-session-revoked', current: false, active: false }),
+    ]);
+
+    expect(prisma.loginSession.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { userId: 'user-1' },
+      take: 50,
+    }));
+    jest.useRealTimers();
+  });
+
+  it('revokes the visible login session and linked refresh tokens together', async () => {
+    const prisma = {
+      loginSession: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+      $transaction: jest.fn(async (operations: unknown[]) => Promise.all(operations)),
+    };
+    const service = new UsersService(prisma as any, { create: jest.fn() } as any);
+
+    await expect(service.revokeSession('user-1', 'login-session-1')).resolves.toEqual({ ok: true });
+
+    expect(prisma.loginSession.updateMany).toHaveBeenCalledWith({
+      where: { id: 'login-session-1', userId: 'user-1' },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { loginSessionId: 'login-session-1', userId: 'user-1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+  });
+});
+
 describe('UsersService account deletion', () => {
   function createService() {
     const tx = {

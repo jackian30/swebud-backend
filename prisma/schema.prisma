@@ -324,6 +324,7 @@ model User {
   notifications                Notification[]                @relation("NotificationsReceived")
   notificationActors           Notification[]                @relation("NotificationActors")
   theme                        UserTheme?
+  loginSessions                LoginSession[]
   refreshTokens                RefreshToken[]
   passwordResetTokens          PasswordResetToken[]
   following                    Follow[]                      @relation("Following")
@@ -630,17 +631,39 @@ model UserTheme {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
-  tokenHash String    @map("token_hash")
-  userId    String    @map("user_id")
-  expiresAt DateTime  @map("expires_at")
-  revokedAt DateTime? @map("revoked_at")
-  createdAt DateTime  @default(now()) @map("created_at")
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String        @id @default(uuid())
+  tokenHash      String        @map("token_hash")
+  userId         String        @map("user_id")
+  loginSessionId String?       @map("login_session_id")
+  expiresAt      DateTime      @map("expires_at")
+  revokedAt      DateTime?     @map("revoked_at")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loginSession   LoginSession? @relation(fields: [loginSessionId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([userId, revokedAt, expiresAt])
+  @@index([loginSessionId])
   @@map("refresh_tokens")
+}
+
+model LoginSession {
+  id            String         @id @default(uuid())
+  userId        String         @map("user_id")
+  expiresAt     DateTime       @map("expires_at")
+  revokedAt     DateTime?      @map("revoked_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+  deviceLabel   String?        @map("device_label")
+  locationLabel String?        @map("location_label")
+  ipAddress     String?        @map("ip_address")
+  userAgent     String?        @map("user_agent")
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId])
+  @@index([userId, revokedAt, expiresAt])
+  @@map("login_sessions")
 }
 
 model PasswordResetToken {

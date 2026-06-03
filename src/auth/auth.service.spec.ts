@@ -1,5 +1,29 @@
-import { AuthService } from './auth.service';
+import { AuthService, sessionMetadataFromRequest } from './auth.service';
 import * as appRelease from '../common/app-version';
+import * as bcrypt from 'bcryptjs';
+
+describe('sessionMetadataFromRequest', () => {
+  it('captures Android app, IP, and proxy location headers', () => {
+    const req = {
+      ip: '10.0.0.1',
+      socket: {},
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP3A; wv) AppleWebKit/537.36 Version/4.0 Chrome/125.0 Mobile Safari/537.36',
+        'x-forwarded-for': '203.0.113.10, 10.0.0.5',
+        'cf-ipcity': 'Makati',
+        'cf-region': 'Metro%20Manila',
+        'cf-ipcountry': 'PH',
+      },
+    };
+
+    expect(sessionMetadataFromRequest(req as any)).toEqual({
+      ipAddress: '203.0.113.10',
+      userAgent: req.headers['user-agent'],
+      deviceLabel: 'Android app',
+      locationLabel: 'Makati, Metro Manila, PH',
+    });
+  });
+});
 
 describe('AuthService Google login', () => {
   const originalFetch = global.fetch;
@@ -46,6 +70,10 @@ describe('AuthService Google login', () => {
       },
       refreshToken: {
         create: jest.fn().mockResolvedValue({}),
+      },
+      loginSession: {
+        create: jest.fn().mockResolvedValue({ id: 'login-session-1' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
       $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
     };
@@ -108,6 +136,10 @@ describe('AuthService Google login', () => {
       refreshToken: {
         create: jest.fn().mockResolvedValue({}),
       },
+      loginSession: {
+        create: jest.fn().mockResolvedValue({ id: 'login-session-2' }),
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
       $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
     };
     const service = new AuthService(
@@ -126,6 +158,80 @@ describe('AuthService Google login', () => {
     expect(prisma.user.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ username: 'elenadiaz2' }),
     }));
+  });
+});
+
+describe('AuthService refresh login sessions', () => {
+  it('rotates refresh tokens without creating another visible login session', async () => {
+    const tokenHash = await bcrypt.hash('refresh-token', 4);
+    const prisma: any = {
+      refreshToken: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'refresh-1', userId: 'user-1', loginSessionId: 'login-session-1', tokenHash }]),
+        update: jest.fn().mockResolvedValue({ id: 'refresh-1' }),
+        create: jest.fn().mockResolvedValue({ id: 'refresh-2' }),
+      },
+      loginSession: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        create: jest.fn().mockResolvedValue({ id: 'new-login-session' }),
+      },
+      user: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'user@example.com',
+          username: 'runner',
+          usernameFinalized: true,
+          dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+          legalConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+          dataConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+          activityPersonas: [],
+          badges: [],
+        }),
+      },
+    };
+    const jwt = {
+      verifyAsync: jest.fn().mockResolvedValue({ sub: 'user-1', email: 'user@example.com', sid: 'refresh-1', lid: 'login-session-1' }),
+      signAsync: jest.fn()
+        .mockResolvedValueOnce('access-token')
+        .mockResolvedValueOnce('next-refresh-token'),
+    };
+    const service = new AuthService(
+      prisma,
+      jwt as any,
+      { get: jest.fn().mockReturnValue(undefined) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await service.refresh('refresh-token', {
+      deviceLabel: 'Android app',
+      locationLabel: 'Makati, PH',
+      ipAddress: '203.0.113.10',
+      userAgent: 'Android WebView',
+    });
+
+    expect(prisma.refreshToken.update).toHaveBeenCalledWith({
+      where: { id: 'refresh-1' },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(prisma.loginSession.updateMany).toHaveBeenCalledWith({
+      where: { id: 'login-session-1', userId: 'user-1', revokedAt: null },
+      data: expect.objectContaining({
+        deviceLabel: 'Android app',
+        locationLabel: 'Makati, PH',
+        ipAddress: '203.0.113.10',
+        userAgent: 'Android WebView',
+      }),
+    });
+    expect(prisma.loginSession.create).not.toHaveBeenCalled();
+    expect(jwt.signAsync).toHaveBeenCalledWith(expect.objectContaining({ lid: 'login-session-1', sid: expect.any(String) }), expect.anything());
+    expect(prisma.refreshToken.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'user-1',
+        loginSessionId: 'login-session-1',
+        tokenHash: expect.any(String),
+      }),
+    });
   });
 });
 

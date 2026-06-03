@@ -54,20 +54,25 @@ export class UsersService {
     await this.prisma.$transaction([
       this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await bcrypt.hash(dto.newPassword, 12) } }),
       this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
+      this.prisma.loginSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
     ]);
     return { ok: true };
   }
-  sessions(userId: string, currentSessionId?: string) {
-    return this.prisma.refreshToken.findMany({
+  sessions(userId: string, currentSessionId?: string | null) {
+    return this.prisma.loginSession.findMany({
       where: { userId },
       orderBy: { createdAt: 'desc' },
       take: 50,
-      select: { id: true, createdAt: true, expiresAt: true, revokedAt: true },
+      select: { id: true, createdAt: true, expiresAt: true, revokedAt: true, deviceLabel: true, locationLabel: true, ipAddress: true, userAgent: true },
     }).then((sessions) => sessions.map((session) => ({ ...session, current: session.id === currentSessionId, active: !session.revokedAt && session.expiresAt > new Date() })));
   }
 
   async revokeSession(userId: string, sessionId: string) {
-    await this.prisma.refreshToken.updateMany({ where: { id: sessionId, userId }, data: { revokedAt: new Date() } });
+    const revokedAt = new Date();
+    await this.prisma.$transaction([
+      this.prisma.loginSession.updateMany({ where: { id: sessionId, userId }, data: { revokedAt } }),
+      this.prisma.refreshToken.updateMany({ where: { loginSessionId: sessionId, userId, revokedAt: null }, data: { revokedAt } }),
+    ]);
     return { ok: true };
   }
 
