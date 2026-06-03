@@ -51,7 +51,7 @@ export class ChatService {
   async send(senderId: string, dto: SendDirectMessageDto, trustedReference = false) {
     if (senderId === dto.recipientId) throw new BadRequestException('Cannot message yourself');
     await this.ensureNotBlocked(senderId, dto.recipientId);
-    await this.ensureMutual(senderId, dto.recipientId);
+    await this.ensureDirectMessagingAllowed(senderId, dto.recipientId);
     const referenceData = await this.directReferenceData(senderId, dto.recipientId, dto, trustedReference);
     return this.prisma.message.create({
       data: {
@@ -70,7 +70,7 @@ export class ChatService {
   async request(senderId: string, dto: SendDirectMessageDto, trustedReference = false) {
     if (senderId === dto.recipientId) throw new BadRequestException('Cannot message yourself');
     await this.ensureNotBlocked(senderId, dto.recipientId);
-    if (await this.isMutual(senderId, dto.recipientId)) return this.send(senderId, dto, trustedReference);
+    if (await this.canSendDirectly(senderId, dto.recipientId)) return this.send(senderId, dto, trustedReference);
     const request = await this.prisma.messageRequest.create({ data: { senderId, recipientId: dto.recipientId, body: dto.encrypted ? '[encrypted request]' : dto.body.trim(), ...this.referenceData(dto, trustedReference) }, include: this.requestInclude() });
     void this.notifications.create({ userId: dto.recipientId, actorId: senderId, type: 'message_request', entityId: request.id, message: 'sent you a message request' });
     return request;
@@ -342,8 +342,8 @@ export class ChatService {
     return message;
   }
 
-  private async ensureMutual(userId: string, peerId: string) {
-    if (!(await this.isMutual(userId, peerId))) throw new ForbiddenException('Send a message request first.');
+  private async ensureDirectMessagingAllowed(userId: string, peerId: string) {
+    if (!(await this.canSendDirectly(userId, peerId))) throw new ForbiddenException('Send a message request first.');
   }
 
   private async ensureNotBlocked(userId: string, peerId: string) {
@@ -377,6 +377,25 @@ export class ChatService {
       this.prisma.follow.findUnique({ where: { followerId_followingId: { followerId: peerId, followingId: userId } } }),
     ]);
     return Boolean(following && followsMe);
+  }
+
+  private async canSendDirectly(userId: string, peerId: string) {
+    if (await this.isMutual(userId, peerId)) return true;
+    return this.hasAcceptedMessageRequest(userId, peerId);
+  }
+
+  private async hasAcceptedMessageRequest(userId: string, peerId: string) {
+    const request = await this.prisma.messageRequest.findFirst({
+      where: {
+        status: 'accepted',
+        OR: [
+          { senderId: userId, recipientId: peerId },
+          { senderId: peerId, recipientId: userId },
+        ],
+      },
+      select: { id: true },
+    });
+    return Boolean(request);
   }
 
   private async acceptMutualRequests(userId: string) {

@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { JwtAuthGuard } from '../auth/jwt.guard';
-import { CompleteUserOnboardingDto, ReportUserDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
+import { CompleteUserOnboardingDto, DeleteMeDto, ReportUserDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
 import { UsersService } from './users.service';
 
 @UseGuards(JwtAuthGuard)
@@ -13,6 +13,7 @@ export class UsersController {
   @Patch('me/onboarding') completeOnboarding(@CurrentUser() user: AuthUser, @Body() dto: CompleteUserOnboardingDto) { return this.users.completeOnboarding(user.id, dto); }
   @Patch('me/account') updateAccount(@CurrentUser() user: AuthUser, @Body() dto: UpdateAccountDto) { return this.users.updateAccount(user.id, dto); }
   @Patch('me/password') updatePassword(@CurrentUser() user: AuthUser, @Body() dto: UpdatePasswordDto) { return this.users.updatePassword(user.id, dto); }
+  @Delete('me') deleteMe(@CurrentUser() user: AuthUser, @Body() dto: DeleteMeDto) { return this.users.deleteMe(user.id, dto); }
   @Get('me/sessions') sessions(@CurrentUser() user: AuthUser) { return this.users.sessions(user.id, user.sessionId); }
   @Delete('me/sessions/:id') revokeSession(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.revokeSession(user.id, id); }
   @Get('me/followers') followers(@CurrentUser() user: AuthUser) { return this.users.followers(user.id); }

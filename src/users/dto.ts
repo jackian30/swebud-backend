@@ -38,6 +38,10 @@ export class UpdatePasswordDto {
   @IsString() @MinLength(8) newPassword!: string;
 }
 
+export class DeleteMeDto {
+  @IsString() @MinLength(1) @MaxLength(80) confirmation!: string;
+}
+
 export class ReportUserDto {
   @IsOptional() @IsEnum(UserReportReason) reason?: UserReportReason;
   @IsOptional() @IsEnum(ReportCategory) category?: ReportCategory;

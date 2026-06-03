@@ -37,6 +37,7 @@ describe('ChatService', () => {
       },
       messageRequest: {
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'request-1', ...data })),
+        findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
         update: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'request-1', ...data })),
         findUniqueOrThrow: jest.fn(),
@@ -66,6 +67,47 @@ describe('ChatService', () => {
 
     await expect(service.send(userId, { recipientId: peerId, body: 'hello' })).rejects.toBeInstanceOf(ForbiddenException);
     expect(prisma.message.create).not.toHaveBeenCalled();
+  });
+
+  it('sends direct messages after either user accepts a message request', async () => {
+    prisma.follow.findUnique.mockResolvedValue(null);
+    prisma.messageRequest.findFirst.mockResolvedValue({ id: 'request-1' });
+
+    await service.send(userId, { recipientId: peerId, body: ' hello ' });
+
+    expect(prisma.messageRequest.findFirst).toHaveBeenCalledWith({
+      where: {
+        status: 'accepted',
+        OR: [
+          { senderId: userId, recipientId: peerId },
+          { senderId: peerId, recipientId: userId },
+        ],
+      },
+      select: { id: true },
+    });
+    expect(prisma.message.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        senderId: userId,
+        recipientId: peerId,
+        body: 'hello',
+      }),
+    }));
+  });
+
+  it('sends instead of creating another request after a message request was accepted', async () => {
+    prisma.follow.findUnique.mockResolvedValue(null);
+    prisma.messageRequest.findFirst.mockResolvedValue({ id: 'request-1' });
+
+    await service.request(userId, { recipientId: peerId, body: 'still there?' });
+
+    expect(prisma.message.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        senderId: userId,
+        recipientId: peerId,
+        body: 'still there?',
+      }),
+    }));
+    expect(prisma.messageRequest.create).not.toHaveBeenCalled();
   });
 
   it('blocks direct messages when either user has blocked the other', async () => {

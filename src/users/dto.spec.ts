@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { BadRequestException, ValidationPipe } from '@nestjs/common';
 import { PostVisibility, ProfileVisibility, UserGender, UserReportReason } from '@prisma/client';
-import { ReportUserDto, UpdateMeDto } from './dto';
+import { DeleteMeDto, ReportUserDto, UpdateMeDto } from './dto';
 
 describe('UpdateMeDto', () => {
   const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
@@ -57,5 +57,17 @@ describe('ReportUserDto', () => {
     await expect(pipe.transform({
       reason: 'not_a_reason',
     }, metadata)).rejects.toBeInstanceOf(BadRequestException);
+  });
+});
+
+describe('DeleteMeDto', () => {
+  const pipe = new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true });
+  const metadata = { type: 'body' as const, metatype: DeleteMeDto, data: '' };
+
+  it('requires a delete confirmation phrase', async () => {
+    await expect(pipe.transform({ confirmation: 'delete @alice' }, metadata)).resolves.toEqual({
+      confirmation: 'delete @alice',
+    });
+    await expect(pipe.transform({}, metadata)).rejects.toBeInstanceOf(BadRequestException);
   });
 });

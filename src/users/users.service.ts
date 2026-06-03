@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
-import { CompleteUserOnboardingDto, ReportUserDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
+import { CompleteUserOnboardingDto, DeleteMeDto, ReportUserDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { visibleAuthorWhere, visiblePostWhere } from '../privacy/privacy';
 import { activityPersonaLinkSelect, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
@@ -68,6 +68,35 @@ export class UsersService {
 
   async revokeSession(userId: string, sessionId: string) {
     await this.prisma.refreshToken.updateMany({ where: { id: sessionId, userId }, data: { revokedAt: new Date() } });
+    return { ok: true };
+  }
+
+  async deleteMe(userId: string, dto: DeleteMeDto) {
+    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, username: true } });
+    const expectedConfirmation = `delete @${user.username}`;
+    if (dto.confirmation.trim() !== expectedConfirmation) {
+      throw new BadRequestException(`Type "${expectedConfirmation}" to delete your account`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.post.updateMany({ where: { activity: { userId } }, data: { activityId: null } });
+      await tx.messageReaction.deleteMany({ where: { userId } });
+      await tx.postEditHistory.deleteMany({ where: { editorId: userId } });
+      await tx.commentEditHistory.deleteMany({ where: { editorId: userId } });
+      await tx.message.updateMany({ where: { deletedById: userId }, data: { deletedById: null } });
+      await tx.buddySessionMessage.updateMany({ where: { deletedById: userId }, data: { deletedById: null } });
+      await tx.buddyRoomParticipant.updateMany({ where: { kickedById: userId }, data: { kickedById: null } });
+      await tx.buddyGroupChatMember.updateMany({ where: { addedById: userId }, data: { addedById: null } });
+      await tx.postReport.updateMany({ where: { reviewedById: userId }, data: { reviewedById: null } });
+      await tx.userReport.updateMany({ where: { reviewedById: userId }, data: { reviewedById: null } });
+      await tx.groupReport.updateMany({ where: { reviewedById: userId }, data: { reviewedById: null } });
+      await tx.userBadge.updateMany({ where: { assignedBy: userId }, data: { assignedBy: null } });
+      await tx.notification.deleteMany({ where: { OR: [{ actorId: userId }, { entityId: userId }] } });
+      await tx.user.delete({ where: { id: userId } });
+      await tx.hashtag.deleteMany({ where: { posts: { none: {} } } });
+      await this.recomputeEngagementCounters(tx);
+    });
+
     return { ok: true };
   }
 
@@ -307,5 +336,23 @@ export class UsersService {
   private listCursor(value?: number) {
     if (!Number.isFinite(value)) return undefined;
     return Math.max(Math.trunc(value ?? 0), 0);
+  }
+
+  private async recomputeEngagementCounters(tx: Prisma.TransactionClient) {
+    await tx.$executeRaw`
+      UPDATE "posts" AS "post"
+      SET
+        "like_count" = COALESCE((SELECT COUNT(*)::int FROM "post_likes" AS "like" WHERE "like"."post_id" = "post"."id"), 0),
+        "comment_count" = COALESCE((SELECT COUNT(*)::int FROM "comments" AS "comment" WHERE "comment"."post_id" = "post"."id"), 0),
+        "view_count" = COALESCE((SELECT SUM("view"."count")::int FROM "post_views" AS "view" WHERE "view"."post_id" = "post"."id"), 0)
+    `;
+    await tx.$executeRaw`
+      UPDATE "comments" AS "comment"
+      SET "like_count" = COALESCE((SELECT COUNT(*)::int FROM "comment_likes" AS "like" WHERE "like"."comment_id" = "comment"."id"), 0)
+    `;
+    await tx.$executeRaw`
+      UPDATE "reposts" AS "repost"
+      SET "like_count" = COALESCE((SELECT COUNT(*)::int FROM "repost_likes" AS "like" WHERE "like"."repost_id" = "repost"."id"), 0)
+    `;
   }
 }

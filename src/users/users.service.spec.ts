@@ -102,3 +102,70 @@ describe('UsersService profile reports', () => {
       .rejects.toBeInstanceOf(BadRequestException);
   });
 });
+
+describe('UsersService account deletion', () => {
+  function createService() {
+    const tx = {
+      post: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      messageReaction: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      postEditHistory: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      commentEditHistory: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      message: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      buddySessionMessage: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      buddyRoomParticipant: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      buddyGroupChatMember: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      postReport: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      userReport: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      groupReport: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      userBadge: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      notification: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      user: { delete: jest.fn().mockResolvedValue({ id: 'user-1' }) },
+      hashtag: { deleteMany: jest.fn().mockResolvedValue({ count: 1 }) },
+      $executeRaw: jest.fn().mockResolvedValue(1),
+    };
+    const prisma = {
+      user: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'user-1', username: 'alice' }),
+      },
+      $transaction: jest.fn(async (callback: (client: typeof tx) => Promise<unknown>) => callback(tx)),
+    };
+    const service = new UsersService(prisma as any, { create: jest.fn() } as any);
+    return { service, prisma, tx };
+  }
+
+  it('rejects account deletion when the username confirmation does not match', async () => {
+    const { service, prisma } = createService();
+
+    await expect(service.deleteMe('user-1', { confirmation: 'delete @wrong' }))
+      .rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('scrubs dangling user references before deleting the account', async () => {
+    const { service, prisma, tx } = createService();
+
+    await expect(service.deleteMe('user-1', { confirmation: 'delete @alice' })).resolves.toEqual({ ok: true });
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(tx.post.updateMany).toHaveBeenCalledWith({
+      where: { activity: { userId: 'user-1' } },
+      data: { activityId: null },
+    });
+    expect(tx.messageReaction.deleteMany).toHaveBeenCalledWith({ where: { userId: 'user-1' } });
+    expect(tx.postEditHistory.deleteMany).toHaveBeenCalledWith({ where: { editorId: 'user-1' } });
+    expect(tx.commentEditHistory.deleteMany).toHaveBeenCalledWith({ where: { editorId: 'user-1' } });
+    expect(tx.message.updateMany).toHaveBeenCalledWith({ where: { deletedById: 'user-1' }, data: { deletedById: null } });
+    expect(tx.buddySessionMessage.updateMany).toHaveBeenCalledWith({ where: { deletedById: 'user-1' }, data: { deletedById: null } });
+    expect(tx.buddyRoomParticipant.updateMany).toHaveBeenCalledWith({ where: { kickedById: 'user-1' }, data: { kickedById: null } });
+    expect(tx.buddyGroupChatMember.updateMany).toHaveBeenCalledWith({ where: { addedById: 'user-1' }, data: { addedById: null } });
+    expect(tx.postReport.updateMany).toHaveBeenCalledWith({ where: { reviewedById: 'user-1' }, data: { reviewedById: null } });
+    expect(tx.userReport.updateMany).toHaveBeenCalledWith({ where: { reviewedById: 'user-1' }, data: { reviewedById: null } });
+    expect(tx.groupReport.updateMany).toHaveBeenCalledWith({ where: { reviewedById: 'user-1' }, data: { reviewedById: null } });
+    expect(tx.userBadge.updateMany).toHaveBeenCalledWith({ where: { assignedBy: 'user-1' }, data: { assignedBy: null } });
+    expect(tx.notification.deleteMany).toHaveBeenCalledWith({ where: { OR: [{ actorId: 'user-1' }, { entityId: 'user-1' }] } });
+    expect(tx.user.delete).toHaveBeenCalledWith({ where: { id: 'user-1' } });
+    expect(tx.hashtag.deleteMany).toHaveBeenCalledWith({ where: { posts: { none: {} } } });
+    expect(tx.$executeRaw).toHaveBeenCalledTimes(3);
+  });
+});
