@@ -21,9 +21,10 @@ RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=node:node prisma ./prisma
 RUN npx prisma generate
+COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node --from=build /app/dist ./dist
 RUN mkdir -p uploads/images uploads/videos uploads/audio && chown -R node:node uploads
 USER node
 
 EXPOSE 3000
-CMD ["sh", "-c", "if [ -z \"$DIRECT_URL\" ]; then echo \"DIRECT_URL is required for Prisma migrations; use the Supabase direct/session connection, not the transaction pooler\" >&2; exit 1; fi; DATABASE_URL=\"$DIRECT_URL\" npx prisma migrate deploy && node dist/src/main.js"]
+CMD ["node", "scripts/render-start.js"]

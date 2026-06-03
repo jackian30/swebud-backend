@@ -197,7 +197,7 @@ Health check path: /health/live
 Set these Render environment variables:
 
 ```text
-DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&connection_limit=3
 DIRECT_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
 FRONTEND_ORIGIN=https://<your-cloudflare-pages-domain>
 ALLOW_LOCAL_ORIGINS=false
@@ -211,18 +211,24 @@ Get the Supabase values step by step:
 2. Copy the project ref from **Project Settings > General > Reference ID**. Use this as `<project-ref>`.
 3. Get the database password from the password saved when the project was created. If it was not saved, go to **Project Settings > Database > Database password** and reset it, then use the new value as `<password>`.
 4. Open **Project Settings > Database > Connection string**.
-5. Select the **Transaction pooler** connection string for `DATABASE_URL`.
+5. Select the **Session pooler** connection string for `DATABASE_URL`.
 6. Choose the region closest to the deploy target, usually Singapore/ap-southeast-1 for Render Singapore.
 7. Copy the URI and replace `[YOUR-PASSWORD]` with the database password. It should match this shape:
 
 ```text
-DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require
+DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&connection_limit=3
 ```
 
-8. Also copy the direct/session connection string for Prisma migrations and set it as `DIRECT_URL`. It should match this shape:
+8. Also copy the direct connection string for Prisma migrations and set it as `DIRECT_URL` when the database is reachable over IPv4. It should match this shape:
 
 ```text
 DIRECT_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
+```
+
+On Supabase free projects, direct DB is usually IPv6-only. If Render cannot reach the direct URL, use the **Session pooler** for `DIRECT_URL` with a single Prisma connection:
+
+```text
+DIRECT_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&connection_limit=1
 ```
 
 Prisma uses `DATABASE_URL` for the running app and `DIRECT_URL` for `prisma migrate deploy`. Do not run migrations through Supabase's transaction pooler.
