@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
-import { CompleteUserOnboardingDto, DeleteMeDto, ReportUserDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
+import { CompleteUserOnboardingDto, DeleteMeDto, ReportUserDto, SaveSearchHistoryDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto } from './dto';
 import { NotificationsService } from '../notifications/notifications.service';
 import { visibleAuthorWhere, visiblePostWhere } from '../privacy/privacy';
 import { activityPersonaLinkSelect, exposeActivityPersonas, replaceActivityPersonaLinks } from '../common/activity-personas';
@@ -204,6 +204,68 @@ export class UsersService {
       select: this.publicSelect(),
     }).then((users) => users.map((user) => exposeProfileBadges(exposeActivityPersonas(user))));
   }
+
+  searchHistory(userId: string, options: { take?: number; cursor?: number } = {}) {
+    const take = Math.min(Math.max(Math.trunc(options.take ?? 1000), 1), 1000);
+    const cursor = this.listCursor(options.cursor);
+    return this.prisma.userSearchHistory.findMany({
+      where: { userId },
+      take,
+      ...(cursor ? { skip: cursor } : {}),
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async saveSearchHistory(userId: string, dto: SaveSearchHistoryDto) {
+    if (dto.type === 'term') {
+      const term = dto.term?.trim();
+      if (!term) throw new BadRequestException('Search term is required');
+      await this.prisma.userSearchHistory.deleteMany({
+        where: { userId, type: 'term', term: { equals: term, mode: 'insensitive' } },
+      });
+      const entry = await this.prisma.userSearchHistory.create({
+        data: { userId, type: 'term', term },
+      });
+      await this.trimSearchHistory(userId);
+      return entry;
+    }
+
+    if (dto.type === 'user') {
+      const targetUserId = dto.targetUserId?.trim();
+      if (!targetUserId) throw new BadRequestException('Target user is required');
+      const target = await this.prisma.user.findUnique({
+        where: { id: targetUserId },
+        select: { id: true, displayName: true, username: true, profileImageUrl: true },
+      });
+      if (!target) throw new NotFoundException('User not found');
+      await this.prisma.userSearchHistory.deleteMany({ where: { userId, type: 'user', targetUserId } });
+      const entry = await this.prisma.userSearchHistory.create({
+        data: {
+          userId,
+          type: 'user',
+          targetUserId,
+          displayName: dto.displayName ?? target.displayName,
+          username: dto.username ?? target.username,
+          profileImageUrl: dto.profileImageUrl ?? target.profileImageUrl,
+        },
+      });
+      await this.trimSearchHistory(userId);
+      return entry;
+    }
+
+    throw new BadRequestException('Unsupported search history type');
+  }
+
+  async removeSearchHistory(userId: string, id: string) {
+    await this.prisma.userSearchHistory.deleteMany({ where: { id, userId } });
+    return { ok: true };
+  }
+
+  async clearSearchHistory(userId: string) {
+    await this.prisma.userSearchHistory.deleteMany({ where: { userId } });
+    return { ok: true };
+  }
+
   async follow(userId: string, identifier: string) {
     const targetId = await this.resolveUserId(identifier);
     if (userId === targetId) throw new BadRequestException('Cannot follow yourself');
@@ -341,6 +403,16 @@ export class UsersService {
   private listCursor(value?: number) {
     if (!Number.isFinite(value)) return undefined;
     return Math.max(Math.trunc(value ?? 0), 0);
+  }
+
+  private async trimSearchHistory(userId: string) {
+    const overflow = await this.prisma.userSearchHistory.findMany({
+      where: { userId },
+      skip: 1000,
+      orderBy: { updatedAt: 'desc' },
+      select: { id: true },
+    });
+    if (overflow.length) await this.prisma.userSearchHistory.deleteMany({ where: { id: { in: overflow.map((entry) => entry.id) } } });
   }
 
   private async recomputeEngagementCounters(tx: Prisma.TransactionClient) {

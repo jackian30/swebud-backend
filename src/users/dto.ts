@@ -48,3 +48,12 @@ export class ReportUserDto {
   @IsOptional() @IsString() @MaxLength(1000) note?: string;
   @IsOptional() @IsString() @MaxLength(1000) details?: string;
 }
+
+export class SaveSearchHistoryDto {
+  @IsString() @MaxLength(16) type!: 'term' | 'user';
+  @IsOptional() @IsString() @MaxLength(120) term?: string;
+  @IsOptional() @IsString() targetUserId?: string;
+  @IsOptional() @IsString() @MaxLength(120) displayName?: string | null;
+  @IsOptional() @IsString() @MaxLength(64) username?: string | null;
+  @IsOptional() @IsString() @MaxLength(1000) profileImageUrl?: string | null;
+}

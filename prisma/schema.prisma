@@ -356,6 +356,8 @@ model User {
   closeBuddyOf                 CloseBuddy[]                  @relation("CloseBuddyMembers")
   externalIntegrations         ExternalIntegration[]
   activities                   Activity[]
+  searchHistories              UserSearchHistory[]           @relation("UserSearchHistoryOwner")
+  searchHistoryTargets         UserSearchHistory[]           @relation("UserSearchHistoryTarget")
   activityPersonas             UserActivityPersona[]
   stories                      Story[]
   storyViews                   StoryView[]
@@ -1355,4 +1357,24 @@ model Activity {
   @@index([userId, startedAt])
   @@index([type, startedAt])
   @@map("activities")
+}
+
+model UserSearchHistory {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  type            String
+  term            String?
+  targetUserId    String?  @map("target_user_id")
+  displayName     String?  @map("display_name")
+  username        String?
+  profileImageUrl String?  @map("profile_image_url")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user       User  @relation("UserSearchHistoryOwner", fields: [userId], references: [id], onDelete: Cascade)
+  targetUser User? @relation("UserSearchHistoryTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([userId, updatedAt])
+  @@index([targetUserId])
+  @@map("user_search_history")
 }
