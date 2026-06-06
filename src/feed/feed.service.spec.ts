@@ -24,4 +24,23 @@ describe('FeedService', () => {
     expect(post.author).not.toHaveProperty('latitude');
     expect(post.author).not.toHaveProperty('longitude');
   });
+
+  it('requires every selected hashtag when multiple hashtags are requested', async () => {
+    const prisma = {
+      follow: { findMany: jest.fn().mockResolvedValue([]) },
+      post: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+    service = new FeedService(prisma as any);
+
+    await service.feed('user-1', { hashtag: 'run,buddysession', sort: 'latest' });
+
+    expect(prisma.post.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        AND: expect.arrayContaining([
+          { hashtags: { some: { hashtag: { name: 'run' } } } },
+          { hashtags: { some: { hashtag: { name: 'buddysession' } } } },
+        ]),
+      }),
+    }));
+  });
 });

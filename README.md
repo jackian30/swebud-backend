@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.29-beta**
+Current release: **0.2.30-beta**
 
 ## Stack
 
@@ -34,12 +34,12 @@ Current release: **0.2.29-beta**
 
 ## Current beta notes
 
-0.2.29-beta focuses on account-backed search history:
+0.2.30-beta focuses on multi-hashtag feed filtering:
 
-- Adds a dedicated `user_search_history` table with per-user uniqueness and latest-first indexing.
-- Adds authenticated recent-search endpoints for list, save/update, remove one, and clear all.
-- Keeps search history scoped to the signed-in user so recent searches follow the account across devices.
-- Preserves the existing login-session history and deploy hardening from the previous backend release.
+- Supports comma-separated feed hashtag filters, such as `hashtag=run,pilates`.
+- Requires every selected hashtag to exist on the post so multi-select filtering behaves as AND logic.
+- Keeps single-hashtag feed filtering behavior compatible with existing clients.
+- Adds feed service coverage for the multi-hashtag AND case.
 
 ## Tags and discovery
 
@@ -478,8 +478,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.29-beta -m "v0.2.29-beta"
-git push origin v0.2.29-beta
+git tag -a v0.2.30-beta -m "v0.2.30-beta"
+git push origin v0.2.30-beta
 ```
 
 ## Beta caveats
@@ -487,4 +487,4 @@ git push origin v0.2.29-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally. Production email uses SMTP env settings through Nodemailer.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.29-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.30-beta flows, but production release still needs broader end-to-end coverage.

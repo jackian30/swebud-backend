@@ -18,7 +18,7 @@ export class FeedService {
     const requestedTake = options.take ?? 20;
     const sort = options.sort ?? 'relevance';
     const cursor = options.cursor ?? 0;
-    const normalizedHashtag = options.hashtag?.toLowerCase().replace(/^#/, '').trim();
+    const normalizedHashtags = this.normalizeHashtags(options.hashtag);
     const needsRelevanceContext = sort === 'relevance';
     const [user, followingRows, preferredHashtags] = await Promise.all([
       needsRelevanceContext
@@ -59,8 +59,8 @@ export class FeedService {
       AND: [
         visiblePostWhere(userId),
         feedAudienceWhere,
+        ...normalizedHashtags.map((name) => ({ hashtags: { some: { hashtag: { name } } } })),
         {
-          ...(normalizedHashtag ? { hashtags: { some: { hashtag: { name: normalizedHashtag } } } } : {}),
           ...(options.savedOnly ? { saves: { some: { userId } } } : {}),
           hiddenBy: { none: { userId } },
         },
@@ -131,6 +131,13 @@ export class FeedService {
   private candidateTake(cursor: number, limit: number, sort: 'relevance' | 'latest' | 'trending' | 'unseen' | 'time') {
     const minimum = sort === 'relevance' || sort === 'trending' ? 120 : 80;
     return Math.min(Math.max(cursor + limit * 4, minimum), 300);
+  }
+
+  private normalizeHashtags(value?: string) {
+    return [...new Set((value ?? '')
+      .split(',')
+      .map((tag) => tag.toLowerCase().replace(/^#/, '').trim())
+      .filter(Boolean))];
   }
 
   private async viewedByPostId(userId: string, postIds: string[], sort: 'relevance' | 'latest' | 'trending' | 'unseen' | 'time') {
