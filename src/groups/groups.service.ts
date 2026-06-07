@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/com
 import { GroupReportReason, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateGroupChannelDto, CreateGroupDto, GroupMessageDto, GroupPostDto, ReportGroupDto, UpdateGroupSettingsDto } from './dto';
+import { CreateGroupChannelDto, CreateGroupDto, GroupChatMuteDto, GroupMessageDto, GroupPostDto, ReportGroupDto, UpdateGroupSettingsDto } from './dto';
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
 type GroupListOptions = { take?: number; cursor?: number; discoverOnly?: boolean };
@@ -48,14 +48,18 @@ export class GroupsService {
       ...(cursor ? { skip: cursor } : {}),
       include: this.include(Boolean(userId)),
     });
-    const unreadByGroup = userId ? await this.unreadCountByGroup(userId) : new Map<string, number>();
+    const [unreadByGroup, mutedGroupIds, pinnedGroupIds] = userId
+      ? await Promise.all([this.unreadCountByGroup(userId), this.mutedGroupIds(userId), this.pinnedGroupIds(userId)])
+      : [new Map<string, number>(), new Set<string>(), new Set<string>()] as const;
     return this.sortGroupsByActivity(groups.map((group) => {
       const { members, messages, ...summary } = group;
       return {
         ...summary,
         isMember: userId ? members.some((member) => member.userId === userId) : false,
         lastMessage: messages[0] ?? null,
-        unreadCount: unreadByGroup.get(group.id) ?? 0,
+        unreadCount: mutedGroupIds.has(group.id) ? 0 : unreadByGroup.get(group.id) ?? 0,
+        muted: mutedGroupIds.has(group.id),
+        pinned: pinnedGroupIds.has(group.id),
       };
     }));
   }
@@ -63,7 +67,7 @@ export class GroupsService {
   async mine(userId: string, options: GroupListOptions = {}) {
     const take = this.listTake(options.take);
     const cursor = this.listCursor(options.cursor);
-    const [groups, unreadByGroup] = await Promise.all([
+    const [groups, unreadByGroup, mutedGroupIds, pinnedGroupIds] = await Promise.all([
       this.prisma.group.findMany({
       where: { members: { some: { userId } } },
       orderBy: { createdAt: 'desc' },
@@ -72,6 +76,8 @@ export class GroupsService {
       include: this.include(true),
       }),
       this.unreadCountByGroup(userId),
+      this.mutedGroupIds(userId),
+      this.pinnedGroupIds(userId),
     ]);
     return this.sortGroupsByActivity(groups.map((group) => {
       const { members, messages, ...summary } = group;
@@ -81,7 +87,9 @@ export class GroupsService {
         isMember: true,
         capabilities: this.capabilities(role),
         lastMessage: messages[0] ?? null,
-        unreadCount: unreadByGroup.get(group.id) ?? 0,
+        unreadCount: mutedGroupIds.has(group.id) ? 0 : unreadByGroup.get(group.id) ?? 0,
+        muted: mutedGroupIds.has(group.id),
+        pinned: pinnedGroupIds.has(group.id),
       };
     }));
   }
@@ -91,7 +99,8 @@ export class GroupsService {
     const group = await this.prisma.group.findUniqueOrThrow({ where: { slug }, include: this.include(true) });
     const isMember = group.members.some((member) => member.userId === userId);
     if (group.visibility === 'private' && !isMember) throw new ForbiddenException('Join this private group by invite first');
-    return { ...group, isMember, capabilities: this.capabilities(group.members.find((member) => member.userId === userId)?.role) };
+    const [muted, pinned] = isMember ? await Promise.all([this.isGroupMuted(userId, group.id), this.isGroupPinned(userId, group.id)]) : [false, false];
+    return { ...group, isMember, capabilities: this.capabilities(group.members.find((member) => member.userId === userId)?.role), muted, pinned };
   }
 
   private async getSummary(userId: string, slug: string) {
@@ -253,7 +262,7 @@ export class GroupsService {
     await this.ensureMember(userId, groupId);
     await this.ensureDefaultChannel(groupId, userId);
     const role = await this.memberRole(userId, groupId);
-    const [channels, unreadByChannel] = await Promise.all([
+    const [channels, unreadByChannel, mutedChannelIds, groupMuted, pinnedChannelIds] = await Promise.all([
       this.prisma.groupChatChannel.findMany({
         where: {
           groupId,
@@ -267,11 +276,64 @@ export class GroupsService {
         include: this.channelInclude(),
       }),
       this.unreadCountByChannel(userId, groupId),
+      this.mutedChannelIds(userId, groupId),
+      this.isGroupMuted(userId, groupId),
+      this.pinnedChannelIds(userId, groupId),
     ]);
     return this.sortDefaultChannelFirst(channels).map((channel) => ({
       ...channel,
-      unreadCount: unreadByChannel.get(channel.id) ?? 0,
-    }));
+      muted: groupMuted || mutedChannelIds.has(channel.id),
+      unreadCount: groupMuted || mutedChannelIds.has(channel.id) ? 0 : unreadByChannel.get(channel.id) ?? 0,
+      pinned: pinnedChannelIds.has(channel.id),
+    })).sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || (left.name === DEFAULT_GROUP_CHANNEL_NAME ? -1 : right.name === DEFAULT_GROUP_CHANNEL_NAME ? 1 : 0));
+  }
+
+  async setGroupMute(userId: string, groupId: string, dto: GroupChatMuteDto) {
+    const muted = dto.muted;
+    await this.ensureMember(userId, groupId);
+    if (muted) {
+      const mutedUntil = this.parseMuteUntil(dto.mutedUntil);
+      await this.prisma.groupChatMute.upsert({
+        where: { userId_groupId: { userId, groupId } },
+        create: { userId, groupId, mutedUntil },
+        update: { mutedUntil },
+      });
+    } else {
+      await this.prisma.groupChatMute.deleteMany({ where: { userId, groupId } });
+    }
+    return { groupId, muted, mutedUntil: muted ? this.parseMuteUntil(dto.mutedUntil) : null };
+  }
+
+  async setGroupPin(userId: string, groupId: string, pinned: boolean) {
+    await this.ensureMember(userId, groupId);
+    if (pinned) await this.prisma.groupChatPin.upsert({ where: { userId_groupId: { userId, groupId } }, create: { userId, groupId }, update: {} });
+    else await this.prisma.groupChatPin.deleteMany({ where: { userId, groupId } });
+    return { groupId, pinned };
+  }
+
+  async setChannelMute(userId: string, groupId: string, channelId: string, dto: GroupChatMuteDto) {
+    const muted = dto.muted;
+    await this.ensureMember(userId, groupId);
+    await this.ensureChannelAccess(userId, groupId, channelId);
+    if (muted) {
+      const mutedUntil = this.parseMuteUntil(dto.mutedUntil);
+      await this.prisma.groupChatChannelMute.upsert({
+        where: { userId_channelId: { userId, channelId } },
+        create: { userId, groupId, channelId, mutedUntil },
+        update: { groupId, mutedUntil },
+      });
+    } else {
+      await this.prisma.groupChatChannelMute.deleteMany({ where: { userId, channelId } });
+    }
+    return { groupId, channelId, muted, mutedUntil: muted ? this.parseMuteUntil(dto.mutedUntil) : null };
+  }
+
+  async setChannelPin(userId: string, groupId: string, channelId: string, pinned: boolean) {
+    await this.ensureMember(userId, groupId);
+    await this.ensureChannelAccess(userId, groupId, channelId);
+    if (pinned) await this.prisma.groupChatChannelPin.upsert({ where: { userId_channelId: { userId, channelId } }, create: { userId, groupId, channelId }, update: { groupId } });
+    else await this.prisma.groupChatChannelPin.deleteMany({ where: { userId, channelId } });
+    return { groupId, channelId, pinned };
   }
 
   async createChannel(userId: string, groupId: string, dto: CreateGroupChannelDto) {
@@ -302,7 +364,8 @@ export class GroupsService {
       this.prisma.message.findMany({ where: { groupId, channelId: channel.id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() }),
       this.channelReadStates(channel.id),
     ]);
-    return messages.map((message) => this.withReadBy(message, readStates));
+    const pinned = await this.withPinnedMessageFlags(userId, messages);
+    return pinned.map((message) => this.withReadBy(message, readStates));
   }
 
   async sendMessage(userId: string, groupId: string, channelId: string | undefined, dto: GroupMessageDto) {
@@ -311,6 +374,10 @@ export class GroupsService {
     if (channel.messagePolicy === 'admins') {
       const role = await this.memberRole(userId, groupId);
       if (!this.canManage(role)) throw new ForbiddenException('Only group owners and admins can post in this channel');
+    }
+    if (channel.messagePolicy === 'moderators') {
+      const role = await this.memberRole(userId, groupId);
+      if (!this.canModerate(role)) throw new ForbiddenException('Only group owners, admins, and moderators can post in this channel');
     }
     const body = dto.body.trim();
     if (!body) throw new BadRequestException('Message cannot be empty');
@@ -352,8 +419,8 @@ export class GroupsService {
     };
   }
 
-  private sortGroupsByActivity<T extends { createdAt?: Date; lastMessage?: { createdAt: Date } | null }>(groups: T[]) {
-    return [...groups].sort((left, right) => this.groupActivityTime(right) - this.groupActivityTime(left));
+  private sortGroupsByActivity<T extends { createdAt?: Date; lastMessage?: { createdAt: Date } | null; pinned?: boolean }>(groups: T[]) {
+    return [...groups].sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned)) || this.groupActivityTime(right) - this.groupActivityTime(left));
   }
 
   private listTake(value?: number) {
@@ -398,7 +465,15 @@ export class GroupsService {
       LEFT JOIN "group_chat_read_states" AS read_state
         ON read_state."user_id" = ${userId}
         AND read_state."channel_id" = message."channel_id"
+      LEFT JOIN "group_chat_mutes" AS group_mute
+        ON group_mute."user_id" = ${userId}
+        AND group_mute."group_id" = message."group_id"
+      LEFT JOIN "group_chat_channel_mutes" AS channel_mute
+        ON channel_mute."user_id" = ${userId}
+        AND channel_mute."channel_id" = message."channel_id"
       WHERE message."group_id" IS NOT NULL
+        AND (group_mute."user_id" IS NULL OR group_mute."muted_until" <= NOW())
+        AND (channel_mute."user_id" IS NULL OR channel_mute."muted_until" <= NOW())
         AND message."sender_id" <> ${userId}
         AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
         AND NOT EXISTS (
@@ -432,8 +507,16 @@ export class GroupsService {
       LEFT JOIN "group_chat_read_states" AS read_state
         ON read_state."user_id" = ${userId}
         AND read_state."channel_id" = message."channel_id"
+      LEFT JOIN "group_chat_mutes" AS group_mute
+        ON group_mute."user_id" = ${userId}
+        AND group_mute."group_id" = message."group_id"
+      LEFT JOIN "group_chat_channel_mutes" AS channel_mute
+        ON channel_mute."user_id" = ${userId}
+        AND channel_mute."channel_id" = message."channel_id"
       WHERE message."group_id" = ${groupId}
         AND message."channel_id" IS NOT NULL
+        AND (group_mute."user_id" IS NULL OR group_mute."muted_until" <= NOW())
+        AND (channel_mute."user_id" IS NULL OR channel_mute."muted_until" <= NOW())
         AND message."sender_id" <> ${userId}
         AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
         AND NOT EXISTS (
@@ -462,6 +545,45 @@ export class GroupsService {
   private async ensureCanView(userId: string, groupId: string) {
     const group = await this.prisma.group.findUniqueOrThrow({ where: { id: groupId }, select: { visibility: true, members: { where: { userId }, select: { userId: true } } } });
     if (group.visibility === 'private' && group.members.length === 0) throw new ForbiddenException('Join this private group by invite first');
+  }
+
+  private async mutedGroupIds(userId: string) {
+    const mutes = await this.prisma.groupChatMute.findMany({ where: this.activeMuteWhere(userId), select: { groupId: true } });
+    return new Set(mutes.map((mute) => mute.groupId));
+  }
+
+  private async mutedChannelIds(userId: string, groupId: string) {
+    const mutes = await this.prisma.groupChatChannelMute.findMany({ where: { ...this.activeMuteWhere(userId), groupId }, select: { channelId: true } });
+    return new Set(mutes.map((mute) => mute.channelId));
+  }
+
+  private async isGroupMuted(userId: string, groupId: string) {
+    return Boolean(await this.prisma.groupChatMute.findFirst({ where: { ...this.activeMuteWhere(userId), groupId }, select: { userId: true } }));
+  }
+
+  private async pinnedGroupIds(userId: string) {
+    const pins = await (this.prisma.groupChatPin?.findMany({ where: { userId }, select: { groupId: true } }) ?? Promise.resolve([]));
+    return new Set(pins.map((pin) => pin.groupId));
+  }
+
+  private async pinnedChannelIds(userId: string, groupId: string) {
+    const pins = await (this.prisma.groupChatChannelPin?.findMany({ where: { userId, groupId }, select: { channelId: true } }) ?? Promise.resolve([]));
+    return new Set(pins.map((pin) => pin.channelId));
+  }
+
+  private async isGroupPinned(userId: string, groupId: string) {
+    return Boolean(await this.prisma.groupChatPin.findUnique({ where: { userId_groupId: { userId, groupId } }, select: { userId: true } }));
+  }
+
+  private activeMuteWhere(userId: string) {
+    return { userId, OR: [{ mutedUntil: null }, { mutedUntil: { gt: new Date() } }] };
+  }
+
+  private parseMuteUntil(value?: string) {
+    if (!value) return null;
+    const date = new Date(value);
+    if (!Number.isFinite(date.getTime()) || date.getTime() <= Date.now()) throw new BadRequestException('Mute expiration must be in the future');
+    return date;
   }
 
   private async ensureMember(userId: string, groupId: string) {
@@ -560,6 +682,13 @@ export class GroupsService {
         .filter((state) => state.userId !== message.senderId && state.lastReadAt.getTime() >= message.createdAt.getTime())
         .map((state) => ({ userId: state.userId, readAt: state.lastReadAt, user: state.user })),
     };
+  }
+
+  private async withPinnedMessageFlags<T extends { id: string }>(userId: string, messages: T[]) {
+    if (!messages.length) return messages;
+    const pins = await this.prisma.pinnedMessage.findMany({ where: { userId, messageId: { in: messages.map((message) => message.id) } }, select: { messageId: true } });
+    const pinnedIds = new Set(pins.map((pin) => pin.messageId));
+    return messages.map((message) => ({ ...message, pinned: pinnedIds.has(message.id) }));
   }
 
   private async messageReferenceData(groupId: string, channelId: string, dto: GroupMessageDto) {

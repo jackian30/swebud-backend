@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
-import { CreateGroupChannelDto, CreateGroupDto, GroupMessageDto, GroupPostDto, ReportGroupDto, UpdateGroupRoleDto, UpdateGroupSettingsDto } from './dto';
+import { CreateGroupChannelDto, CreateGroupDto, GroupChatMuteDto, GroupChatPinDto, GroupMessageDto, GroupPostDto, ReportGroupDto, UpdateGroupRoleDto, UpdateGroupSettingsDto } from './dto';
 import { GroupsService } from './groups.service';
 import { ChatGateway } from '../chat/chat.gateway';
 
@@ -54,7 +54,11 @@ export class GroupsController {
   @Post(':id/posts') createPost(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: GroupPostDto) { return this.groups.createPost(user.id, id, dto); }
   @Delete(':id/posts/:postId') @HttpCode(204) removePost(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('postId') postId: string) { return this.groups.removePost(user.id, id, postId); }
   @Get(':id/channels') channels(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.groups.channels(user.id, id); }
+  @Patch(':id/mute') muteGroupChat(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: GroupChatMuteDto) { return this.groups.setGroupMute(user.id, id, dto); }
+  @Patch(':id/pin') pinGroupChat(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: GroupChatPinDto) { return this.groups.setGroupPin(user.id, id, dto.pinned); }
   @Post(':id/channels') createChannel(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: CreateGroupChannelDto) { return this.groups.createChannel(user.id, id, dto); }
+  @Patch(':id/channels/:channelId/mute') muteChannel(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('channelId') channelId: string, @Body() dto: GroupChatMuteDto) { return this.groups.setChannelMute(user.id, id, channelId, dto); }
+  @Patch(':id/channels/:channelId/pin') pinChannel(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('channelId') channelId: string, @Body() dto: GroupChatPinDto) { return this.groups.setChannelPin(user.id, id, channelId, dto.pinned); }
   @Get(':id/channels/:channelId/messages') channelMessages(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('channelId') channelId: string) { return this.groups.messages(user.id, id, channelId); }
   @Patch(':id/channels/:channelId/read') async markChannelRead(@CurrentUser() user: AuthUser, @Param('id') id: string, @Param('channelId') channelId: string) {
     const result = await this.groups.markChannelRead(user.id, id, channelId);

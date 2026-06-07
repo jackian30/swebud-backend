@@ -3,7 +3,7 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { ChatService } from './chat.service';
 import { ChatGateway } from './chat.gateway';
-import { AddBuddyGroupParticipantsDto, CreateBuddyGroupChatDto, MessageReactionDto, RegisterChatKeyDto, SendBuddyGroupMessageDto, SendDirectMessageDto, UpdateChatProfileDto } from './dto';
+import { AddBuddyGroupParticipantsDto, ChatMuteDto, ChatPinDto, CreateBuddyGroupChatDto, MessageReactionDto, RegisterChatKeyDto, ReportMessageDto, SendBuddyGroupMessageDto, SendDirectMessageDto, UpdateChatProfileDto } from './dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('chat')
@@ -14,8 +14,14 @@ export class ChatController {
   @Get('keys/:peerId') peerKey(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.peerKey(user.id, peerId); }
   @Get('profiles/buddy/:peerId') buddyProfile(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string) { return this.chat.buddyProfile(user.id, peerId); }
   @Patch('profiles/buddy/:peerId') updateBuddyProfile(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string, @Body() dto: UpdateChatProfileDto) { return this.chat.updateBuddyProfile(user.id, peerId, dto); }
+  @Get('search/messages') searchMessages(@CurrentUser() user: AuthUser, @Query('q') q?: string) { return this.chat.searchMessages(user.id, q); }
+  @Patch('conversations/:peerId/mute') muteConversation(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string, @Body() dto: ChatMuteDto) { return this.chat.setDirectMute(user.id, peerId, dto); }
+  @Patch('conversations/:peerId/pin') pinConversation(@CurrentUser() user: AuthUser, @Param('peerId') peerId: string, @Body() dto: ChatPinDto) { return this.chat.setDirectPin(user.id, peerId, dto); }
   @Post('messages') async send(@CurrentUser() user: AuthUser, @Body() dto: SendDirectMessageDto) { const message = await this.chat.send(user.id, dto); this.gateway.emitMessage(dto.recipientId, 'chat:message', message); this.gateway.emitMessage(user.id, 'chat:message', message); return message; }
   @Post('messages/:id/reactions') async react(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: MessageReactionDto) { const message = await this.chat.react(user.id, id, dto); if (message.recipientId) this.gateway.emitMessage(message.recipientId, 'chat:message', message); this.gateway.emitMessage(message.senderId, 'chat:message', message); return message; }
+  @Get('messages/:id/info') messageInfo(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.chat.messageInfo(user.id, id); }
+  @Patch('messages/:id/pin') pinMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ChatPinDto) { return this.chat.setMessagePin(user.id, id, dto); }
+  @Post('messages/:id/report') reportMessage(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ReportMessageDto) { return this.chat.reportMessage(user.id, id, dto); }
   @Delete('messages/:id/reactions') async unreact(@CurrentUser() user: AuthUser, @Param('id') id: string, @Query('emoji') emoji: string) { const message = await this.chat.unreact(user.id, id, emoji); if (message.recipientId) this.gateway.emitMessage(message.recipientId, 'chat:message', message); this.gateway.emitMessage(message.senderId, 'chat:message', message); return message; }
   @Post('messages/:id/unsend') async unsendMessage(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     const message = await this.chat.unsendMessage(user.id, id);
@@ -40,6 +46,8 @@ export class ChatController {
     return room;
   }
   @Get('buddy-groups/:id') buddyGroupChat(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.chat.buddyGroupChat(user.id, id); }
+  @Patch('buddy-groups/:id/mute') muteBuddyGroupChat(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ChatMuteDto) { return this.chat.setBuddyGroupMute(user.id, id, dto); }
+  @Patch('buddy-groups/:id/pin') pinBuddyGroupChat(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ChatPinDto) { return this.chat.setBuddyGroupPin(user.id, id, dto); }
   @Post('buddy-groups/:id/participants') async addBuddyGroupParticipants(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: AddBuddyGroupParticipantsDto) {
     const room = await this.chat.addBuddyGroupParticipants(user.id, id, dto);
     for (const member of room.members ?? []) this.gateway.emitMessage(member.userId, 'chat:buddy-group-updated', room);

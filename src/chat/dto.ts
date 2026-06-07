@@ -1,4 +1,5 @@
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { ReportCategory } from '@prisma/client';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
 
 export class SendDirectMessageDto {
   @IsUUID() recipientId!: string;
@@ -18,6 +19,13 @@ export class RegisterChatKeyDto {
   @IsOptional() @IsString() @MaxLength(4096) privateKey?: string;
 }
 export class MessageReactionDto { @IsString() @MaxLength(32) emoji!: string; }
+export class ChatMuteDto { @IsBoolean() muted!: boolean; @IsOptional() @IsDateString() mutedUntil?: string; }
+export class ChatPinDto { @IsBoolean() pinned!: boolean; }
+export class ReportMessageDto {
+  @IsOptional() @IsEnum(ReportCategory) category?: ReportCategory;
+  @IsOptional() @IsString() @MaxLength(1000) note?: string;
+  @IsOptional() @IsString() @MaxLength(1000) details?: string;
+}
 export class TypingDto { @IsUUID() recipientId!: string; }
 export class UpdateChatProfileDto {
   @IsOptional() @IsString() @MaxLength(120) displayName?: string;

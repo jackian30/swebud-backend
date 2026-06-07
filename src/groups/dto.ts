@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
 import { GroupReportReason, ReportCategory } from '@prisma/client';
-import { ArrayMaxSize, IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
 
 export class CreateGroupDto {
   @IsString() name!: string;
@@ -46,11 +46,14 @@ export class GroupMessageDto {
   @IsOptional() @IsString() @MaxLength(120) referenceAuthorName?: string;
 }
 
+export class GroupChatMuteDto { @IsBoolean() muted!: boolean; @IsOptional() @IsDateString() mutedUntil?: string; }
+export class GroupChatPinDto { @IsBoolean() pinned!: boolean; }
+
 export class CreateGroupChannelDto {
   @IsString() @Matches(/^[a-z0-9][a-z0-9 -]{1,38}[a-z0-9]$/i) name!: string;
   @IsOptional() @IsString() @MaxLength(160) description?: string;
   @IsOptional() @IsIn(['public', 'private']) visibility?: 'public' | 'private';
-  @IsOptional() @IsIn(['everyone', 'admins']) messagePolicy?: 'everyone' | 'admins';
+  @IsOptional() @IsIn(['everyone', 'moderators', 'admins']) messagePolicy?: 'everyone' | 'moderators' | 'admins';
   @IsOptional() @IsArray() @IsString({ each: true }) memberIds?: string[];
 }
 

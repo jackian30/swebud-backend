@@ -17,6 +17,20 @@ describe('GroupsService', () => {
         findMany: jest.fn().mockResolvedValue([]),
         findUniqueOrThrow: jest.fn().mockResolvedValue({ allowAnonymousPosts: true }),
       },
+      groupChatMute: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      groupChatChannelMute: {
+        findMany: jest.fn().mockResolvedValue([]),
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
+      },
+      groupChatChannel: {
+        findUniqueOrThrow: jest.fn(),
+      },
       post: {
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'post-1', ...data })),
       },

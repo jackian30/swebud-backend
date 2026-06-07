@@ -43,6 +43,7 @@ enum GroupChatChannelVisibility {
 
 enum GroupChatChannelMessagePolicy {
   everyone
+  moderators
   admins
 
   @@map("group_chat_channel_message_policy")
@@ -335,16 +336,28 @@ model User {
   receivedMessageRequests      MessageRequest[]              @relation("ReceivedMessageRequests")
   chatProfileOverrides         ChatProfileOverride[]         @relation("ChatProfileOverrideOwners")
   chatProfileOverridePeers     ChatProfileOverride[]         @relation("ChatProfileOverridePeers")
+  directChatMutes              DirectChatMute[]              @relation("DirectChatMuteOwners")
+  mutedByDirectChats           DirectChatMute[]              @relation("DirectChatMutePeers")
+  directChatPins               DirectChatPin[]               @relation("DirectChatPinOwners")
+  pinnedByDirectChats          DirectChatPin[]               @relation("DirectChatPinPeers")
+  groupChatMutes               GroupChatMute[]
+  groupChatChannelMutes        GroupChatChannelMute[]
+  groupChatPins                GroupChatPin[]
+  groupChatChannelPins         GroupChatChannelPin[]
   groupMembers                 GroupMember[]
   groupChatReadStates          GroupChatReadState[]
   createdBuddyGroupChats       BuddyGroupChat[]              @relation("BuddyGroupChatCreators")
   buddyGroupChatMemberships    BuddyGroupChatMember[]
   buddyGroupChatReadStates     BuddyGroupChatReadState[]
+  buddyGroupChatMutes          BuddyGroupChatMute[]
+  buddyGroupChatPins           BuddyGroupChatPin[]
   createdGroupChannels         GroupChatChannel[]            @relation("GroupChatChannelCreators")
   groupChannelMemberships      GroupChatChannelMember[]
   groupPosts                   GroupPost[]
   sentMessages                 Message[]                     @relation("SentMessages")
   receivedMessages             Message[]                     @relation("ReceivedMessages")
+  pinnedMessages               PinnedMessage[]
+  messageReports               MessageReport[]
   sentBuddySessionMessages     BuddySessionMessage[]         @relation("SentBuddySessionMessages")
   buddySessionMessageReactions BuddySessionMessageReaction[]
   hiddenBuddySessionMessages   BuddySessionHiddenMessage[]
@@ -622,6 +635,31 @@ model ChatProfileOverride {
   @@map("chat_profile_overrides")
 }
 
+model DirectChatMute {
+  userId     String    @map("user_id")
+  peerId     String    @map("peer_id")
+  mutedUntil DateTime? @map("muted_until")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  user       User      @relation("DirectChatMuteOwners", fields: [userId], references: [id], onDelete: Cascade)
+  peer       User      @relation("DirectChatMutePeers", fields: [peerId], references: [id], onDelete: Cascade)
+
+  @@id([userId, peerId])
+  @@index([peerId])
+  @@map("direct_chat_mutes")
+}
+
+model DirectChatPin {
+  userId    String   @map("user_id")
+  peerId    String   @map("peer_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation("DirectChatPinOwners", fields: [userId], references: [id], onDelete: Cascade)
+  peer      User     @relation("DirectChatPinPeers", fields: [peerId], references: [id], onDelete: Cascade)
+
+  @@id([userId, peerId])
+  @@index([peerId])
+  @@map("direct_chat_pins")
+}
+
 model UserTheme {
   userId    String              @id @map("user_id")
   theme     ThemePreference     @default(system)
@@ -863,19 +901,23 @@ model Comment {
 }
 
 model Group {
-  id                  String               @id @default(uuid())
+  id                  String                 @id @default(uuid())
   name                String
-  slug                String               @unique
+  slug                String                 @unique
   description         String?
-  profileImageUrl     String?              @map("profile_image_url")
-  coverImageUrl       String?              @map("cover_image_url")
-  visibility          GroupVisibility      @default(public)
-  inviteCode          String?              @unique @map("invite_code")
-  allowAnonymousPosts Boolean              @default(false) @map("allow_anonymous_posts")
-  createdAt           DateTime             @default(now()) @map("created_at")
+  profileImageUrl     String?                @map("profile_image_url")
+  coverImageUrl       String?                @map("cover_image_url")
+  visibility          GroupVisibility        @default(public)
+  inviteCode          String?                @unique @map("invite_code")
+  allowAnonymousPosts Boolean                @default(false) @map("allow_anonymous_posts")
+  createdAt           DateTime               @default(now()) @map("created_at")
   members             GroupMember[]
   readStates          GroupChatReadState[]
   chatChannels        GroupChatChannel[]
+  chatMutes           GroupChatMute[]
+  channelMutes        GroupChatChannelMute[]
+  chatPins            GroupChatPin[]
+  channelPins         GroupChatChannelPin[]
   messages            Message[]
   posts               Post[]
   legacyPosts         GroupPost[]
@@ -913,6 +955,8 @@ model GroupChatChannel {
   allowedUsers  GroupChatChannelMember[]
   messages      Message[]
   readStates    GroupChatReadState[]
+  mutes         GroupChatChannelMute[]
+  pins          GroupChatChannelPin[]
 
   @@unique([groupId, name])
   @@index([groupId, createdAt])
@@ -929,6 +973,8 @@ model BuddyGroupChat {
   creator     User                      @relation("BuddyGroupChatCreators", fields: [creatorId], references: [id], onDelete: Cascade)
   members     BuddyGroupChatMember[]
   readStates  BuddyGroupChatReadState[]
+  mutes       BuddyGroupChatMute[]
+  pins        BuddyGroupChatPin[]
   messages    Message[]
 
   @@index([creatorId, createdAt])
@@ -946,6 +992,87 @@ model BuddyGroupChatMember {
   @@id([buddyGroupChatId, userId])
   @@index([userId, joinedAt])
   @@map("buddy_group_chat_members")
+}
+
+model GroupChatMute {
+  userId     String    @map("user_id")
+  groupId    String    @map("group_id")
+  mutedUntil DateTime? @map("muted_until")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group      Group     @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+  @@index([groupId])
+  @@map("group_chat_mutes")
+}
+
+model GroupChatPin {
+  userId    String   @map("user_id")
+  groupId   String   @map("group_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+
+  @@id([userId, groupId])
+  @@index([groupId])
+  @@map("group_chat_pins")
+}
+
+model GroupChatChannelMute {
+  userId     String           @map("user_id")
+  groupId    String           @map("group_id")
+  channelId  String           @map("channel_id")
+  mutedUntil DateTime?        @map("muted_until")
+  createdAt  DateTime         @default(now()) @map("created_at")
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group      Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  channel    GroupChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelId])
+  @@index([groupId])
+  @@index([channelId])
+  @@map("group_chat_channel_mutes")
+}
+
+model GroupChatChannelPin {
+  userId    String           @map("user_id")
+  groupId   String           @map("group_id")
+  channelId String           @map("channel_id")
+  createdAt DateTime         @default(now()) @map("created_at")
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group     Group            @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  channel   GroupChatChannel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+
+  @@id([userId, channelId])
+  @@index([groupId])
+  @@index([channelId])
+  @@map("group_chat_channel_pins")
+}
+
+model BuddyGroupChatMute {
+  userId           String         @map("user_id")
+  buddyGroupChatId String         @map("buddy_group_chat_id")
+  mutedUntil       DateTime?      @map("muted_until")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  buddyGroupChat   BuddyGroupChat @relation(fields: [buddyGroupChatId], references: [id], onDelete: Cascade)
+
+  @@id([userId, buddyGroupChatId])
+  @@index([buddyGroupChatId])
+  @@map("buddy_group_chat_mutes")
+}
+
+model BuddyGroupChatPin {
+  userId           String         @map("user_id")
+  buddyGroupChatId String         @map("buddy_group_chat_id")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  user             User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  buddyGroupChat   BuddyGroupChat @relation(fields: [buddyGroupChatId], references: [id], onDelete: Cascade)
+
+  @@id([userId, buddyGroupChatId])
+  @@index([buddyGroupChatId])
+  @@map("buddy_group_chat_pins")
 }
 
 model GroupChatChannelMember {
@@ -1029,6 +1156,8 @@ model Message {
   channel             GroupChatChannel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
   reactions           MessageReaction[]
   hiddenBy            HiddenMessage[]
+  pinnedBy            PinnedMessage[]
+  reports             MessageReport[]
 
   @@index([senderId, recipientId, createdAt])
   @@index([recipientId, senderId, createdAt])
@@ -1038,6 +1167,18 @@ model Message {
   @@index([buddyGroupChatId, createdAt])
   @@index([channelId, createdAt])
   @@map("messages")
+}
+
+model PinnedMessage {
+  userId    String   @map("user_id")
+  messageId String   @map("message_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   Message  @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@id([userId, messageId])
+  @@index([messageId])
+  @@map("pinned_messages")
 }
 
 model HiddenMessage {
@@ -1250,6 +1391,31 @@ model GroupReport {
   @@index([groupId, createdAt])
   @@index([userId, createdAt])
   @@map("group_reports")
+}
+
+model MessageReport {
+  id             String         @id @default(uuid())
+  messageId      String         @map("message_id")
+  userId         String         @map("user_id")
+  category       ReportCategory @default(other)
+  note           String?
+  details        String?
+  status         ReportStatus   @default(open)
+  priority       Int            @default(0)
+  reviewedAt     DateTime?      @map("reviewed_at")
+  reviewedById   String?        @map("reviewed_by_id")
+  actionTaken    String?        @map("action_taken")
+  resolutionNote String?        @map("resolution_note")
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+  message        Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, userId])
+  @@index([status, category, createdAt])
+  @@index([messageId, createdAt])
+  @@index([userId, createdAt])
+  @@map("message_reports")
 }
 
 model Block {

@@ -18,6 +18,12 @@ describe('ChatService', () => {
         findUnique: jest.fn(),
         upsert: jest.fn(),
       },
+      directChatMute: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
+      },
       follow: {
         findUnique: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
@@ -51,6 +57,12 @@ describe('ChatService', () => {
       },
       buddyGroupChatReadState: {
         upsert: jest.fn(),
+      },
+      buddyGroupChatMute: {
+        findMany: jest.fn().mockResolvedValue([]),
+        findUnique: jest.fn().mockResolvedValue(null),
+        upsert: jest.fn(),
+        deleteMany: jest.fn(),
       },
       groupMember: {
         findUnique: jest.fn(),
