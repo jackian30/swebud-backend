@@ -1,12 +1,35 @@
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { GroupReportReason, ReportCategory } from '@prisma/client';
-import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsNumber, IsOptional, IsString, Matches, MaxLength, ValidateNested } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Matches, MaxLength, ValidateNested } from 'class-validator';
+
+function normalizeGroupSlug(value: unknown) {
+  if (typeof value !== 'string') return value;
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, '-')
+    .replace(/[^a-z0-9-]/g, '')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
 
 export class CreateGroupDto {
   @IsString() name!: string;
-  @IsString() @Matches(/^[a-z0-9-]{3,60}$/) slug!: string;
+  @Transform(({ value }) => normalizeGroupSlug(value))
+  @IsString()
+  @Matches(/^[a-z0-9-]{3,60}$/, { message: 'Slug must be 3-60 characters after cleanup. Use letters, numbers, or hyphens.' })
+  slug!: string;
   @IsOptional() @IsString() description?: string;
   @IsOptional() @IsIn(['public', 'private']) visibility?: 'public' | 'private';
+  @IsOptional() @IsArray() @ArrayMaxSize(50) @IsUUID('4', { each: true }) inviteUserIds?: string[];
+}
+
+export class InviteGroupUsersDto {
+  @IsArray()
+  @ArrayMaxSize(50)
+  @IsUUID('4', { each: true })
+  userIds!: string[];
 }
 
 export class UpdateGroupSettingsDto {

@@ -34,6 +34,15 @@ enum GroupRole {
   @@map("group_role")
 }
 
+enum GroupInviteStatus {
+  pending
+  accepted
+  declined
+  cancelled
+
+  @@map("group_invite_status")
+}
+
 enum GroupChatChannelVisibility {
   public
   private
@@ -75,6 +84,7 @@ enum NotificationType {
   follow_request
   message_request
   message_reaction
+  group_invite
   group_join
   group_post
   repost
@@ -345,6 +355,8 @@ model User {
   groupChatPins                GroupChatPin[]
   groupChatChannelPins         GroupChatChannelPin[]
   groupMembers                 GroupMember[]
+  groupInvitesSent             GroupInvite[]                 @relation("GroupInvitesSent")
+  groupInvitesReceived         GroupInvite[]                 @relation("GroupInvitesReceived")
   groupChatReadStates          GroupChatReadState[]
   createdBuddyGroupChats       BuddyGroupChat[]              @relation("BuddyGroupChatCreators")
   buddyGroupChatMemberships    BuddyGroupChatMember[]
@@ -923,6 +935,7 @@ model Group {
   legacyPosts         GroupPost[]
   reports             GroupReport[]
   buddyRooms          BuddyRoom[]
+  invites             GroupInvite[]
 
   @@index([visibility, createdAt])
   @@map("groups")
@@ -939,6 +952,24 @@ model GroupMember {
   @@id([groupId, userId])
   @@index([userId, joinedAt])
   @@map("group_members")
+}
+
+model GroupInvite {
+  id          String            @id @default(uuid())
+  groupId     String            @map("group_id")
+  inviterId   String            @map("inviter_id")
+  inviteeId   String            @map("invitee_id")
+  status      GroupInviteStatus @default(pending)
+  createdAt   DateTime          @default(now()) @map("created_at")
+  respondedAt DateTime?         @map("responded_at")
+  group       Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  inviter     User              @relation("GroupInvitesSent", fields: [inviterId], references: [id], onDelete: Cascade)
+  invitee     User              @relation("GroupInvitesReceived", fields: [inviteeId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, inviteeId])
+  @@index([inviteeId, status, createdAt])
+  @@index([groupId, status, createdAt])
+  @@map("group_invites")
 }
 
 model GroupChatChannel {

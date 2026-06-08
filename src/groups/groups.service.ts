@@ -1,8 +1,9 @@
-import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable } from '@nestjs/common';
 import { GroupReportReason, Prisma } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { NotificationsService } from '../notifications/notifications.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateGroupChannelDto, CreateGroupDto, GroupChatMuteDto, GroupMessageDto, GroupPostDto, ReportGroupDto, UpdateGroupSettingsDto } from './dto';
+import { CreateGroupChannelDto, CreateGroupDto, GroupChatMuteDto, GroupMessageDto, GroupPostDto, InviteGroupUsersDto, ReportGroupDto, UpdateGroupSettingsDto } from './dto';
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
 type GroupListOptions = { take?: number; cursor?: number; discoverOnly?: boolean };
@@ -15,24 +16,34 @@ type GroupChatReadStateWithUser = {
 const DEFAULT_GROUP_CHANNEL_NAME = 'main';
 const DEFAULT_GROUP_CHANNEL_DESCRIPTION = 'Main channel';
 
+function isPrismaUniqueError(error: unknown) {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code?: string }).code === 'P2002';
+}
+
 @Injectable()
 export class GroupsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService, private notifications: NotificationsService) {}
 
   async create(userId: string, dto: CreateGroupDto) {
-    const group = await this.prisma.group.create({
-      data: {
-        name: dto.name.trim(),
-        slug: dto.slug.toLowerCase(),
-        description: dto.description?.trim(),
-        visibility: dto.visibility ?? 'public',
-        inviteCode: randomBytes(6).toString('hex'),
-        members: { create: { userId, role: 'owner' } },
-        chatChannels: { create: { name: DEFAULT_GROUP_CHANNEL_NAME, description: DEFAULT_GROUP_CHANNEL_DESCRIPTION, creatorId: userId } },
-      },
-      include: this.include(true),
-    });
-    return { ...group, isMember: true, capabilities: this.capabilities('owner') };
+    try {
+      const group = await this.prisma.group.create({
+        data: {
+          name: dto.name.trim(),
+          slug: dto.slug.toLowerCase(),
+          description: dto.description?.trim(),
+          visibility: dto.visibility ?? 'public',
+          inviteCode: randomBytes(6).toString('hex'),
+          members: { create: { userId, role: 'owner' } },
+          chatChannels: { create: { name: DEFAULT_GROUP_CHANNEL_NAME, description: DEFAULT_GROUP_CHANNEL_DESCRIPTION, creatorId: userId } },
+        },
+        include: this.include(true),
+      });
+      if (dto.inviteUserIds?.length) await this.createPendingInvites(userId, group.id, group.name, dto.inviteUserIds, { throwIfEmpty: false });
+      return { ...group, isMember: true, capabilities: this.capabilities('owner') };
+    } catch (error) {
+      if (isPrismaUniqueError(error)) throw new ConflictException('Group slug is already taken.');
+      throw error;
+    }
   }
 
   async list(userId?: string, options: GroupListOptions = {}) {
@@ -144,6 +155,72 @@ export class GroupsService {
     const group = await this.prisma.group.findUniqueOrThrow({ where: { inviteCode } });
     await this.join(userId, group.id);
     return this.get(userId, group.slug);
+  }
+
+  async invitations(userId: string) {
+    return this.prisma.groupInvite.findMany({
+      where: { inviteeId: userId, status: 'pending' },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        inviter: { select: this.publicUserSelect() },
+        group: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            description: true,
+            profileImageUrl: true,
+            coverImageUrl: true,
+            visibility: true,
+            _count: { select: { members: true, posts: true } },
+          },
+        },
+      },
+    });
+  }
+
+  async inviteCandidates(userId: string, groupId: string, q = '') {
+    await this.ensureMember(userId, groupId);
+    return this.prisma.user.findMany({
+      where: this.inviteCandidateWhere(userId, groupId, q),
+      orderBy: [{ displayName: 'asc' }, { username: 'asc' }],
+      take: 20,
+      select: this.publicUserSelect(),
+    });
+  }
+
+  async inviteUsers(userId: string, groupId: string, dto: InviteGroupUsersDto) {
+    const group = await this.prisma.group.findUniqueOrThrow({
+      where: { id: groupId },
+      select: { id: true, name: true, members: { where: { userId }, take: 1, select: { userId: true } } },
+    });
+    if (!group.members.length) throw new ForbiddenException('Join the group first');
+    return this.createPendingInvites(userId, group.id, group.name, dto.userIds, { throwIfEmpty: true });
+  }
+
+  async acceptInvite(userId: string, inviteId: string) {
+    const invite = await this.prisma.groupInvite.findFirst({
+      where: { id: inviteId, inviteeId: userId, status: 'pending' },
+      include: { group: { select: { id: true, name: true, slug: true } } },
+    });
+    if (!invite) throw new BadRequestException('This group invite is no longer available.');
+    await this.prisma.$transaction([
+      this.prisma.groupInvite.update({ where: { id: invite.id }, data: { status: 'accepted', respondedAt: new Date() } }),
+      this.prisma.groupMember.upsert({ where: { groupId_userId: { groupId: invite.groupId, userId } }, create: { groupId: invite.groupId, userId }, update: {} }),
+      this.prisma.notification.updateMany({ where: { userId, type: 'group_invite', entityId: invite.id }, data: { readAt: new Date() } }),
+    ]);
+    void this.notifications.create({ userId: invite.inviterId, actorId: userId, type: 'group_join', entityId: invite.groupId, message: `accepted your invite to ${invite.group.name}` });
+    return this.get(userId, invite.group.slug);
+  }
+
+  async declineInvite(userId: string, inviteId: string) {
+    const result = await this.prisma.groupInvite.updateMany({
+      where: { id: inviteId, inviteeId: userId, status: 'pending' },
+      data: { status: 'declined', respondedAt: new Date() },
+    });
+    if (!result.count) throw new BadRequestException('This group invite is no longer available.');
+    await this.prisma.notification.updateMany({ where: { userId, type: 'group_invite', entityId: inviteId }, data: { readAt: new Date() } });
+    return { ok: true };
   }
 
 
@@ -401,6 +478,59 @@ export class GroupsService {
       this.prisma.groupChatChannelMember.findMany({ where: { channelId }, select: { userId: true } }),
     ]);
     return [...new Set([...managers.map((member) => member.userId), ...allowed.map((member) => member.userId)])];
+  }
+
+  private async createPendingInvites(userId: string, groupId: string, groupName: string, userIds: string[], options: { throwIfEmpty: boolean }) {
+    const recipientIds = [...new Set(userIds.filter((id) => id && id !== userId))];
+    if (!recipientIds.length) {
+      if (options.throwIfEmpty) throw new BadRequestException('Choose at least one user to invite.');
+      return { sent: 0, recipients: [] };
+    }
+    const recipients = await this.prisma.user.findMany({
+      where: this.inviteCandidateWhere(userId, groupId, '', recipientIds),
+      select: this.publicUserSelect(),
+      take: 50,
+    });
+    if (!recipients.length) {
+      if (options.throwIfEmpty) throw new BadRequestException('No selected users can be invited to this group.');
+      return { sent: 0, recipients: [] };
+    }
+    const invited = [];
+    const now = new Date();
+    for (const recipient of recipients) {
+      const invite = await this.prisma.groupInvite.upsert({
+        where: { groupId_inviteeId: { groupId, inviteeId: recipient.id } },
+        create: { groupId, inviterId: userId, inviteeId: recipient.id },
+        update: { inviterId: userId, status: 'pending', respondedAt: null, createdAt: now },
+      });
+      invited.push({ ...invite, invitee: recipient });
+      void this.notifications.create({ userId: recipient.id, actorId: userId, type: 'group_invite', entityId: invite.id, message: `invited you to join ${groupName}` });
+    }
+    return { sent: invited.length, recipients: invited.map((invite) => invite.invitee) };
+  }
+
+  private inviteCandidateWhere(userId: string, groupId: string, q = '', userIds?: string[]) {
+    const term = q.trim();
+    const where: Prisma.UserWhereInput = {
+      id: userIds?.length ? { in: userIds.filter((id) => id !== userId) } : { not: userId },
+      moderationStatus: 'active',
+      groupMembers: { none: { groupId } },
+      groupInvitesReceived: { none: { groupId, status: 'pending' } },
+      blocksSent: { none: { blockedId: userId } },
+      blocksReceived: { none: { blockerId: userId } },
+    };
+    if (term) {
+      where.OR = [
+        { displayName: { contains: term, mode: 'insensitive' } },
+        { username: { contains: term, mode: 'insensitive' } },
+        { email: { contains: term, mode: 'insensitive' } },
+      ];
+    }
+    return where;
+  }
+
+  private publicUserSelect() {
+    return { id: true, displayName: true, username: true, profileImageUrl: true } as const;
   }
 
   private async memberRole(userId: string, groupId: string) {

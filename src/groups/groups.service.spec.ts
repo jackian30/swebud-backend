@@ -5,6 +5,7 @@ describe('GroupsService', () => {
   const userId = 'user-1';
   const groupId = 'group-1';
   let prisma: any;
+  let notifications: any;
   let service: GroupsService;
 
   beforeEach(() => {
@@ -35,7 +36,8 @@ describe('GroupsService', () => {
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'post-1', ...data })),
       },
     };
-    service = new GroupsService(prisma);
+    notifications = { create: jest.fn() };
+    service = new GroupsService(prisma, notifications);
   });
 
   it('rejects group posts without text or media', async () => {
