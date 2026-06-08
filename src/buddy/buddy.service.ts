@@ -137,15 +137,24 @@ export class BuddyService {
   async stopPresence(userId: string) {
     const session = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true, latitude: true, longitude: true } });
     if (!session) return { ok: true };
-    if (session.roomId) return { ok: true };
     await this.expireUserSession(userId, session);
     return { ok: true };
   }
 
   private async expireUserSession(userId: string, session: { roomId: string | null; latitude: number; longitude: number }) {
-    await this.prisma.buddySession.deleteMany({ where: { userId } });
+    const leftAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      await tx.buddySession.deleteMany({ where: { userId } });
+      if (session.roomId) {
+        await tx.buddyRoomParticipant.updateMany({
+          where: { roomId: session.roomId, userId, kickedAt: null },
+          data: { leftAt, lastActivityAt: leftAt },
+        });
+      }
+    });
     if (session.roomId) {
       await this.emitRoomPresenceStopped(userId, session.roomId).catch(() => undefined);
+      await this.closeRoomIfNoActiveManagers(session.roomId);
       await this.closeRoomIfOwnersInactive(session.roomId);
       return;
     }

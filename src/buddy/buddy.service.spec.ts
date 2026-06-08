@@ -161,30 +161,38 @@ describe('BuddyService', () => {
     expect(prisma.buddyRoom.delete).not.toHaveBeenCalled();
   });
 
-  it('keeps room live presence and the last pin when the app closes', async () => {
+  it('stops room live presence and notifies participants when the app closes', async () => {
     const realtime = { emitToUser: jest.fn() };
     prisma.buddySession = {
       findUnique: jest.fn().mockResolvedValue({ roomId: 'room-1', latitude: 14.61, longitude: 121.03 }),
-      deleteMany: jest.fn(),
+      deleteMany: jest.fn().mockResolvedValue({ count: 1 }),
       findMany: jest.fn().mockResolvedValue([{ userId: 'user-2' }]),
+      count: jest.fn().mockResolvedValue(1),
     };
     prisma.buddySessionMessage = {
       create: jest.fn(),
     };
     prisma.buddyRoom.findFirst = jest.fn().mockResolvedValue(null);
     prisma.buddyRoomParticipant = {
-      updateMany: jest.fn(),
+      findMany: jest.fn().mockResolvedValue([{ userId: 'owner-2' }]),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       deleteMany: jest.fn(),
     };
     service = new BuddyService(prisma, moduleRef(realtime) as any);
 
     await service.stopPresence(userId);
 
-    expect(prisma.buddySession.deleteMany).not.toHaveBeenCalled();
-    expect(prisma.buddyRoomParticipant.updateMany).not.toHaveBeenCalled();
+    expect(prisma.buddySession.deleteMany).toHaveBeenCalledWith({ where: { userId } });
+    expect(prisma.buddyRoomParticipant.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { roomId: 'room-1', userId, kickedAt: null },
+      data: expect.objectContaining({ leftAt: expect.any(Date), lastActivityAt: expect.any(Date) }),
+    }));
     expect(prisma.buddyRoomParticipant.deleteMany).not.toHaveBeenCalled();
     expect(prisma.buddySessionMessage.create).not.toHaveBeenCalled();
-    expect(realtime.emitToUser).not.toHaveBeenCalledWith('user-2', 'buddy:room-presence-stopped', expect.anything());
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-presence-stopped', expect.objectContaining({
+      roomId: 'room-1',
+      userId,
+    }));
     expect(prisma.buddyRoom.delete).not.toHaveBeenCalled();
   });
 
