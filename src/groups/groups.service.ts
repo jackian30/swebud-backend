@@ -268,14 +268,14 @@ export class GroupsService {
 
   async posts(userId: string, groupId: string, filters: { sort?: 'latest' | 'trending' | 'most-commented' | 'oldest'; hashtag?: string; q?: string; mine?: boolean; take?: number; cursor?: number; timezone?: string } = {}) {
     await this.ensureCanView(userId, groupId);
-    const hashtag = filters.hashtag?.toLowerCase().replace(/^#/, '').trim();
+    const hashtags = this.normalizeHashtags(filters.hashtag);
     const q = filters.q?.trim();
     const take = Math.min(filters.take ?? 10, 50);
     const cursor = filters.cursor ?? 0;
     const where = {
       groupId,
       ...(filters.mine ? { authorId: userId } : {}),
-      ...(hashtag ? { hashtags: { some: { hashtag: { name: hashtag } } } } : {}),
+      ...(hashtags.length ? { AND: hashtags.map((name) => ({ hashtags: { some: { hashtag: { name } } } })) } : {}),
       ...(q ? { text: { contains: q, mode: 'insensitive' as const } } : {}),
     };
     if (filters.sort === 'trending') {
@@ -926,5 +926,12 @@ export class GroupsService {
 
   private extractHashtags(text?: string) {
     return [...new Set((text?.match(/#[\p{L}\p{N}_]+/gu) ?? []).map((tag) => tag.toLowerCase().replace(/^#/, '').trim()).filter(Boolean))];
+  }
+
+  private normalizeHashtags(value?: string) {
+    return [...new Set((value ?? '')
+      .split(',')
+      .map((tag) => tag.toLowerCase().replace(/^#/, '').trim())
+      .filter(Boolean))];
   }
 }
