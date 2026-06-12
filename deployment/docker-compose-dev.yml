@@ -80,7 +80,8 @@ services:
       GARMIN_CONSUMER_KEY: ${GARMIN_CONSUMER_KEY:-}
       GARMIN_CONSUMER_SECRET: ${GARMIN_CONSUMER_SECRET:-}
     command: >
-      sh -c "npm ci &&
+      sh -c "apk add --no-cache ffmpeg &&
+      npm ci &&
       npx prisma generate &&
       DATABASE_URL=\"$${DIRECT_URL}\" npx prisma migrate deploy &&
       mkdir -p uploads/profile-photos uploads/cover-photos uploads/group-photos uploads/chat-photos uploads/actsnaps uploads/posts uploads/comments uploads/images uploads/videos uploads/audio uploads/media &&

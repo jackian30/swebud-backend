@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.30-beta**
+Current release: **0.2.35-beta**
 
 ## Stack
 
@@ -34,12 +34,12 @@ Current release: **0.2.30-beta**
 
 ## Current beta notes
 
-0.2.30-beta focuses on multi-hashtag feed filtering:
+0.2.35-beta focuses on media upload optimization:
 
-- Supports comma-separated feed hashtag filters, such as `hashtag=run,pilates`.
-- Requires every selected hashtag to exist on the post so multi-select filtering behaves as AND logic.
-- Keeps single-hashtag feed filtering behavior compatible with existing clients.
-- Adds feed service coverage for the multi-hashtag AND case.
+- Keeps image uploads optimized through Sharp WebP conversions and collection-specific resizing.
+- Adds ffmpeg optimization for video uploads with MP4/H.264/AAC output, max 1280x1280 dimensions, and faststart metadata.
+- Adds ffmpeg optimization for audio uploads with M4A/AAC output.
+- Keeps original uploaded media when the optimized result would be larger.
 
 ## Tags and discovery
 
@@ -478,8 +478,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.30-beta -m "v0.2.30-beta"
-git push origin v0.2.30-beta
+git tag -a v0.2.35-beta -m "v0.2.35-beta"
+git push origin v0.2.35-beta
 ```
 
 ## Beta caveats

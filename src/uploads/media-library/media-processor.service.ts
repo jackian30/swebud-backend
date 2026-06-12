@@ -1,4 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
+import { spawn } from 'child_process';
+import { mkdtemp, readFile, rm, writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import sharp = require('sharp');
 import { assertCollectionAccepts, extensionForMime, kindForMime } from './collections';
 import { MediaCollection, ProcessedMedia } from './types';
@@ -13,9 +17,8 @@ export class MediaProcessor {
     if (file.size > collection.maxBytes) throw new BadRequestException(`${kind === 'image' ? 'Image' : kind === 'audio' ? 'Audio' : 'Video'} is too large.`);
     this.assertMagicBytes(file);
 
-    if (kind === 'video' || kind === 'audio') {
-      return { buffer: file.buffer, filename: this.randomName(extensionForMime(file.mimetype)), mimeType: file.mimetype, size: file.buffer.length, type: kind };
-    }
+    if (kind === 'video') return this.processVideo(file);
+    if (kind === 'audio') return this.processAudio(file);
     return this.processImage(file, collection);
   }
 
@@ -45,6 +48,59 @@ export class MediaProcessor {
 
   private randomName(extension: string) {
     return `${Date.now()}-${Math.random().toString(16).slice(2)}${extension}`;
+  }
+
+  private async processVideo(file: Express.Multer.File): Promise<ProcessedMedia> {
+    const original = { buffer: file.buffer, filename: this.randomName(extensionForMime(file.mimetype)), mimeType: file.mimetype, size: file.buffer.length, type: 'video' as const };
+    const processed = await this.transcode(file.buffer, extensionForMime(file.mimetype), '.mp4', [
+      '-map', '0:v:0',
+      '-map', '0:a?',
+      '-vf', 'scale=min(1280\\,iw):min(1280\\,ih):force_original_aspect_ratio=decrease',
+      '-c:v', 'libx264',
+      '-preset', 'veryfast',
+      '-crf', '28',
+      '-pix_fmt', 'yuv420p',
+      '-c:a', 'aac',
+      '-b:a', '128k',
+      '-movflags', '+faststart',
+    ], 'video');
+    if (processed.length >= file.buffer.length) return original;
+    return { buffer: processed, filename: this.randomName('.mp4'), mimeType: 'video/mp4', size: processed.length, type: 'video' };
+  }
+
+  private async processAudio(file: Express.Multer.File): Promise<ProcessedMedia> {
+    const original = { buffer: file.buffer, filename: this.randomName(extensionForMime(file.mimetype)), mimeType: file.mimetype, size: file.buffer.length, type: 'audio' as const };
+    const processed = await this.transcode(file.buffer, extensionForMime(file.mimetype), '.m4a', [
+      '-vn',
+      '-c:a', 'aac',
+      '-b:a', '96k',
+      '-movflags', '+faststart',
+    ], 'audio');
+    if (processed.length >= file.buffer.length) return original;
+    return { buffer: processed, filename: this.randomName('.m4a'), mimeType: 'audio/mp4', size: processed.length, type: 'audio' };
+  }
+
+  private async transcode(input: Buffer, inputExtension: string, outputExtension: string, outputArgs: string[], kind: 'video' | 'audio') {
+    const dir = await mkdtemp(join(tmpdir(), 'swebudd-media-'));
+    const inputPath = join(dir, `input${inputExtension}`);
+    const outputPath = join(dir, `output${outputExtension}`);
+    try {
+      await writeFile(inputPath, input);
+      await this.runFfmpeg(['-y', '-hide_banner', '-loglevel', 'error', '-i', inputPath, ...outputArgs, outputPath]);
+      return await readFile(outputPath);
+    } catch {
+      throw new BadRequestException(`Could not process that ${kind}. Try a smaller or more common ${kind} file.`);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  private runFfmpeg(args: string[]) {
+    return new Promise<void>((resolve, reject) => {
+      const child = spawn('ffmpeg', args, { stdio: 'ignore' });
+      child.on('error', reject);
+      child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`ffmpeg exited with code ${code ?? 'unknown'}`)));
+    });
   }
 
   private assertMagicBytes(file: Express.Multer.File) {

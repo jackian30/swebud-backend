@@ -31,16 +31,47 @@ describe('MediaProcessor', () => {
     await expect(processor.process(file({ mimetype: 'image/png', buffer: Buffer.from('not-a-png') }), mediaCollections['generic-image'])).rejects.toThrow('Uploaded file content does not match its media type.');
   });
 
-  it('accepts valid videos without image conversion', async () => {
+  it('optimizes valid videos to MP4 when transcoding makes them smaller', async () => {
+    jest.spyOn(processor as never, 'transcode').mockResolvedValue(Buffer.from('mp4') as never);
+
     const result = await processor.process(file({ mimetype: 'video/mp4', buffer: mp4Buffer(), size: mp4Buffer().length }), mediaCollections['generic-video']);
 
     expect(result).toMatchObject({
-      buffer: mp4Buffer(),
+      buffer: Buffer.from('mp4'),
       mimeType: 'video/mp4',
-      size: mp4Buffer().length,
+      size: 3,
       type: 'video',
     });
     expect(result.filename).toMatch(/\.mp4$/);
+  });
+
+  it('keeps original video when transcoding is not smaller', async () => {
+    const buffer = mp4Buffer();
+    jest.spyOn(processor as never, 'transcode').mockResolvedValue(Buffer.concat([buffer, Buffer.from('larger')]) as never);
+
+    const result = await processor.process(file({ mimetype: 'video/mp4', buffer, size: buffer.length }), mediaCollections['generic-video']);
+
+    expect(result).toMatchObject({
+      buffer,
+      mimeType: 'video/mp4',
+      size: buffer.length,
+      type: 'video',
+    });
+    expect(result.filename).toMatch(/\.mp4$/);
+  });
+
+  it('optimizes valid audio to AAC m4a when transcoding makes it smaller', async () => {
+    jest.spyOn(processor as never, 'transcode').mockResolvedValue(Buffer.from('aac') as never);
+
+    const result = await processor.process(file({ mimetype: 'audio/mpeg', buffer: mp3Buffer(), size: mp3Buffer().length }), mediaCollections['generic-audio']);
+
+    expect(result).toMatchObject({
+      buffer: Buffer.from('aac'),
+      mimeType: 'audio/mp4',
+      size: 3,
+      type: 'audio',
+    });
+    expect(result.filename).toMatch(/\.m4a$/);
   });
 
   it('keeps GIF images unconverted', async () => {
@@ -81,4 +112,8 @@ function gifBuffer() {
 
 function mp4Buffer() {
   return Buffer.from([0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x69, 0x73, 0x6f, 0x6d, 0x00]);
+}
+
+function mp3Buffer() {
+  return Buffer.from('ID3-audio-data');
 }
