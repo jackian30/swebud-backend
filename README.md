@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.35-beta**
+Current release: **0.2.36-beta**
 
 ## Stack
 
@@ -34,12 +34,12 @@ Current release: **0.2.35-beta**
 
 ## Current beta notes
 
-0.2.35-beta focuses on media upload optimization:
+0.2.36-beta focuses on buddy-session invite cleanup and local deployment hardening:
 
-- Keeps image uploads optimized through Sharp WebP conversions and collection-specific resizing.
-- Adds ffmpeg optimization for video uploads with MP4/H.264/AAC output, max 1280x1280 dimensions, and faststart metadata.
-- Adds ffmpeg optimization for audio uploads with M4A/AAC output.
-- Keeps original uploaded media when the optimized result would be larger.
+- Sends buddy-session direct invites with internal room/code data instead of Android-localhost URLs.
+- Keeps chat invite messages parseable as app-native Join/Closed actions.
+- Tightens local Docker dev port bindings for backend, Postgres, and MailHog.
+- Preserves frontend proxy access over the shared Docker network.
 
 ## Tags and discovery
 
@@ -478,8 +478,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.35-beta -m "v0.2.35-beta"
-git push origin v0.2.35-beta
+git tag -a v0.2.36-beta -m "v0.2.36-beta"
+git push origin v0.2.36-beta
 ```
 
 ## Beta caveats

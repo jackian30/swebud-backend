@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-swebud}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swebud}
     ports:
-      - "${POSTGRES_PORT:-55432}:5432"
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-55432}:5432"
     volumes:
       - swebud_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -22,8 +22,8 @@ services:
     image: mailhog/mailhog:v1.0.1
     restart: unless-stopped
     ports:
-      - "${MAILHOG_SMTP_PORT:-1126}:1025"
-      - "${MAILHOG_UI_PORT:-8126}:8025"
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${MAILHOG_SMTP_PORT:-1126}:1025"
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${MAILHOG_UI_PORT:-8126}:8025"
     networks:
       - swebud
 
@@ -87,7 +87,7 @@ services:
       mkdir -p uploads/profile-photos uploads/cover-photos uploads/group-photos uploads/chat-photos uploads/actsnaps uploads/posts uploads/comments uploads/images uploads/videos uploads/audio uploads/media &&
       npm run dev"
     ports:
-      - "${BACKEND_PORT:-3002}:3000"
+      - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${BACKEND_PORT:-3002}:3000"
     volumes:
       - ..:/app
       - swebud_backend_node_modules:/app/node_modules

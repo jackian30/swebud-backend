@@ -314,7 +314,7 @@ export class BuddyService {
       select: this.inviteUserSelect(),
     });
     if (recipients.length !== recipientIds.length) throw new ForbiddenException('One or more people cannot be invited to this buddy session.');
-    const body = this.inviteMessage(room, dto.inviteUrl);
+    const body = this.inviteMessage(room);
     const messages = [];
     for (const recipient of recipients) {
       messages.push(await this.prisma.message.create({
@@ -989,34 +989,14 @@ export class BuddyService {
     return { AND: filters };
   }
 
-  private inviteMessage(room: any, inviteUrl?: string) {
+  private inviteMessage(room: any) {
     const groupContext = room.scope === BuddySessionScope.group && room.group?.name ? ` in ${room.group.name}` : '';
     const lines = [
       `You're invited to join "${room.name}"${groupContext} on SweBudd.`,
+      `Room: ${room.id}`,
       `Code: ${room.code}`,
     ];
-    const trustedUrl = this.trustedInviteUrl(room, inviteUrl);
-    if (trustedUrl) lines.push(`Open: ${trustedUrl}`);
     return lines.join('\n');
-  }
-
-  private trustedInviteUrl(room: any, inviteUrl?: string) {
-    if (!inviteUrl) return '';
-    try {
-      const parsed = new URL(inviteUrl, 'https://swebudd.local');
-      if (parsed.pathname !== this.invitePath(room)) return '';
-      if (parsed.searchParams.get('code') !== room.code) return '';
-      return inviteUrl;
-    } catch {
-      return '';
-    }
-  }
-
-  private invitePath(room: any) {
-    if (room.scope === BuddySessionScope.group && room.group?.slug) {
-      return `/groups/${encodeURIComponent(room.group.slug)}/buddy-sessions/${encodeURIComponent(room.id)}`;
-    }
-    return `/buddy-sessions/${encodeURIComponent(room.id)}`;
   }
 
   private canAccessPrivateRoom(userId: string, room: any) {
