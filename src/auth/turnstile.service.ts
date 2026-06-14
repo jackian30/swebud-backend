@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { allowedOrigins, isLocalOrigin } from '../common/security';
 
 type TurnstileVerifyResponse = {
   success: boolean;
@@ -18,17 +19,17 @@ export class TurnstileService {
     return Boolean(this.secretKey());
   }
 
-  async verify(token?: string, remoteIp?: string, expectedAction?: string) {
+  async verify(token?: string, remoteIp?: string, expectedAction?: string, origin?: string | null) {
     const secret = this.secretKey();
     if (!secret) {
-      if (!this.canSkipMissingSecret()) {
+      if (!this.canSkipMissingSecret(origin)) {
         throw new ServiceUnavailableException('Security check is not configured');
       }
       return { skipped: true, reason: 'CLOUDFLARE_TURNSTILE_SECRET_KEY is not configured' };
     }
     if (!token) {
-      if (this.canSkipLocalDev()) {
-        return { skipped: true, reason: 'Local dev security check skipped' };
+      if (this.canSkipLocalOrNativeOrigin(origin)) {
+        return { skipped: true, reason: 'Local/native security check skipped' };
       }
       throw new BadRequestException('Please complete the security check before continuing.');
     }
@@ -62,14 +63,15 @@ export class TurnstileService {
     return value && value !== '***' ? value : '';
   }
 
-  private canSkipMissingSecret() {
-    if (this.canSkipLocalDev()) return true;
+  private canSkipMissingSecret(origin?: string | null) {
+    if (this.canSkipLocalOrNativeOrigin(origin)) return true;
     return false;
   }
 
-  private canSkipLocalDev() {
+  private canSkipLocalOrNativeOrigin(origin?: string | null) {
     if (process.env.NODE_ENV !== 'production') return true;
-    const frontendOrigin = this.config.get<string>('FRONTEND_ORIGIN')?.trim() ?? '';
-    return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(frontendOrigin);
+    if (origin && isLocalOrigin(origin)) return true;
+    const origins = allowedOrigins(this.config);
+    return Boolean(origins.length) && origins.every((allowedOrigin) => isLocalOrigin(allowedOrigin));
   }
 }

@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.36-beta**
+Current release: **0.2.37-beta**
 
 ## Stack
 
@@ -34,12 +34,12 @@ Current release: **0.2.36-beta**
 
 ## Current beta notes
 
-0.2.36-beta focuses on buddy-session invite cleanup and local deployment hardening:
+0.2.37-beta focuses on local/native auth hardening for the Android permission release:
 
-- Sends buddy-session direct invites with internal room/code data instead of Android-localhost URLs.
-- Keeps chat invite messages parseable as app-native Join/Closed actions.
-- Tightens local Docker dev port bindings for backend, Postgres, and MailHog.
-- Preserves frontend proxy access over the shared Docker network.
+- Keeps Turnstile enforced for production web login/register when captcha is configured.
+- Allows trusted localhost/native app origins to use beta auth without a web captcha widget.
+- Expands Turnstile unit coverage for production enforcement and local/native bypass cases.
+- Preserves the existing buddy invite and local deployment hardening.
 
 ## Tags and discovery
 
@@ -478,8 +478,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.36-beta -m "v0.2.36-beta"
-git push origin v0.2.36-beta
+git tag -a v0.2.37-beta -m "v0.2.37-beta"
+git push origin v0.2.37-beta
 ```
 
 ## Beta caveats

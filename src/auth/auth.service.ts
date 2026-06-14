@@ -60,6 +60,7 @@ type GoogleTokenInfo = {
 export type SessionMetadata = {
   ipAddress?: string | null;
   userAgent?: string | null;
+  origin?: string | null;
   deviceLabel?: string | null;
   locationLabel?: string | null;
 };
@@ -83,7 +84,7 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto, metadata?: SessionMetadata) {
-    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'signup');
+    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'signup', metadata?.origin);
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
     if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
 
@@ -117,7 +118,7 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, metadata?: SessionMetadata) {
-    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'login');
+    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'login', metadata?.origin);
     const identifier = dto.email.toLowerCase().trim();
     const user = await this.prisma.user.findFirst({
       where: {
@@ -395,6 +396,7 @@ export function sessionMetadataFromRequest(req: Request): SessionMetadata {
   return {
     ipAddress,
     userAgent: cleanSessionText(userAgent, 500),
+    origin: cleanSessionText(firstHeader(req, 'origin'), 160),
     deviceLabel: deviceLabelFromUserAgent(userAgent),
     locationLabel,
   };

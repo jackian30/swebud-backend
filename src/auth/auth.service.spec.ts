@@ -9,6 +9,7 @@ describe('sessionMetadataFromRequest', () => {
       socket: {},
       headers: {
         'user-agent': 'Mozilla/5.0 (Linux; Android 15; Pixel 8 Build/AP3A; wv) AppleWebKit/537.36 Version/4.0 Chrome/125.0 Mobile Safari/537.36',
+        origin: 'https://localhost',
         'x-forwarded-for': '203.0.113.10, 10.0.0.5',
         'cf-ipcity': 'Makati',
         'cf-region': 'Metro%20Manila',
@@ -19,6 +20,7 @@ describe('sessionMetadataFromRequest', () => {
     expect(sessionMetadataFromRequest(req as any)).toEqual({
       ipAddress: '203.0.113.10',
       userAgent: req.headers['user-agent'],
+      origin: 'https://localhost',
       deviceLabel: 'Android app',
       locationLabel: 'Makati, Metro Manila, PH',
     });
