@@ -3,7 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { randomBytes } from 'crypto';
 import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, SendBuddySessionMessageDto, UpdateBuddyRoomParticipantRoleDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, SendBuddySessionMessageDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpsertBuddySessionDto } from './dto';
 import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/activity-personas';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
@@ -287,6 +287,38 @@ export class BuddyService {
     return this.toRoom(room, true);
   }
 
+  async updateRoom(userId: string, roomId: string, dto: UpdateBuddyRoomDto) {
+    const room = await this.ensureCanManageRoom(userId, roomId, 'Only session owners and admins can update this buddy session.');
+    const nextActivity = dto.activity === undefined ? room.activity : (dto.activity?.trim() || null);
+    const nextSubActivity = nextActivity ? (dto.subActivity === undefined ? room.subActivity : (dto.subActivity?.trim() || null)) : null;
+    await this.ensureActivityOption(nextActivity);
+    const touchedAt = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.buddyRoom.update({
+        where: { id: roomId },
+        data: {
+          activity: nextActivity,
+          subActivity: nextSubActivity,
+        },
+      });
+      await tx.buddySession.updateMany({
+        where: { roomId, expiresAt: { gt: touchedAt } },
+        data: {
+          activity: nextActivity,
+          subActivity: nextSubActivity,
+        },
+      });
+      await this.touchRoomParticipantActivity(tx, roomId, userId, touchedAt);
+      return tx.buddyRoom.findUniqueOrThrow({
+        where: { id: roomId },
+        include: this.roomInclude(),
+      });
+    });
+    const nextRoom = this.toRoom(updated, this.canRevealRoomCode(userId, updated));
+    await this.emitRoomUpdated(roomId, nextRoom).catch(() => undefined);
+    return nextRoom;
+  }
+
   async joinRoom(userId: string, dto: JoinBuddyRoomDto) {
     const room = await this.ensureCanJoinRoom(userId, dto);
     return this.saveSession(userId, { roomId: room.id, latitude: dto.latitude, longitude: dto.longitude, ttlMinutes: DEFAULT_TTL_MINUTES }, room);
@@ -328,6 +360,55 @@ export class BuddyService {
       recipients: recipients.map((recipient) => exposeActivityPersonas(recipient)),
       messages,
     };
+  }
+
+  async pinRoomLocation(userId: string, roomId: string, dto: PinBuddyRoomLocationDto) {
+    await this.ensureCanManageRoom(userId, roomId, 'Only session owners and admins can pin a session location.');
+    const pinnedAt = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.buddyRoom.update({
+        where: { id: roomId },
+        data: {
+          pinnedLatitude: dto.latitude,
+          pinnedLongitude: dto.longitude,
+          pinnedLabel: dto.label?.trim() || null,
+          pinnedById: userId,
+          pinnedAt,
+        },
+      });
+      await this.touchRoomParticipantActivity(tx, roomId, userId, pinnedAt);
+      return tx.buddyRoom.findUniqueOrThrow({
+        where: { id: roomId },
+        include: this.roomInclude(),
+      });
+    });
+    const room = this.toRoom(updated, this.canRevealRoomCode(userId, updated));
+    await this.emitRoomPinnedLocation(roomId, room).catch(() => undefined);
+    return room;
+  }
+
+  async clearRoomPinnedLocation(userId: string, roomId: string) {
+    await this.ensureCanManageRoom(userId, roomId, 'Only session owners and admins can clear a pinned session location.');
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.buddyRoom.update({
+        where: { id: roomId },
+        data: {
+          pinnedLatitude: null,
+          pinnedLongitude: null,
+          pinnedLabel: null,
+          pinnedById: null,
+          pinnedAt: null,
+        },
+      });
+      await this.touchRoomParticipantActivity(tx, roomId, userId);
+      return tx.buddyRoom.findUniqueOrThrow({
+        where: { id: roomId },
+        include: this.roomInclude(),
+      });
+    });
+    const room = this.toRoom(updated, this.canRevealRoomCode(userId, updated));
+    await this.emitRoomPinnedLocation(roomId, room).catch(() => undefined);
+    return room;
   }
 
   async roomMessages(userId: string, roomId: string) {
@@ -803,6 +884,28 @@ export class BuddyService {
     for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-read', payload);
   }
 
+  private async emitRoomPinnedLocation(roomId: string, room: any) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const recipients = await this.prisma.buddySession.findMany({
+      where: { roomId, expiresAt: { gt: new Date() } },
+      select: { userId: true },
+    });
+    const event = { id: `${roomId}:pinned-location:${new Date().toISOString()}`, roomId, room };
+    for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-pinned-location', event);
+  }
+
+  private async emitRoomUpdated(roomId: string, room: any) {
+    const realtime = this.notificationsGateway();
+    if (!realtime) return;
+    const recipients = await this.prisma.buddySession.findMany({
+      where: { roomId, expiresAt: { gt: new Date() } },
+      select: { userId: true },
+    });
+    const event = { id: `${roomId}:updated:${new Date().toISOString()}`, roomId, room };
+    for (const recipient of recipients) realtime.emitToUser(recipient.userId, 'buddy:room-updated', event);
+  }
+
   private async emitRoomKicked(roomId: string, userId: string, user: any, kickedById: string, kickedAt: Date) {
     const realtime = this.notificationsGateway();
     if (!realtime) return;
@@ -905,6 +1008,16 @@ export class BuddyService {
     });
     if (!room || room.expiresAt <= new Date()) throw new NotFoundException('Buddy session not found');
     if (!this.canManageRoom(this.activeRoomParticipant(room, userId)?.role)) throw new ForbiddenException('Only session owners and admins can send direct invites.');
+    return room;
+  }
+
+  private async ensureCanManageRoom(userId: string, roomId: string, message: string) {
+    const room = await this.prisma.buddyRoom.findUnique({
+      where: { id: roomId },
+      include: this.roomInclude(),
+    });
+    if (!room || room.expiresAt <= new Date()) throw new NotFoundException('Buddy session not found');
+    if (!this.canManageRoom(this.activeRoomParticipant(room, userId)?.role)) throw new ForbiddenException(message);
     return room;
   }
 
@@ -1143,6 +1256,7 @@ export class BuddyService {
       creator: room.creator,
       activity: room.activity,
       subActivity: room.subActivity,
+      pinnedLocation: this.toPinnedLocation(room),
       expiresAt: room.expiresAt,
       createdAt: room.createdAt,
       participantCount: room._count?.sessions ?? 0,
@@ -1167,6 +1281,7 @@ export class BuddyService {
       creatorId: room.creatorId,
       activity: room.activity,
       subActivity: room.subActivity,
+      pinnedLocation: this.toPinnedLocation(room),
       expiresAt: room.expiresAt,
       createdAt: room.createdAt,
       participantCount: room._count?.sessions ?? 0,
@@ -1182,6 +1297,17 @@ export class BuddyService {
       leftAt: participant.leftAt,
       kickedAt: participant.kickedAt,
       user: participant.user ? this.toBuddyUser(participant.user) : null,
+    };
+  }
+
+  private toPinnedLocation(room: any) {
+    if (typeof room.pinnedLatitude !== 'number' || typeof room.pinnedLongitude !== 'number') return null;
+    return {
+      latitude: room.pinnedLatitude,
+      longitude: room.pinnedLongitude,
+      label: room.pinnedLabel ?? null,
+      pinnedById: room.pinnedById ?? null,
+      pinnedAt: room.pinnedAt ?? null,
     };
   }
 

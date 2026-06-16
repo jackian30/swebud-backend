@@ -41,6 +41,11 @@ export class CreateBuddyRoomDto {
   @IsOptional() @IsNumber() @Min(15) @Max(360) ttlMinutes?: number;
 }
 
+export class UpdateBuddyRoomDto {
+  @IsOptional() @IsString() @MaxLength(60) activity?: string | null;
+  @IsOptional() @IsString() @MaxLength(60) subActivity?: string | null;
+}
+
 export class BuddyRoomQueryDto {
   @IsOptional() @IsEnum(BuddySessionScope) scope?: BuddySessionScope;
   @IsOptional() @IsUUID() groupId?: string;
@@ -51,6 +56,12 @@ export class JoinBuddyRoomDto {
   @IsOptional() @IsString() @MaxLength(24) code?: string;
   @IsNumber() @Min(-90) @Max(90) latitude!: number;
   @IsNumber() @Min(-180) @Max(180) longitude!: number;
+}
+
+export class PinBuddyRoomLocationDto {
+  @IsNumber() @Min(-90) @Max(90) latitude!: number;
+  @IsNumber() @Min(-180) @Max(180) longitude!: number;
+  @IsOptional() @IsString() @MaxLength(80) label?: string;
 }
 
 export class InviteBuddyRoomDto {

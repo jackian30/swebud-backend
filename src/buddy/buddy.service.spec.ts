@@ -403,6 +403,121 @@ describe('BuddyService', () => {
     }));
   });
 
+  it('lets a room admin pin a destination and notifies active participants', async () => {
+    const realtime = { emitToUser: jest.fn() };
+    const room = {
+      id: 'room-1',
+      name: 'Sunday run',
+      scope: 'public',
+      visibility: BuddySessionVisibility.public,
+      code: 'ABC123',
+      groupId: null,
+      group: null,
+      creatorId: 'creator-1',
+      creator: { id: 'creator-1', displayName: 'Creator', username: 'creator', profileImageUrl: null },
+      participants: [{ userId, role: BuddyRoomParticipantRole.admin, joinedAt: new Date(), lastActivityAt: new Date(), leftAt: null, kickedAt: null, user: { id: userId, username: 'fitmaster' } }],
+      sessions: [],
+      activity: 'walking',
+      subActivity: null,
+      pinnedLatitude: null,
+      pinnedLongitude: null,
+      pinnedLabel: null,
+      pinnedById: null,
+      pinnedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date('2026-05-23T00:00:00.000Z'),
+      _count: { sessions: 1 },
+    };
+    prisma.buddyRoom.findUnique = jest.fn().mockResolvedValue(room);
+    prisma.buddyRoom.update = jest.fn().mockResolvedValue({});
+    prisma.buddyRoom.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    prisma.buddyRoom.findUniqueOrThrow = jest.fn().mockResolvedValue({
+      ...room,
+      pinnedLatitude: 14.61,
+      pinnedLongitude: 121.03,
+      pinnedLabel: 'Pinned Location',
+      pinnedById: userId,
+      pinnedAt: new Date('2026-06-16T09:30:00.000Z'),
+    });
+    prisma.buddyRoomParticipant = { update: jest.fn().mockResolvedValue({ role: BuddyRoomParticipantRole.admin }) };
+    prisma.buddySession = { findMany: jest.fn().mockResolvedValue([{ userId }, { userId: 'user-2' }]) };
+    service = new BuddyService(prisma, moduleRef(realtime) as any);
+
+    const updated = await service.pinRoomLocation(userId, 'room-1', { latitude: 14.61, longitude: 121.03, label: 'Pinned Location' });
+
+    expect(updated.pinnedLocation).toEqual(expect.objectContaining({ latitude: 14.61, longitude: 121.03, label: 'Pinned Location', pinnedById: userId }));
+    expect(prisma.buddyRoom.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'room-1' },
+      data: expect.objectContaining({ pinnedLatitude: 14.61, pinnedLongitude: 121.03, pinnedById: userId }),
+    }));
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-pinned-location', expect.objectContaining({
+      roomId: 'room-1',
+      room: expect.objectContaining({ pinnedLocation: expect.objectContaining({ latitude: 14.61, longitude: 121.03 }) }),
+    }));
+  });
+
+  it('lets a room admin change the session activity and updates active room sessions', async () => {
+    const realtime = { emitToUser: jest.fn() };
+    const room = {
+      id: 'room-1',
+      name: 'Sunday run',
+      scope: 'public',
+      visibility: BuddySessionVisibility.public,
+      code: 'ABC123',
+      groupId: null,
+      group: null,
+      creatorId: 'creator-1',
+      creator: { id: 'creator-1', displayName: 'Creator', username: 'creator', profileImageUrl: null },
+      participants: [{ userId, role: BuddyRoomParticipantRole.admin, joinedAt: new Date(), lastActivityAt: new Date(), leftAt: null, kickedAt: null, user: { id: userId, username: 'fitmaster' } }],
+      sessions: [],
+      activity: 'walking',
+      subActivity: null,
+      pinnedLatitude: null,
+      pinnedLongitude: null,
+      pinnedLabel: null,
+      pinnedById: null,
+      pinnedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date('2026-05-23T00:00:00.000Z'),
+      _count: { sessions: 2 },
+    };
+    prisma.buddyActivityOption = { findFirst: jest.fn().mockResolvedValue({ activity: 'cycling' }) };
+    prisma.buddyRoom.findUnique = jest.fn().mockResolvedValue(room);
+    prisma.buddyRoom.update = jest.fn().mockResolvedValue({});
+    prisma.buddyRoom.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    prisma.buddyRoom.findUniqueOrThrow = jest.fn().mockResolvedValue({
+      ...room,
+      activity: 'cycling',
+      subActivity: 'road',
+    });
+    prisma.buddyRoomParticipant = { update: jest.fn().mockResolvedValue({ role: BuddyRoomParticipantRole.admin }) };
+    prisma.buddySession = {
+      updateMany: jest.fn().mockResolvedValue({ count: 2 }),
+      findMany: jest.fn().mockResolvedValue([{ userId }, { userId: 'user-2' }]),
+    };
+    service = new BuddyService(prisma, moduleRef(realtime) as any);
+
+    const updated = await service.updateRoom(userId, 'room-1', { activity: 'cycling', subActivity: 'road' });
+
+    expect(updated.activity).toBe('cycling');
+    expect(updated.subActivity).toBe('road');
+    expect(prisma.buddyActivityOption.findFirst).toHaveBeenCalledWith(expect.objectContaining({
+      where: { activity: 'cycling', enabled: true },
+    }));
+    expect(prisma.buddyRoom.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'room-1' },
+      data: { activity: 'cycling', subActivity: 'road' },
+    }));
+    expect(prisma.buddySession.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ roomId: 'room-1', expiresAt: { gt: expect.any(Date) } }),
+      data: { activity: 'cycling', subActivity: 'road' },
+    }));
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-updated', expect.objectContaining({
+      roomId: 'room-1',
+      room: expect.objectContaining({ activity: 'cycling', subActivity: 'road' }),
+    }));
+  });
+
   function configureJoinRoomMocks(previousSession: { roomId: string | null; expiresAt: Date } | null) {
     const room = {
       id: 'room-1',

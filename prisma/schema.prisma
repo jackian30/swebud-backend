@@ -473,6 +473,11 @@ model BuddyRoom {
   creatorId    String                  @map("creator_id")
   activity     String?
   subActivity  String?                 @map("sub_activity")
+  pinnedLatitude  Float?               @map("pinned_latitude")
+  pinnedLongitude Float?               @map("pinned_longitude")
+  pinnedLabel     String?              @map("pinned_label")
+  pinnedById      String?              @map("pinned_by_id")
+  pinnedAt        DateTime?            @map("pinned_at")
   expiresAt    DateTime                @map("expires_at")
   createdAt    DateTime                @default(now()) @map("created_at")
   updatedAt    DateTime                @updatedAt @map("updated_at")
