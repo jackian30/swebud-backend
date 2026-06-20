@@ -434,6 +434,7 @@ export class PostsService {
       images: { orderBy: { sortOrder: 'asc' as const } },
       hashtags: { include: { hashtag: true } },
       taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' as const } },
+      buddySessionRecap: true,
       comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const }, include: this.commentInclude(1, viewerId) },
       _count: { select: { reposts: true } },
       ...(viewerId ? { saves: { where: { userId: viewerId }, select: { userId: true } } } : {}),

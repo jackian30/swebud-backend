@@ -375,6 +375,7 @@ model User {
   hiddenBuddySessionMessages   BuddySessionHiddenMessage[]
   buddySessionReadStates       BuddySessionReadState[]
   buddySession                 BuddySession?
+  buddySessionRecaps           BuddySessionRecap[]           @relation("BuddySessionRecapOwners")
   createdBuddyRooms            BuddyRoom[]                   @relation("BuddyRoomCreators")
   buddyRoomParticipants        BuddyRoomParticipant[]
   closeBuddies                 CloseBuddy[]                  @relation("CloseBuddyOwners")
@@ -464,29 +465,29 @@ model BuddySession {
 }
 
 model BuddyRoom {
-  id           String                  @id @default(uuid())
-  name         String
-  scope        BuddySessionScope       @default(public)
-  visibility   BuddySessionVisibility  @default(public)
-  code         String                  @unique
-  groupId      String?                 @map("group_id")
-  creatorId    String                  @map("creator_id")
-  activity     String?
-  subActivity  String?                 @map("sub_activity")
-  pinnedLatitude  Float?               @map("pinned_latitude")
-  pinnedLongitude Float?               @map("pinned_longitude")
-  pinnedLabel     String?              @map("pinned_label")
-  pinnedById      String?              @map("pinned_by_id")
-  pinnedAt        DateTime?            @map("pinned_at")
-  expiresAt    DateTime                @map("expires_at")
-  createdAt    DateTime                @default(now()) @map("created_at")
-  updatedAt    DateTime                @updatedAt @map("updated_at")
-  group        Group?                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  creator      User                    @relation("BuddyRoomCreators", fields: [creatorId], references: [id], onDelete: Cascade)
-  sessions     BuddySession[]
-  participants BuddyRoomParticipant[]
-  messages     BuddySessionMessage[]
-  readStates   BuddySessionReadState[]
+  id              String                  @id @default(uuid())
+  name            String
+  scope           BuddySessionScope       @default(public)
+  visibility      BuddySessionVisibility  @default(public)
+  code            String                  @unique
+  groupId         String?                 @map("group_id")
+  creatorId       String                  @map("creator_id")
+  activity        String?
+  subActivity     String?                 @map("sub_activity")
+  pinnedLatitude  Float?                  @map("pinned_latitude")
+  pinnedLongitude Float?                  @map("pinned_longitude")
+  pinnedLabel     String?                 @map("pinned_label")
+  pinnedById      String?                 @map("pinned_by_id")
+  pinnedAt        DateTime?               @map("pinned_at")
+  expiresAt       DateTime                @map("expires_at")
+  createdAt       DateTime                @default(now()) @map("created_at")
+  updatedAt       DateTime                @updatedAt @map("updated_at")
+  group           Group?                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  creator         User                    @relation("BuddyRoomCreators", fields: [creatorId], references: [id], onDelete: Cascade)
+  sessions        BuddySession[]
+  participants    BuddyRoomParticipant[]
+  messages        BuddySessionMessage[]
+  readStates      BuddySessionReadState[]
 
   @@index([scope, visibility, expiresAt])
   @@index([groupId, expiresAt])
@@ -585,6 +586,43 @@ model BuddyRoomParticipant {
   @@index([roomId, role, lastActivityAt])
   @@index([kickedById])
   @@map("buddy_room_participants")
+}
+
+model BuddySessionRecap {
+  id                  String            @id @default(uuid())
+  ownerId             String            @map("owner_id")
+  roomId              String            @map("room_id")
+  roomName            String            @map("room_name")
+  scope               BuddySessionScope @default(public)
+  groupId             String?           @map("group_id")
+  groupName           String?           @map("group_name")
+  groupSlug           String?           @map("group_slug")
+  activity            String?
+  subActivity         String?           @map("sub_activity")
+  title               String
+  caption             String?
+  participantCount    Int               @default(1) @map("participant_count")
+  participantPreview  Json?             @map("participant_preview")
+  areaLabel           String?           @map("area_label")
+  startedAt           DateTime          @map("started_at")
+  endedAt             DateTime?         @map("ended_at")
+  durationSeconds     Int?              @map("duration_seconds")
+  includeParticipants Boolean           @default(false) @map("include_participants")
+  includeBroadArea    Boolean           @default(false) @map("include_broad_area")
+  visibility          PostVisibility    @default(only_me)
+  sharedPostId        String?           @unique @map("shared_post_id")
+  sharedAt            DateTime?         @map("shared_at")
+  createdAt           DateTime          @default(now()) @map("created_at")
+  updatedAt           DateTime          @updatedAt @map("updated_at")
+  owner               User              @relation("BuddySessionRecapOwners", fields: [ownerId], references: [id], onDelete: Cascade)
+  group               Group?            @relation("BuddySessionRecapGroups", fields: [groupId], references: [id], onDelete: SetNull)
+  sharedPost          Post?             @relation("BuddySessionRecapPost", fields: [sharedPostId], references: [id], onDelete: SetNull)
+
+  @@unique([ownerId, roomId])
+  @@index([ownerId, createdAt])
+  @@index([groupId, createdAt])
+  @@index([roomId])
+  @@map("buddy_session_recaps")
 }
 
 model Follow {
@@ -756,21 +794,22 @@ model Post {
   createdAt      DateTime       @default(now()) @map("created_at")
   updatedAt      DateTime       @updatedAt @map("updated_at")
 
-  author       User              @relation(fields: [authorId], references: [id], onDelete: Cascade)
-  profileOwner User?             @relation("ProfileWallPosts", fields: [profileOwnerId], references: [id], onDelete: Cascade)
-  group        Group?            @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  images       PostImage[]
-  hashtags     PostHashtag[]
-  likes        PostLike[]
-  saves        PostSave[]
-  views        PostView[]
-  reposts      Repost[]
-  reports      PostReport[]
-  hiddenBy     HiddenPost[]
-  comments     Comment[]
-  editHistory  PostEditHistory[]
-  taggedUsers  PostTag[]
-  activity     Activity?         @relation(fields: [activityId], references: [id])
+  author            User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  profileOwner      User?              @relation("ProfileWallPosts", fields: [profileOwnerId], references: [id], onDelete: Cascade)
+  group             Group?             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  images            PostImage[]
+  hashtags          PostHashtag[]
+  likes             PostLike[]
+  saves             PostSave[]
+  views             PostView[]
+  reposts           Repost[]
+  reports           PostReport[]
+  hiddenBy          HiddenPost[]
+  comments          Comment[]
+  editHistory       PostEditHistory[]
+  taggedUsers       PostTag[]
+  activity          Activity?          @relation(fields: [activityId], references: [id])
+  buddySessionRecap BuddySessionRecap? @relation("BuddySessionRecapPost")
 
   @@index([authorId, createdAt])
   @@index([profileOwnerId, createdAt])
@@ -940,6 +979,7 @@ model Group {
   legacyPosts         GroupPost[]
   reports             GroupReport[]
   buddyRooms          BuddyRoom[]
+  buddySessionRecaps  BuddySessionRecap[]    @relation("BuddySessionRecapGroups")
   invites             GroupInvite[]
 
   @@index([visibility, createdAt])
@@ -1470,6 +1510,7 @@ model Notification {
   id        String           @id @default(uuid())
   userId    String           @map("user_id")
   actorId   String?          @map("actor_id")
+  actorIds  Json?            @map("actor_ids")
   type      NotificationType
   entityId  String?          @map("entity_id")
   message   String
@@ -1479,6 +1520,7 @@ model Notification {
   actor     User?            @relation("NotificationActors", fields: [actorId], references: [id], onDelete: SetNull)
 
   @@index([userId, readAt, createdAt])
+  @@index([userId, type, entityId, readAt])
   @@map("notifications")
 }
 

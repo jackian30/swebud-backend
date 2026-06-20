@@ -1,9 +1,9 @@
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { ModuleRef } from '@nestjs/core';
 import { randomBytes } from 'crypto';
-import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
+import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility, PostVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, SendBuddySessionMessageDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, BuddySessionRecapQueryDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, SendBuddySessionMessageDto, ShareBuddySessionRecapDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpdateBuddySessionRecapDto, UpsertBuddySessionDto } from './dto';
 import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/activity-personas';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
@@ -16,6 +16,7 @@ const MAX_DISCOVERABLE_TAKE = 500;
 const BUDDY_CLEANUP_INTERVAL_MS = 5 * 60_000;
 const ROOM_LOCATION_EVENT_MIN_INTERVAL_MS = 1_000;
 const DISCOVERY_SESSION_EVENT_MIN_INTERVAL_MS = 2_000;
+const DEFAULT_RECAP_TITLE = 'Buddy Session recap';
 
 @Injectable()
 export class BuddyService {
@@ -113,6 +114,7 @@ export class BuddyService {
 
   async stop(userId: string) {
     const session = await this.prisma.buddySession.findUnique({ where: { userId }, select: { roomId: true, latitude: true, longitude: true } });
+    const recap = session?.roomId ? await this.createRoomRecap(userId, session.roomId).catch(() => null) : null;
     const leftAt = new Date();
     await this.prisma.$transaction(async (tx) => {
       await tx.buddySession.deleteMany({ where: { userId } });
@@ -131,7 +133,7 @@ export class BuddyService {
     } else if (session) {
       await this.emitDiscoverySessionStopped(userId, session).catch(() => undefined);
     }
-    return { ok: true };
+    return { ok: true, recap };
   }
 
   async stopPresence(userId: string) {
@@ -625,8 +627,326 @@ export class BuddyService {
     if (!room) throw new NotFoundException('Buddy session not found');
     const requester = this.activeRoomParticipant(room, userId);
     if (!this.canManageRoom(requester?.role)) throw new ForbiddenException('Only session owners and admins can close this buddy session.');
+    const recap = await this.createRoomRecap(userId, roomId).catch(() => null);
     await this.deleteRoom(roomId);
-    return { ok: true };
+    return { ok: true, recap };
+  }
+
+  async roomRecap(userId: string, roomId: string) {
+    const existing = await this.prisma.buddySessionRecap.findUnique({
+      where: { ownerId_roomId: { ownerId: userId, roomId } },
+      include: this.recapInclude(),
+    });
+    if (existing) return this.toRecap(existing);
+    return this.createRoomRecap(userId, roomId);
+  }
+
+  async recaps(userId: string, query: BuddySessionRecapQueryDto = {}) {
+    const where = query.groupId
+      ? {
+          groupId: query.groupId,
+          OR: [
+            { ownerId: userId },
+            { sharedPost: { is: { groupId: query.groupId } } },
+          ],
+        }
+      : { ownerId: userId };
+    if (query.groupId) await this.ensureGroupMember(userId, query.groupId);
+    const recaps = await this.prisma.buddySessionRecap.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+      include: this.recapInclude(),
+    });
+    return recaps.map((recap) => this.toRecap(recap));
+  }
+
+  async recap(userId: string, recapId: string) {
+    const recap = await this.ensureOwnsRecap(userId, recapId);
+    return this.toRecap(recap);
+  }
+
+  async updateRecap(userId: string, recapId: string, dto: UpdateBuddySessionRecapDto) {
+    await this.ensureOwnsRecap(userId, recapId);
+    const data = this.recapUpdateData(dto);
+    if (!Object.keys(data).length) return this.recap(userId, recapId);
+    const recap = await this.prisma.buddySessionRecap.update({
+      where: { id: recapId },
+      data,
+      include: this.recapInclude(),
+    });
+    return this.toRecap(recap);
+  }
+
+  async shareRecap(userId: string, recapId: string, dto: ShareBuddySessionRecapDto) {
+    const existing = await this.ensureOwnsRecap(userId, recapId);
+    await this.ensureRecapParticipant(userId, existing);
+    const updateData = this.recapUpdateData(dto);
+    const recap = Object.keys(updateData).length
+      ? await this.prisma.buddySessionRecap.update({ where: { id: recapId }, data: updateData, include: this.recapInclude() })
+      : existing;
+    const target = dto.target ?? (recap.groupId ? 'group' : 'feed');
+    if (target === 'group') {
+      if (!recap.groupId) throw new BadRequestException('This recap is not linked to a group.');
+      await this.ensureGroupMember(userId, recap.groupId);
+    }
+    const postText = this.recapPostText(recap);
+    const postData = {
+      authorId: userId,
+      groupId: target === 'group' ? recap.groupId : null,
+      text: postText,
+      visibility: target === 'group' ? PostVisibility.public : (recap.visibility ?? PostVisibility.only_me),
+      hashtags: {
+        create: [{ hashtag: { connectOrCreate: { where: { name: 'buddysession' }, create: { name: 'buddysession' } } } }],
+      },
+    };
+    const post = await this.prisma.post.create({
+      data: postData,
+      include: this.postInclude(),
+    });
+    const shared = await this.prisma.buddySessionRecap.update({
+      where: { id: recap.id },
+      data: { sharedPostId: post.id, sharedAt: new Date() },
+      include: this.recapInclude(),
+    });
+    return { recap: this.toRecap(shared), post: this.presentPost(post), target };
+  }
+
+  private async createRoomRecap(userId: string, roomId: string) {
+    const existing = await this.prisma.buddySessionRecap.findUnique({
+      where: { ownerId_roomId: { ownerId: userId, roomId } },
+      include: this.recapInclude(),
+    });
+    if (existing) return this.toRecap(existing);
+    const room = await this.prisma.buddyRoom.findUnique({
+      where: { id: roomId },
+      include: this.recapRoomInclude(),
+    });
+    if (!room) throw new NotFoundException('Buddy session not found');
+    const participant = room.participants?.find((item: any) => item.userId === userId && !item.kickedAt);
+    if (!participant) throw new ForbiddenException('Only session participants can create a recap.');
+    if (room.scope === BuddySessionScope.group && room.groupId) await this.ensureGroupMember(userId, room.groupId);
+    const endedAt = new Date();
+    const participantPreview = (room.participants ?? [])
+      .filter((item: any) => !item.kickedAt)
+      .slice(0, 8)
+      .map((item: any) => ({
+        userId: item.userId,
+        displayName: item.user?.displayName ?? null,
+        username: item.user?.username ?? null,
+        profileImageUrl: item.user?.profileImageUrl ?? null,
+      }));
+    const participantCount = Math.max(participantPreview.length, 1);
+    const title = this.defaultRecapTitle(room);
+    const recap = await this.prisma.buddySessionRecap.create({
+      data: {
+        ownerId: userId,
+        roomId,
+        roomName: room.name,
+        scope: room.scope,
+        groupId: room.groupId,
+        groupName: room.group?.name ?? null,
+        groupSlug: room.group?.slug ?? null,
+        activity: room.activity,
+        subActivity: room.subActivity,
+        title,
+        caption: this.defaultRecapCaption(room, participantCount),
+        participantCount,
+        participantPreview,
+        areaLabel: room.pinnedLabel ? this.broadAreaLabel(room.pinnedLabel) : null,
+        startedAt: room.createdAt,
+        endedAt,
+        durationSeconds: Math.max(Math.round((endedAt.getTime() - room.createdAt.getTime()) / 1000), 0),
+        includeParticipants: false,
+        includeBroadArea: false,
+        visibility: PostVisibility.only_me,
+      },
+      include: this.recapInclude(),
+    });
+    return this.toRecap(recap);
+  }
+
+  private async ensureOwnsRecap(userId: string, recapId: string) {
+    const recap = await this.prisma.buddySessionRecap.findUnique({
+      where: { id: recapId },
+      include: this.recapInclude(),
+    });
+    if (!recap) throw new NotFoundException('Buddy Session recap not found.');
+    if (recap.ownerId !== userId) throw new ForbiddenException('Only the recap owner can manage this recap.');
+    if (recap.groupId) await this.ensureGroupMember(userId, recap.groupId);
+    return recap;
+  }
+
+  private async ensureRecapParticipant(userId: string, recap: any) {
+    const participantPreview = this.recapParticipantPreview(recap.participantPreview);
+    if (participantPreview.some((participant) => participant.userId === userId)) return;
+    if (participantPreview.length) {
+      throw new ForbiddenException('Only session participants can share this recap.');
+    }
+    const participant = await this.prisma.buddyRoomParticipant.findFirst({
+      where: { roomId: recap.roomId, userId, kickedAt: null },
+      select: { userId: true },
+    });
+    if (!participant) throw new ForbiddenException('Only session participants can share this recap.');
+  }
+
+  private recapParticipantPreview(value: unknown): { userId?: string | null }[] {
+    if (!Array.isArray(value)) return [];
+    return value.filter((item): item is { userId?: string | null } => Boolean(item) && typeof item === 'object');
+  }
+
+  private recapUpdateData(dto: UpdateBuddySessionRecapDto) {
+    const data: Record<string, unknown> = {};
+    if (dto.title !== undefined) {
+      const title = dto.title.trim();
+      if (!title) throw new BadRequestException('Recap title is required.');
+      data.title = title;
+    }
+    if (dto.caption !== undefined) data.caption = dto.caption?.trim() || null;
+    if (dto.areaLabel !== undefined) data.areaLabel = dto.areaLabel ? this.broadAreaLabel(dto.areaLabel) : null;
+    if (dto.includeParticipants !== undefined) data.includeParticipants = Boolean(dto.includeParticipants);
+    if (dto.includeBroadArea !== undefined) data.includeBroadArea = Boolean(dto.includeBroadArea);
+    if (dto.visibility !== undefined) data.visibility = dto.visibility;
+    return data;
+  }
+
+  private defaultRecapTitle(room: any) {
+    const activity = this.titleCase(room.subActivity || room.activity || '');
+    if (activity) return `${activity} recap`;
+    return room.name?.trim() || DEFAULT_RECAP_TITLE;
+  }
+
+  private defaultRecapCaption(room: any, participantCount: number) {
+    const activity = this.titleCase(room.subActivity || room.activity || 'Buddy Session');
+    const buddyText = participantCount === 1 ? 'solo' : `with ${participantCount - 1} ${participantCount - 1 === 1 ? 'buddy' : 'buddies'}`;
+    const groupText = room.group?.name ? ` in ${room.group.name}` : '';
+    return `Finished ${activity} ${buddyText}${groupText}.`;
+  }
+
+  private broadAreaLabel(value: string) {
+    return value
+      .replace(/\s+/g, ' ')
+      .replace(/\b(?:street|st\.?|avenue|ave\.?|road|rd\.?|block|lot|unit|floor|flr)\b.*$/i, '')
+      .trim()
+      .slice(0, 120);
+  }
+
+  private recapPostText(recap: any) {
+    const lines = [recap.title || DEFAULT_RECAP_TITLE];
+    if (recap.caption) lines.push('', recap.caption);
+    lines.push('', `Duration: ${this.formatDuration(recap.durationSeconds)}`);
+    lines.push(`Buddies: ${recap.participantCount ?? 1}`);
+    if (recap.includeBroadArea && recap.areaLabel) lines.push(`Area: ${recap.areaLabel}`);
+    if (recap.includeParticipants && Array.isArray(recap.participantPreview)) {
+      const names = recap.participantPreview
+        .filter((participant: any) => participant.userId !== recap.ownerId)
+        .map((participant: any) => participant.username ? `@${participant.username}` : participant.displayName)
+        .filter(Boolean)
+        .slice(0, 5);
+      if (names.length) lines.push(`With: ${names.join(', ')}`);
+    }
+    lines.push('', '#BuddySession');
+    return lines.join('\n').slice(0, 1000);
+  }
+
+  private formatDuration(seconds?: number | null) {
+    if (!seconds || seconds < 60) return 'Not added';
+    const minutes = Math.round(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+    if (!hours) return `${minutes}m`;
+    if (!remainingMinutes) return `${hours}h`;
+    return `${hours}h ${remainingMinutes}m`;
+  }
+
+  private titleCase(value: string) {
+    return value
+      .replace(/[_-]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/\b\w/g, (match) => match.toUpperCase());
+  }
+
+  private recapInclude() {
+    return {
+      owner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
+      group: { select: { id: true, name: true, slug: true, visibility: true } },
+      sharedPost: { select: { id: true, groupId: true, createdAt: true } },
+    } as const;
+  }
+
+  private recapRoomInclude() {
+    return {
+      group: { select: { id: true, name: true, slug: true, visibility: true } },
+      participants: {
+        where: { kickedAt: null },
+        orderBy: { joinedAt: 'asc' as const },
+        select: {
+          userId: true,
+          role: true,
+          joinedAt: true,
+          leftAt: true,
+          kickedAt: true,
+          user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
+        },
+      },
+    } as const;
+  }
+
+  private toRecap(recap: any) {
+    return {
+      id: recap.id,
+      ownerId: recap.ownerId,
+      roomId: recap.roomId,
+      roomName: recap.roomName,
+      scope: recap.scope,
+      groupId: recap.groupId,
+      groupName: recap.groupName,
+      groupSlug: recap.groupSlug,
+      group: recap.group ?? null,
+      activity: recap.activity,
+      subActivity: recap.subActivity,
+      title: recap.title,
+      caption: recap.caption,
+      participantCount: recap.participantCount,
+      participantPreview: recap.participantPreview ?? [],
+      areaLabel: recap.areaLabel,
+      startedAt: recap.startedAt,
+      endedAt: recap.endedAt,
+      durationSeconds: recap.durationSeconds,
+      includeParticipants: recap.includeParticipants,
+      includeBroadArea: recap.includeBroadArea,
+      visibility: recap.visibility,
+      sharedPostId: recap.sharedPostId,
+      sharedPost: recap.sharedPost ?? null,
+      sharedAt: recap.sharedAt,
+      createdAt: recap.createdAt,
+      updatedAt: recap.updatedAt,
+      owner: recap.owner ?? null,
+    };
+  }
+
+  private postInclude() {
+    return {
+      author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
+      profileOwner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
+      group: { select: { id: true, name: true, slug: true, visibility: true } },
+      images: { orderBy: { sortOrder: 'asc' as const } },
+      hashtags: { include: { hashtag: true } },
+      taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' as const } },
+      comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const } },
+      buddySessionRecap: true,
+      _count: { select: { reposts: true } },
+    } as const;
+  }
+
+  private presentPost(post: any) {
+    const safePost = { ...(post ?? {}) };
+    const repostCount = safePost._count?.reposts ?? 0;
+    delete safePost._count;
+    delete safePost.latitude;
+    delete safePost.longitude;
+    return { ...safePost, repostCount };
   }
 
   private async closeRoomIfOwnersInactive(roomId: string) {

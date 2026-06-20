@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuard
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { BuddyService } from './buddy.service';
-import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, SendBuddySessionMessageDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, BuddySessionRecapQueryDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, SendBuddySessionMessageDto, ShareBuddySessionRecapDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpdateBuddySessionRecapDto, UpsertBuddySessionDto } from './dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('buddy')
@@ -17,8 +17,18 @@ export class BuddyController {
   @Get('nearby') nearby(@CurrentUser() user: AuthUser, @Query() query: NearbyBuddyQueryDto) { return this.buddy.nearby(user.id, query); }
   @Get('discoverable') discoverable(@CurrentUser() user: AuthUser, @Query() query: DiscoverableBuddyQueryDto) { return this.buddy.discoverable(user.id, query); }
 
+  @Get('recaps') recaps(@CurrentUser() user: AuthUser, @Query() query: BuddySessionRecapQueryDto) { return this.buddy.recaps(user.id, query); }
+  @Get('recaps/:id') recap(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.buddy.recap(user.id, id); }
+  @Patch('recaps/:id') updateRecap(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateBuddySessionRecapDto) {
+    return this.buddy.updateRecap(user.id, id, dto);
+  }
+  @Post('recaps/:id/share') shareRecap(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ShareBuddySessionRecapDto) {
+    return this.buddy.shareRecap(user.id, id, dto);
+  }
+
   @Get('rooms') rooms(@CurrentUser() user: AuthUser, @Query() query: BuddyRoomQueryDto) { return this.buddy.rooms(user.id, query); }
   @Get('rooms/:id') room(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.buddy.room(user.id, id); }
+  @Post('rooms/:id/recap') roomRecap(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.buddy.roomRecap(user.id, id); }
   @Post('rooms') createRoom(@CurrentUser() user: AuthUser, @Body() dto: CreateBuddyRoomDto) { return this.buddy.createRoom(user.id, dto); }
   @Patch('rooms/:id') updateRoom(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: UpdateBuddyRoomDto) {
     return this.buddy.updateRoom(user.id, id, dto);

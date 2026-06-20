@@ -1,6 +1,6 @@
 import { Type } from 'class-transformer';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
-import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility } from '@prisma/client';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility, PostVisibility } from '@prisma/client';
 
 export class UpsertBuddySessionDto {
   @IsOptional() @IsString() @MaxLength(60) activity?: string;
@@ -51,6 +51,10 @@ export class BuddyRoomQueryDto {
   @IsOptional() @IsUUID() groupId?: string;
 }
 
+export class BuddySessionRecapQueryDto {
+  @IsOptional() @IsUUID() groupId?: string;
+}
+
 export class JoinBuddyRoomDto {
   @IsOptional() @IsUUID() roomId?: string;
   @IsOptional() @IsString() @MaxLength(24) code?: string;
@@ -89,4 +93,17 @@ export class KickBuddyRoomParticipantDto {
 export class UpdateBuddyRoomParticipantRoleDto {
   @IsIn([BuddyRoomParticipantRole.admin, BuddyRoomParticipantRole.member])
   role!: Exclude<BuddyRoomParticipantRole, 'owner'>;
+}
+
+export class UpdateBuddySessionRecapDto {
+  @IsOptional() @IsString() @MaxLength(100) title?: string;
+  @IsOptional() @IsString() @MaxLength(1000) caption?: string | null;
+  @IsOptional() @IsString() @MaxLength(120) areaLabel?: string | null;
+  @IsOptional() @IsBoolean() includeParticipants?: boolean;
+  @IsOptional() @IsBoolean() includeBroadArea?: boolean;
+  @IsOptional() @IsEnum(PostVisibility) visibility?: PostVisibility;
+}
+
+export class ShareBuddySessionRecapDto extends UpdateBuddySessionRecapDto {
+  @IsOptional() @IsIn(['feed', 'group']) target?: 'feed' | 'group';
 }
