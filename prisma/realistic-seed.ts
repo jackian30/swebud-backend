@@ -1,5 +1,6 @@
 import { ActivityPersona, PrismaClient, ThemePreference } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { ensureSeedMediaAssets, seedAvatarImageUrl, seedCoverImageUrl, seedGroupImageUrl, seedPostImageUrl, seedStoryImageUrl } from './seed-media';
 
 if (!process.env.DATABASE_URL) {
   process.env.DATABASE_URL = 'postgresql://swebud:swebud@localhost:5432/swebud?schema=public';
@@ -30,8 +31,8 @@ const devAccounts = [
     email: 'christopher.ian30.cir@gmail.com',
     username: 'christopherian30cir',
     displayName: 'Christopher Ian',
-    profileImageUrl: 'https://i.pravatar.cc/160?u=swebud-admin-christopher',
-    coverImageUrl: 'https://picsum.photos/seed/swebud-admin-cover/1200/420',
+    profileImageUrl: seedAvatarImageUrl('swebud-admin-christopher'),
+    coverImageUrl: seedCoverImageUrl('swebud-admin-cover'),
     bio: 'Default SweBudd administrator account.',
     storyText: 'Admin QA ActSnap.',
   },
@@ -39,8 +40,8 @@ const devAccounts = [
     email: 'topher@swebud.loc',
     username: 'tophers',
     displayName: 'Topher',
-    profileImageUrl: 'https://i.pravatar.cc/160?u=swebud-topher',
-    coverImageUrl: 'https://picsum.photos/seed/swebud-topher-cover/1200/420',
+    profileImageUrl: seedAvatarImageUrl('swebud-topher'),
+    coverImageUrl: seedCoverImageUrl('swebud-topher-cover'),
     bio: 'Local seeded account for repeatable SweBudd QA.',
     storyText: 'Seeded ActSnap for avatar and feed QA.',
   },
@@ -87,6 +88,7 @@ async function main() {
   const repostTarget = Number(process.env.REALISTIC_SEED_REPOSTS ?? 120);
 
   console.log(`realistic-seed-start run=${RUN_ID}`);
+  await ensureSeedMediaAssets();
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
   const users: { id: string; username: string | null }[] = [];
@@ -100,8 +102,8 @@ async function main() {
         displayName: `${first} ${last}`,
         username,
         bio: `${one(['Runner', 'Lifter', 'Cyclist', 'Weekend warrior', 'Mobility nerd', 'Trying to be consistent'])} around ${one(neighborhoods)}. ${one(['Coffee before cardio.', 'Slow progress still counts.', 'Always down for a group session.', 'Here for accountability.'])}`,
-        profileImageUrl: `https://i.pravatar.cc/160?img=${(i % 70) + 1}`,
-        coverImageUrl: `https://picsum.photos/seed/swebud-cover-${i}/1200/420`,
+        profileImageUrl: seedAvatarImageUrl(`real-user-${i}`),
+        coverImageUrl: seedCoverImageUrl(`swebud-cover-${i}`),
         ...nearManila(),
       },
       create: {
@@ -110,8 +112,8 @@ async function main() {
         displayName: `${first} ${last}`,
         username,
         bio: `${one(['Runner', 'Lifter', 'Cyclist', 'Weekend warrior', 'Mobility nerd', 'Trying to be consistent'])} around ${one(neighborhoods)}.`,
-        profileImageUrl: `https://i.pravatar.cc/160?img=${(i % 70) + 1}`,
-        coverImageUrl: `https://picsum.photos/seed/swebud-cover-${i}/1200/420`,
+        profileImageUrl: seedAvatarImageUrl(`real-user-${i}`),
+        coverImageUrl: seedCoverImageUrl(`swebud-cover-${i}`),
         ...nearManila(),
         theme: { create: { theme: one(['system', 'light', 'dark']) } },
       },
@@ -158,7 +160,7 @@ async function main() {
         authorId: user.id,
         text: account.storyText,
         textPlacement: 'caption',
-        mediaUrl: 'https://picsum.photos/seed/swebud-topher-actsnap/900/1600',
+        mediaUrl: seedStoryImageUrl('swebud-topher-actsnap'),
         mediaType: 'image',
         visibility: 'public',
         expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -184,11 +186,17 @@ async function main() {
     const owner = one(users);
     const group = await prisma.group.upsert({
       where: { slug: `${slug(name)}-real` },
-      update: { description: `${name}. ${one(['Beginner friendly.', 'No ego, just consistency.', 'Post your sessions and invite people.', 'Mostly around Metro Manila.'])}` },
+      update: {
+        description: `${name}. ${one(['Beginner friendly.', 'No ego, just consistency.', 'Post your sessions and invite people.', 'Mostly around Metro Manila.'])}`,
+        profileImageUrl: seedGroupImageUrl(`real-group-${i}`),
+        coverImageUrl: seedCoverImageUrl(`real-group-cover-${i}`),
+      },
       create: {
         name,
         slug: `${slug(name)}-real`,
         description: `${name}. ${one(['Beginner friendly.', 'No ego, just consistency.', 'Post your sessions and invite people.'])}`,
+        profileImageUrl: seedGroupImageUrl(`real-group-${i}`),
+        coverImageUrl: seedCoverImageUrl(`real-group-cover-${i}`),
         visibility: i === 7 ? 'private' : 'public',
         inviteCode: `real${RUN_ID}${i}`,
         members: { create: { userId: owner.id, role: 'owner' } },
@@ -220,7 +228,7 @@ async function main() {
         ...nearManila(),
         viewCount: rand(2200),
         createdAt: recentDate(35),
-        images: imageCount ? { create: Array.from({ length: imageCount }, (_, sortOrder) => ({ url: `https://picsum.photos/seed/real-${RUN_ID}-${i}-${sortOrder}/900/700`, alt: `${one(workoutTypes)} photo`, sortOrder })) } : undefined,
+        images: imageCount ? { create: Array.from({ length: imageCount }, (_, sortOrder) => ({ url: seedPostImageUrl(`real-${RUN_ID}-${i}-${sortOrder}`), alt: `${one(workoutTypes)} photo`, sortOrder })) } : undefined,
         hashtags: { create: chosenTags.map((name) => ({ hashtag: { connectOrCreate: { where: { name }, create: { name } } } })) },
       },
       select: { id: true, authorId: true },

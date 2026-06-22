@@ -1,6 +1,7 @@
 import { faker } from '@faker-js/faker';
 import { PrismaClient, ThemePreference, GroupRole, MessageRequestStatus } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
+import { ensureSeedMediaAssets, seedAvatarImageUrl, seedCoverImageUrl, seedGroupImageUrl, seedPostImageUrl } from './seed-media';
 
 const prisma = new PrismaClient();
 const PASSWORD = 'password';
@@ -27,6 +28,7 @@ function sample<T>(items: T[], count: number) {
 
 async function main() {
   console.log(`🌱 Seeding SweBudd dev data: ${USER_COUNT} users, ${POST_COUNT} posts, ${GROUP_COUNT} groups`);
+  await ensureSeedMediaAssets();
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
   const users = [];
@@ -64,7 +66,7 @@ async function main() {
           `${faker.helpers.arrayElement(['Runner', 'Cyclist', 'Lifter', 'Weekend warrior'])} around Metro Manila.`,
           faker.person.bio(),
         ]),
-        profileImageUrl: faker.image.avatar(),
+        profileImageUrl: seedAvatarImageUrl(`swebud-user-${i}`),
         ...loc,
       },
       create: {
@@ -73,7 +75,7 @@ async function main() {
         passwordHash,
         displayName: `${first} ${last}`,
         bio: `${faker.helpers.arrayElement(['Runner', 'Lifter', 'Cyclist', 'Yoga enjoyer'])}. ${faker.lorem.sentence()}`,
-        profileImageUrl: faker.image.avatar(),
+        profileImageUrl: seedAvatarImageUrl(`swebud-user-${i}`),
         ...loc,
         theme: { create: { theme: faker.helpers.arrayElement(Object.values(ThemePreference)) } },
       },
@@ -103,11 +105,18 @@ async function main() {
     const owner = faker.helpers.arrayElement(users);
     const group = await prisma.group.upsert({
       where: { slug },
-      update: { name: baseName, description: faker.lorem.sentence() },
+      update: {
+        name: baseName,
+        description: faker.lorem.sentence(),
+        profileImageUrl: seedGroupImageUrl(slug),
+        coverImageUrl: seedCoverImageUrl(`group-${slug}`),
+      },
       create: {
         name: baseName,
         slug,
         description: faker.lorem.sentence(),
+        profileImageUrl: seedGroupImageUrl(slug),
+        coverImageUrl: seedCoverImageUrl(`group-${slug}`),
         members: { create: { userId: owner.id, role: GroupRole.owner } },
       },
     });
@@ -143,7 +152,7 @@ async function main() {
         createdAt: faker.date.recent({ days: 30 }),
         images: {
           create: Array.from({ length: imageCount }, (_, sortOrder) => ({
-            url: `https://picsum.photos/seed/swebud-${i}-${sortOrder}/900/700`,
+            url: seedPostImageUrl(`swebud-${i}-${sortOrder}`),
             alt: faker.helpers.arrayElement(['Workout photo', 'Training snapshot', 'Salute check']),
             sortOrder,
           })),

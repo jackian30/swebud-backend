@@ -1,6 +1,6 @@
 {
   "name": "swebudd-backend",
-  "version": "0.2.39-beta",
+  "version": "0.2.40-beta",
   "private": true,
   "description": "SweBudd NestJS backend",
   "scripts": {
@@ -32,7 +32,7 @@
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "helmet": "^8.0.0",
-    "nodemailer": "^8.0.7",
+    "nodemailer": "^9.0.1",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "prisma": "^6.19.3",
@@ -67,7 +67,7 @@
     "typescript": "^5.7.2"
   },
   "overrides": {
-    "multer": "^2.1.1",
+    "multer": "^2.2.0",
     "lodash": "^4.18.1"
   }
 }

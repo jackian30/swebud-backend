@@ -39,7 +39,7 @@ case "$MODE" in
     ;;
 esac
 
-docker compose -p "$PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build "${SERVICES[@]}"
+docker compose -p "$PROJECT" --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d --build --remove-orphans "${SERVICES[@]}"
 
 echo "SweBudd stack is starting:"
 echo "- Mode:               $MODE_LABEL"
