@@ -456,6 +456,122 @@ describe('BuddyService', () => {
     }));
   });
 
+  it('rejects regular members changing the shared session pin', async () => {
+    const room = {
+      id: 'room-1',
+      name: 'Sunday run',
+      scope: 'public',
+      visibility: BuddySessionVisibility.public,
+      code: 'ABC123',
+      groupId: null,
+      group: null,
+      creatorId: 'creator-1',
+      creator: { id: 'creator-1', displayName: 'Creator', username: 'creator', profileImageUrl: null },
+      participants: [{
+        userId,
+        role: BuddyRoomParticipantRole.member,
+        joinedAt: new Date(),
+        lastActivityAt: new Date(),
+        leftAt: null,
+        kickedAt: null,
+        user: { id: userId, username: 'fitmaster' },
+      }],
+      sessions: [],
+      activity: 'walking',
+      subActivity: null,
+      pinnedLatitude: 14.61,
+      pinnedLongitude: 121.03,
+      pinnedLabel: 'Shared Start',
+      pinnedById: 'creator-1',
+      pinnedAt: new Date('2026-06-16T09:30:00.000Z'),
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date('2026-05-23T00:00:00.000Z'),
+      _count: { sessions: 1 },
+    };
+    prisma.buddyRoom.findUnique = jest.fn().mockResolvedValue(room);
+    service = new BuddyService(prisma, moduleRef() as any);
+
+    await expect(service.pinRoomLocation(userId, 'room-1', { latitude: 14.62, longitude: 121.04 }))
+      .rejects.toThrow('Only session owners and admins can pin a session location.');
+    await expect(service.clearRoomPinnedLocation(userId, 'room-1'))
+      .rejects.toThrow('Only session owners and admins can clear a pinned session location.');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('lets an active participant set a personal pin without moving the shared destination', async () => {
+    const realtime = { emitToUser: jest.fn() };
+    const room = {
+      id: 'room-1',
+      name: 'Sunday run',
+      scope: 'public',
+      visibility: BuddySessionVisibility.public,
+      code: 'ABC123',
+      groupId: null,
+      group: null,
+      creatorId: 'creator-1',
+      creator: { id: 'creator-1', displayName: 'Creator', username: 'creator', profileImageUrl: null },
+      participants: [{
+        userId,
+        role: BuddyRoomParticipantRole.member,
+        joinedAt: new Date(),
+        lastActivityAt: new Date(),
+        leftAt: null,
+        kickedAt: null,
+        personalPinLatitude: null,
+        personalPinLongitude: null,
+        personalPinLabel: null,
+        personalPinAt: null,
+        user: { id: userId, username: 'fitmaster' },
+      }],
+      sessions: [],
+      activity: 'walking',
+      subActivity: null,
+      pinnedLatitude: 14.61,
+      pinnedLongitude: 121.03,
+      pinnedLabel: 'Shared Start',
+      pinnedById: 'creator-1',
+      pinnedAt: new Date('2026-06-16T09:30:00.000Z'),
+      expiresAt: new Date(Date.now() + 60_000),
+      createdAt: new Date('2026-05-23T00:00:00.000Z'),
+      _count: { sessions: 1 },
+    };
+    const personalPinAt = new Date('2026-06-29T10:30:00.000Z');
+    prisma.buddyRoom.findUniqueOrThrow = jest.fn().mockResolvedValue({
+      ...room,
+      participants: [{
+        ...room.participants[0],
+        personalPinLatitude: 14.62,
+        personalPinLongitude: 121.04,
+        personalPinLabel: 'My water stop',
+        personalPinAt,
+      }],
+    });
+    prisma.buddyRoomParticipant = { update: jest.fn().mockResolvedValue({ role: BuddyRoomParticipantRole.member }) };
+    prisma.buddySession = {
+      findFirst: jest.fn().mockResolvedValue({ id: 'session-1' }),
+      findMany: jest.fn().mockResolvedValue([{ userId }, { userId: 'user-2' }]),
+    };
+    service = new BuddyService(prisma, moduleRef(realtime) as any);
+
+    const updated = await service.pinRoomPersonalLocation(userId, 'room-1', { latitude: 14.62, longitude: 121.04, label: 'My water stop' });
+
+    expect(updated.pinnedLocation).toEqual(expect.objectContaining({ latitude: 14.61, longitude: 121.03, label: 'Shared Start' }));
+    expect(updated.participants[0].personalPin).toEqual(expect.objectContaining({ latitude: 14.62, longitude: 121.04, label: 'My water stop' }));
+    expect(prisma.buddyRoomParticipant.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { roomId_userId: { roomId: 'room-1', userId } },
+      data: expect.objectContaining({ personalPinLatitude: 14.62, personalPinLongitude: 121.04, personalPinLabel: 'My water stop' }),
+    }));
+    expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-updated', expect.objectContaining({
+      roomId: 'room-1',
+      room: expect.objectContaining({
+        pinnedLocation: expect.objectContaining({ latitude: 14.61, longitude: 121.03 }),
+        participants: expect.arrayContaining([
+          expect.objectContaining({ personalPin: expect.objectContaining({ latitude: 14.62, longitude: 121.04 }) }),
+        ]),
+      }),
+    }));
+  });
+
   it('lets a room admin change the session activity and updates active room sessions', async () => {
     const realtime = { emitToUser: jest.fn() };
     const room = {

@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, UseGuard
 import { JwtAuthGuard } from '../auth/jwt.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { BuddyService } from './buddy.service';
-import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, BuddySessionRecapQueryDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, SendBuddySessionMessageDto, ShareBuddySessionRecapDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpdateBuddySessionRecapDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, BuddySessionRecapQueryDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, PinBuddyRoomPersonalLocationDto, SendBuddySessionMessageDto, ShareBuddySessionRecapDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpdateBuddySessionRecapDto, UpsertBuddySessionDto } from './dto';
 
 @UseGuards(JwtAuthGuard)
 @Controller('buddy')
@@ -46,6 +46,12 @@ export class BuddyController {
   }
   @Delete('rooms/:id/pinned-location') clearRoomPinnedLocation(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.buddy.clearRoomPinnedLocation(user.id, id);
+  }
+  @Patch('rooms/:id/personal-pin') pinRoomPersonalLocation(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: PinBuddyRoomPersonalLocationDto) {
+    return this.buddy.pinRoomPersonalLocation(user.id, id, dto);
+  }
+  @Delete('rooms/:id/personal-pin') clearRoomPersonalLocation(@CurrentUser() user: AuthUser, @Param('id') id: string) {
+    return this.buddy.clearRoomPersonalLocation(user.id, id);
   }
   @Get('rooms/:id/messages') roomMessages(@CurrentUser() user: AuthUser, @Param('id') id: string) {
     return this.buddy.roomMessages(user.id, id);

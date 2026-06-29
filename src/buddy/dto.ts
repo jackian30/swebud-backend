@@ -68,6 +68,12 @@ export class PinBuddyRoomLocationDto {
   @IsOptional() @IsString() @MaxLength(80) label?: string;
 }
 
+export class PinBuddyRoomPersonalLocationDto {
+  @IsNumber() @Min(-90) @Max(90) latitude!: number;
+  @IsNumber() @Min(-180) @Max(180) longitude!: number;
+  @IsOptional() @IsString() @MaxLength(80) label?: string;
+}
+
 export class InviteBuddyRoomDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @IsUUID(undefined, { each: true }) recipientIds!: string[];
   @IsOptional() @IsString() @MaxLength(1000) inviteUrl?: string;

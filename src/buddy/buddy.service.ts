@@ -3,7 +3,7 @@ import { ModuleRef } from '@nestjs/core';
 import { randomBytes } from 'crypto';
 import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionMessageKind, BuddySessionScope, BuddySessionVisibility, PostVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, BuddySessionRecapQueryDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, SendBuddySessionMessageDto, ShareBuddySessionRecapDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpdateBuddySessionRecapDto, UpsertBuddySessionDto } from './dto';
+import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, BuddySessionRecapQueryDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, PinBuddyRoomPersonalLocationDto, SendBuddySessionMessageDto, ShareBuddySessionRecapDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpdateBuddySessionRecapDto, UpsertBuddySessionDto } from './dto';
 import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/activity-personas';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
 
@@ -410,6 +410,53 @@ export class BuddyService {
     });
     const room = this.toRoom(updated, this.canRevealRoomCode(userId, updated));
     await this.emitRoomPinnedLocation(roomId, room).catch(() => undefined);
+    return room;
+  }
+
+  async pinRoomPersonalLocation(userId: string, roomId: string, dto: PinBuddyRoomPersonalLocationDto) {
+    await this.ensureActiveRoomParticipant(userId, roomId);
+    const personalPinAt = new Date();
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.buddyRoomParticipant.update({
+        where: { roomId_userId: { roomId, userId } },
+        data: {
+          personalPinLatitude: dto.latitude,
+          personalPinLongitude: dto.longitude,
+          personalPinLabel: dto.label?.trim() || null,
+          personalPinAt,
+        },
+      });
+      await this.touchRoomParticipantActivity(tx, roomId, userId, personalPinAt);
+      return tx.buddyRoom.findUniqueOrThrow({
+        where: { id: roomId },
+        include: this.roomInclude(),
+      });
+    });
+    const room = this.toRoom(updated, this.canRevealRoomCode(userId, updated));
+    await this.emitRoomUpdated(roomId, room).catch(() => undefined);
+    return room;
+  }
+
+  async clearRoomPersonalLocation(userId: string, roomId: string) {
+    await this.ensureActiveRoomParticipant(userId, roomId);
+    const updated = await this.prisma.$transaction(async (tx) => {
+      await tx.buddyRoomParticipant.update({
+        where: { roomId_userId: { roomId, userId } },
+        data: {
+          personalPinLatitude: null,
+          personalPinLongitude: null,
+          personalPinLabel: null,
+          personalPinAt: null,
+        },
+      });
+      await this.touchRoomParticipantActivity(tx, roomId, userId);
+      return tx.buddyRoom.findUniqueOrThrow({
+        where: { id: roomId },
+        include: this.roomInclude(),
+      });
+    });
+    const room = this.toRoom(updated, this.canRevealRoomCode(userId, updated));
+    await this.emitRoomUpdated(roomId, room).catch(() => undefined);
     return room;
   }
 
@@ -1616,6 +1663,7 @@ export class BuddyService {
       lastActivityAt: participant.lastActivityAt,
       leftAt: participant.leftAt,
       kickedAt: participant.kickedAt,
+      personalPin: this.toPersonalPin(participant),
       user: participant.user ? this.toBuddyUser(participant.user) : null,
     };
   }
@@ -1628,6 +1676,16 @@ export class BuddyService {
       label: room.pinnedLabel ?? null,
       pinnedById: room.pinnedById ?? null,
       pinnedAt: room.pinnedAt ?? null,
+    };
+  }
+
+  private toPersonalPin(participant: any) {
+    if (typeof participant.personalPinLatitude !== 'number' || typeof participant.personalPinLongitude !== 'number') return null;
+    return {
+      latitude: participant.personalPinLatitude,
+      longitude: participant.personalPinLongitude,
+      label: participant.personalPinLabel ?? null,
+      pinnedAt: participant.personalPinAt ?? null,
     };
   }
 
@@ -1718,6 +1776,10 @@ export class BuddyService {
           lastActivityAt: true,
           leftAt: true,
           kickedAt: true,
+          personalPinLatitude: true,
+          personalPinLongitude: true,
+          personalPinLabel: true,
+          personalPinAt: true,
           user: { select: this.buddyUserSelect() },
         },
       },
