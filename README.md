@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.40-beta**
+Current release: **0.2.41-beta**
 
 ## Stack
 
@@ -34,12 +34,12 @@ Current release: **0.2.40-beta**
 
 ## Current beta notes
 
-0.2.40-beta focuses on local seed-media reliability and deployment cleanup:
+0.2.41-beta adds Buddy Room personal pins while preserving shared session pin controls:
 
-- Generates deterministic local SVG seed media under `/uploads/seed-media`.
-- Removes flaky Picsum/Unsplash dependencies from seeded post, cover, story, and group media.
-- Keeps local seeded data usable offline and stable across browser/feed cache refreshes.
-- Runs Docker deployment with orphan cleanup so stale containers do not linger.
+- Personal pins are scoped to the current user by default.
+- Shared room pins remain explicit and guarded by owner/moderator/admin checks.
+- Personal and shared pins are stored separately so clients can render them independently.
+- Buddy room pin APIs return the isolated pin state needed by the frontend map.
 
 ## Tags and discovery
 
@@ -478,8 +478,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.40-beta -m "v0.2.40-beta"
-git push origin v0.2.40-beta
+git tag -a v0.2.41-beta -m "v0.2.41-beta"
+git push origin v0.2.41-beta
 ```
 
 ## Beta caveats
@@ -487,4 +487,4 @@ git push origin v0.2.40-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally. Production email uses SMTP env settings through Nodemailer.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.40-beta flows, but production release still needs broader end-to-end coverage.
+- Backend unit/API coverage is in place for current 0.2.41-beta flows, but production release still needs broader end-to-end coverage.
