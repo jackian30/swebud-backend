@@ -348,7 +348,7 @@ export class BuddyService {
       select: this.inviteUserSelect(),
     });
     if (recipients.length !== recipientIds.length) throw new ForbiddenException('One or more people cannot be invited to this buddy session.');
-    const body = this.inviteMessage(room);
+    const body = this.inviteMessage(room, dto.message);
     const messages = [];
     for (const recipient of recipients) {
       messages.push(await this.prisma.message.create({
@@ -1469,13 +1469,15 @@ export class BuddyService {
     return { AND: filters };
   }
 
-  private inviteMessage(room: any) {
+  private inviteMessage(room: any, message?: string) {
     const groupContext = room.scope === BuddySessionScope.group && room.group?.name ? ` in ${room.group.name}` : '';
     const lines = [
       `You're invited to join "${room.name}"${groupContext} on SweBudd.`,
       `Room: ${room.id}`,
       `Code: ${room.code}`,
     ];
+    const note = message?.trim();
+    if (note) lines.unshift(note, '');
     return lines.join('\n');
   }
 

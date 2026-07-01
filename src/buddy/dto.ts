@@ -77,6 +77,7 @@ export class PinBuddyRoomPersonalLocationDto {
 export class InviteBuddyRoomDto {
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @IsUUID(undefined, { each: true }) recipientIds!: string[];
   @IsOptional() @IsString() @MaxLength(1000) inviteUrl?: string;
+  @IsOptional() @IsString() @MaxLength(500) message?: string;
 }
 
 export class SendBuddySessionMessageDto {
