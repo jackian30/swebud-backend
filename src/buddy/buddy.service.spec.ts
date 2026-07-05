@@ -15,6 +15,7 @@ describe('BuddyService', () => {
         findUnique: jest.fn().mockResolvedValue(null),
         findFirst: jest.fn().mockResolvedValue(null),
         findMany: jest.fn().mockResolvedValue([]),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         delete: jest.fn().mockResolvedValue({}),
         deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({
@@ -450,6 +451,15 @@ describe('BuddyService', () => {
       where: { id: 'room-1' },
       data: expect.objectContaining({ pinnedLatitude: 14.61, pinnedLongitude: 121.03, pinnedById: userId }),
     }));
+    expect(prisma.buddyRoomParticipant.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { roomId_userId: { roomId: 'room-1', userId } },
+      data: expect.objectContaining({
+        personalPinLatitude: null,
+        personalPinLongitude: null,
+        personalPinLabel: null,
+        personalPinAt: null,
+      }),
+    }));
     expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-pinned-location', expect.objectContaining({
       roomId: 'room-1',
       room: expect.objectContaining({ pinnedLocation: expect.objectContaining({ latitude: 14.61, longitude: 121.03 }) }),
@@ -561,6 +571,16 @@ describe('BuddyService', () => {
       where: { roomId_userId: { roomId: 'room-1', userId } },
       data: expect.objectContaining({ personalPinLatitude: 14.62, personalPinLongitude: 121.04, personalPinLabel: 'My water stop' }),
     }));
+    expect(prisma.buddyRoom.updateMany).toHaveBeenCalledWith({
+      where: { id: 'room-1', pinnedById: userId },
+      data: expect.objectContaining({
+        pinnedLatitude: null,
+        pinnedLongitude: null,
+        pinnedLabel: null,
+        pinnedById: null,
+        pinnedAt: null,
+      }),
+    });
     expect(realtime.emitToUser).toHaveBeenCalledWith('user-2', 'buddy:room-updated', expect.objectContaining({
       roomId: 'room-1',
       room: expect.objectContaining({

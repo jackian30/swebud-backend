@@ -378,7 +378,12 @@ export class BuddyService {
           pinnedAt,
         },
       });
-      await this.touchRoomParticipantActivity(tx, roomId, userId, pinnedAt);
+      await this.touchRoomParticipantActivity(tx, roomId, userId, pinnedAt, {
+        personalPinLatitude: null,
+        personalPinLongitude: null,
+        personalPinLabel: null,
+        personalPinAt: null,
+      });
       return tx.buddyRoom.findUniqueOrThrow({
         where: { id: roomId },
         include: this.roomInclude(),
@@ -424,6 +429,16 @@ export class BuddyService {
           personalPinLongitude: dto.longitude,
           personalPinLabel: dto.label?.trim() || null,
           personalPinAt,
+        },
+      });
+      await tx.buddyRoom.updateMany({
+        where: { id: roomId, pinnedById: userId },
+        data: {
+          pinnedLatitude: null,
+          pinnedLongitude: null,
+          pinnedLabel: null,
+          pinnedById: null,
+          pinnedAt: null,
         },
       });
       await this.touchRoomParticipantActivity(tx, roomId, userId, personalPinAt);
@@ -1518,10 +1533,10 @@ export class BuddyService {
     return this.isRoomOwnerRole(role);
   }
 
-  private async touchRoomParticipantActivity(db: any, roomId: string, userId: string, at = new Date()) {
+  private async touchRoomParticipantActivity(db: any, roomId: string, userId: string, at = new Date(), data: Record<string, unknown> = {}) {
     const participant = await db.buddyRoomParticipant.update({
       where: { roomId_userId: { roomId, userId } },
-      data: { lastActivityAt: at },
+      data: { ...data, lastActivityAt: at },
       select: { role: true },
     }).catch(() => null);
     if (participant && this.isRoomOwnerRole(participant.role)) {
