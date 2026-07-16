@@ -73,6 +73,15 @@ fi
 for key in CLOUDFLARE_TURNSTILE_SECRET_KEY MEDIA_S3_BUCKET MEDIA_PUBLIC_BASE_URL AWS_S3_ENDPOINT MAIL_FROM; do
   grep -A1 -- "- key: $key" "$SCRIPT_DIR/../render.yaml" | grep -q 'sync: false'
 done
+# Browser origins are public, non-secret deployment values. Keep the deployed
+# Cloudflare origin pinned and explicitly clear the unused admin origin so an
+# existing Render service cannot retain a historical localhost value.
+grep -A1 -- '- key: FRONTEND_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://swebudd.com'
+grep -A1 -- '- key: ADMIN_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: ""'
+if sed -n '/- key: FRONTEND_ORIGIN/,+1p; /- key: ADMIN_ORIGIN/,+1p' "$SCRIPT_DIR/../render.yaml" | grep -q 'localhost'; then
+  echo "Render blueprint configures a public browser origin as localhost." >&2
+  exit 1
+fi
 grep -A1 -- '- key: NATIVE_AUTH_ENABLED' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "true"'
 grep -A1 -- '- key: NATIVE_APP_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://localhost'
 

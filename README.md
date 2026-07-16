@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.44-beta**
+Current release: **0.2.45-beta**
 
 ## Stack
 
@@ -34,7 +34,10 @@ Current release: **0.2.44-beta**
 
 ## Current beta notes
 
-0.2.44-beta completes the security and contract hardening pass:
+0.2.45-beta keeps the security and contract hardening from 0.2.44-beta and fixes the Render production-origin rollout:
+
+- The Render Blueprint pins the public Cloudflare Pages origin to `https://swebudd.com`, explicitly clears the unused admin origin, and reserves `https://localhost` for the Capacitor native origin only.
+- Production startup errors identify the exact browser-origin variable that is invalid without weakening the HTTPS/local-network rejection.
 
 - Google sign-in binds only by the verified Google subject; a matching local email is never auto-linked.
 - Public post/profile presentation removes precise coordinates, raw provider activity payloads, hidden recap fields, and anonymous author identifiers.
@@ -226,13 +229,16 @@ Set these Render environment variables:
 ```text
 DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&connection_limit=3
 DIRECT_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
-FRONTEND_ORIGIN=https://<your-cloudflare-pages-domain>
+FRONTEND_ORIGIN=https://swebudd.com
+ADMIN_ORIGIN=
 ALLOW_LOCAL_ORIGINS=false
 NATIVE_AUTH_ENABLED=true
 NATIVE_APP_ORIGIN=https://localhost
 NODE_ENV=production
 MEDIA_STORAGE_DRIVER=s3
 ```
+
+`FRONTEND_ORIGIN` is the public Cloudflare Pages browser origin. `ADMIN_ORIGIN` is optional and must remain empty while no public admin site exists. `https://localhost` belongs only in `NATIVE_APP_ORIGIN` for the signed Capacitor WebView; putting it in either browser-origin variable intentionally fails production startup. Render ignores `sync: false` variables when updating an existing Blueprint and preserves omitted variables, so the Blueprint pins `FRONTEND_ORIGIN` and explicitly clears `ADMIN_ORIGIN` on sync instead of inheriting an old local value.
 
 Get the Supabase values step by step:
 
@@ -323,12 +329,13 @@ Deployment env should use:
 
 ```text
 FRONTEND_ORIGIN=https://swebudd.com
+ADMIN_ORIGIN=
 API_BASE_URL=https://api.swebudd.com
 GOOGLE_CALLBACK_URL=https://api.swebudd.com/auth/google/callback
 GOOGLE_OAUTH_REDIRECT_URI=https://swebudd.com/auth/google/callback
 ```
 
-For a Netlify-hosted frontend, set `FRONTEND_ORIGIN` to the Netlify production URL and any preview URLs that should be allowed, separated by commas. Set the frontend's `VITE_API_BASE_URL` to this API origin.
+For another hosted frontend, set `FRONTEND_ORIGIN` to its production URL and any preview URLs that should be allowed, separated by commas. Set the frontend's `VITE_API_BASE_URL` to this API origin. Configure `ADMIN_ORIGIN` only after an admin site has a public HTTPS origin.
 
 The current Capacitor Android client uses `NATIVE_AUTH_ENABLED=true` with the exact WebView origin `NATIVE_APP_ORIGIN=https://localhost`. Native clients keep refresh credentials in OS secure storage and send `X-SweBudd-Client: native`; the backend rejects that transport unless both settings match. Native builds must use an absolute HTTPS API origin. Production media should use `MEDIA_STORAGE_DRIVER=s3` plus `MEDIA_PUBLIC_BASE_URL` so native clients receive stable absolute media URLs.
 
@@ -518,8 +525,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.44-beta -m "v0.2.44-beta"
-git push origin v0.2.44-beta
+git tag -a v0.2.45-beta -m "v0.2.45-beta"
+git push origin v0.2.45-beta
 ```
 
 ## Beta caveats

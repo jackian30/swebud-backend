@@ -95,6 +95,14 @@ describe('security helpers', () => {
     }
   });
 
+  it('identifies an invalid optional admin origin without requiring an admin deployment', () => {
+    process.env.NODE_ENV = 'production';
+
+    expect(() => assertProductionConfig(productionConfig({ ADMIN_ORIGIN: '' }))).not.toThrow();
+    expect(() => assertProductionConfig(productionConfig({ ADMIN_ORIGIN: 'https://localhost' })))
+      .toThrow('ADMIN_ORIGIN=https://localhost');
+  });
+
   it('rejects local-origin expansion in production even with a public configured origin', () => {
     process.env.NODE_ENV = 'production';
 

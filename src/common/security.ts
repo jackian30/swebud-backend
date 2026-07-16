@@ -98,14 +98,18 @@ export function assertProductionConfig(config: ConfigService) {
   requiredSecret(config, 'CLOUDFLARE_TURNSTILE_SECRET_KEY', '');
 
   if (allowLocalOrigins(config)) throw new Error('ALLOW_LOCAL_ORIGINS must be false in production.');
-  const publicOrigins = [config.get<string>('FRONTEND_ORIGIN'), config.get<string>('ADMIN_ORIGIN')]
-    .filter(Boolean)
-    .join(',')
-    .split(',')
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  const invalidOrigins = publicOrigins.filter((origin) => !isPublicHttpsOrigin(origin));
-  if (invalidOrigins.length) throw new Error(`FRONTEND_ORIGIN/ADMIN_ORIGIN must use HTTPS in production: ${invalidOrigins.join(', ')}`);
+  const publicOrigins = (['FRONTEND_ORIGIN', 'ADMIN_ORIGIN'] as const).flatMap((key) =>
+    (config.get<string>(key) ?? '')
+      .split(',')
+      .map((origin) => origin.trim())
+      .filter(Boolean)
+      .map((origin) => ({ key, origin })),
+  );
+  const invalidOrigins = publicOrigins.filter(({ origin }) => !isPublicHttpsOrigin(origin));
+  if (invalidOrigins.length) {
+    const invalidValues = invalidOrigins.map(({ key, origin }) => `${key}=${origin}`);
+    throw new Error(`FRONTEND_ORIGIN/ADMIN_ORIGIN must use HTTPS in production: ${invalidValues.join(', ')}`);
+  }
   if (booleanConfig(config, 'NATIVE_AUTH_ENABLED', false)) {
     const nativeOrigin = config.get<string>('NATIVE_APP_ORIGIN')?.trim();
     if (!nativeOrigin) throw new Error('Missing required production env: NATIVE_APP_ORIGIN');

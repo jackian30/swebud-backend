@@ -22,9 +22,9 @@ services:
       - key: JWT_REFRESH_SECRET
         generateValue: true
       - key: FRONTEND_ORIGIN
-        sync: false
+        value: https://swebudd.com
       - key: ADMIN_ORIGIN
-        sync: false
+        value: ""
       - key: ALLOW_LOCAL_ORIGINS
         value: "false"
       - key: NATIVE_AUTH_ENABLED
