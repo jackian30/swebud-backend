@@ -84,6 +84,7 @@ if sed -n '/- key: FRONTEND_ORIGIN/,+1p; /- key: ADMIN_ORIGIN/,+1p' "$SCRIPT_DIR
 fi
 grep -A1 -- '- key: NATIVE_AUTH_ENABLED' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "true"'
 grep -A1 -- '- key: NATIVE_APP_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://localhost'
+node --test "$SCRIPT_DIR/../scripts/render-start.test.js"
 
 # Production validation must inspect shell overrides exactly as Compose does.
 # These cases exit before any Docker operation.
