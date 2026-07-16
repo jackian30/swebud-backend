@@ -20708,7 +20708,7 @@
   "info": {
     "title": "SweBudd API",
     "description": "Authoritative HTTP API contract for SweBudd clients.",
-    "version": "0.2.47-beta",
+    "version": "0.2.48-beta",
     "contact": {}
   },
   "tags": [],

@@ -6,7 +6,7 @@ type MutableEnvironment = Record<string, string | undefined>;
 export function normalizeLegacyRenderBrowserOrigins(
   env: MutableEnvironment = process.env,
 ) {
-  if (env.RENDER !== 'true') return false;
+  if (env.NODE_ENV !== 'production') return false;
 
   let changed = false;
   if (env.FRONTEND_ORIGIN?.trim() === LEGACY_RENDER_LOCAL_ORIGIN) {
