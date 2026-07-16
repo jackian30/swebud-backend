@@ -1,14 +1,15 @@
-import { IsEnum, IsOptional } from 'class-validator';
+import { IsEnum } from 'class-validator';
+import { IsOptionalNonNull } from '../common/validation';
 
 export enum ThemeDtoPreference { system = 'system', light = 'light', dark = 'dark' }
 export enum MapVisualDtoPreference { system = 'system', streets = 'streets', light = 'light', dark = 'dark', satellite = 'satellite' }
 
 export class UpdateThemeDto {
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsEnum(ThemeDtoPreference)
   theme?: ThemeDtoPreference;
 
-  @IsOptional()
+  @IsOptionalNonNull()
   @IsEnum(MapVisualDtoPreference)
   mapVisual?: MapVisualDtoPreference;
 }

@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { BuddyRoomQueryDto, BuddySessionMessageReactionDto, BuddySessionRecapQueryDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, PinBuddyRoomPersonalLocationDto, SendBuddySessionMessageDto, ShareBuddySessionRecapDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpdateBuddySessionRecapDto, UpsertBuddySessionDto } from './dto';
 import { activityPersonaLinkSelect, exposeActivityPersonas } from '../common/activity-personas';
 import { NotificationsGateway } from '../notifications/notifications.gateway';
+import { presentPublicBuddySessionRecap, presentPublicPost, publicBuddySessionRecapSelect } from '../common/post-presentation';
 
 const DEFAULT_TTL_MINUTES = 60;
 const ROOM_OWNER_INACTIVITY_MS = 5 * 60 * 60_000;
@@ -500,15 +501,22 @@ export class BuddyService {
     const joinedMessageUserIds = new Set(messages.filter((message) => message.kind === BuddySessionMessageKind.joined).map((message) => message.senderId));
     const syntheticJoinedMessages = participants
       .filter((participant) => !joinedMessageUserIds.has(participant.userId))
-      .map((participant) => ({
+      .map((participant) => this.toSessionMessage({
         id: `participant:${roomId}:${participant.userId}:joined`,
         roomId,
         senderId: participant.userId,
         kind: BuddySessionMessageKind.joined,
         body: BuddySessionMessageKind.joined,
+        referenceType: null,
+        referenceId: null,
+        referenceText: null,
+        referenceAuthorName: null,
+        deletedAt: null,
+        deletedById: null,
         createdAt: participant.joinedAt,
         sender: participant.user,
-      }));
+        reactions: [],
+      }, readStates));
     return [...messages.map((message) => this.toSessionMessage(message, readStates)), ...syntheticJoinedMessages]
       .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
       .slice(-100);
@@ -548,8 +556,9 @@ export class BuddyService {
   }
 
   async unreactToRoomMessage(userId: string, roomId: string, messageId: string, emoji: string) {
+    const normalizedEmoji = this.allowedReaction(emoji);
     await this.ensureCanAccessRoomMessage(userId, roomId, messageId);
-    await this.prisma.buddySessionMessageReaction.deleteMany({ where: { messageId, userId, emoji } });
+    await this.prisma.buddySessionMessageReaction.deleteMany({ where: { messageId, userId, emoji: normalizedEmoji } });
     await this.touchRoomParticipantActivity(this.prisma, roomId, userId);
     return this.emitUpdatedRoomMessage(roomId, messageId);
   }
@@ -720,7 +729,7 @@ export class BuddyService {
       take: 50,
       include: this.recapInclude(),
     });
-    return recaps.map((recap) => this.toRecap(recap));
+    return recaps.map((recap) => recap.ownerId === userId ? this.toRecap(recap) : presentPublicBuddySessionRecap(recap));
   }
 
   async recap(userId: string, recapId: string) {
@@ -764,14 +773,14 @@ export class BuddyService {
     };
     const post = await this.prisma.post.create({
       data: postData,
-      include: this.postInclude(),
+      include: this.postInclude(userId),
     });
     const shared = await this.prisma.buddySessionRecap.update({
       where: { id: recap.id },
       data: { sharedPostId: post.id, sharedAt: new Date() },
       include: this.recapInclude(),
     });
-    return { recap: this.toRecap(shared), post: this.presentPost(post), target };
+    return { recap: this.toRecap(shared), post: this.presentPost(post, userId), target };
   }
 
   private async createRoomRecap(userId: string, roomId: string) {
@@ -812,7 +821,7 @@ export class BuddyService {
         activity: room.activity,
         subActivity: room.subActivity,
         title,
-        caption: this.defaultRecapCaption(room, participantCount),
+        caption: this.defaultRecapCaption(room),
         participantCount,
         participantPreview,
         areaLabel: room.pinnedLabel ? this.broadAreaLabel(room.pinnedLabel) : null,
@@ -878,11 +887,9 @@ export class BuddyService {
     return room.name?.trim() || DEFAULT_RECAP_TITLE;
   }
 
-  private defaultRecapCaption(room: any, participantCount: number) {
+  private defaultRecapCaption(room: any) {
     const activity = this.titleCase(room.subActivity || room.activity || 'Buddy Session');
-    const buddyText = participantCount === 1 ? 'solo' : `with ${participantCount - 1} ${participantCount - 1 === 1 ? 'buddy' : 'buddies'}`;
-    const groupText = room.group?.name ? ` in ${room.group.name}` : '';
-    return `Finished ${activity} ${buddyText}${groupText}.`;
+    return `Finished ${activity}.`;
   }
 
   private broadAreaLabel(value: string) {
@@ -897,9 +904,9 @@ export class BuddyService {
     const lines = [recap.title || DEFAULT_RECAP_TITLE];
     if (recap.caption) lines.push('', recap.caption);
     lines.push('', `Duration: ${this.formatDuration(recap.durationSeconds)}`);
-    lines.push(`Buddies: ${recap.participantCount ?? 1}`);
     if (recap.includeBroadArea && recap.areaLabel) lines.push(`Area: ${recap.areaLabel}`);
     if (recap.includeParticipants && Array.isArray(recap.participantPreview)) {
+      lines.push(`Buddies: ${recap.participantCount ?? 1}`);
       const names = recap.participantPreview
         .filter((participant: any) => participant.userId !== recap.ownerId)
         .map((participant: any) => participant.username ? `@${participant.username}` : participant.displayName)
@@ -933,7 +940,6 @@ export class BuddyService {
     return {
       owner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       group: { select: { id: true, name: true, slug: true, visibility: true } },
-      sharedPost: { select: { id: true, groupId: true, createdAt: true } },
     } as const;
   }
 
@@ -980,7 +986,6 @@ export class BuddyService {
       includeBroadArea: recap.includeBroadArea,
       visibility: recap.visibility,
       sharedPostId: recap.sharedPostId,
-      sharedPost: recap.sharedPost ?? null,
       sharedAt: recap.sharedAt,
       createdAt: recap.createdAt,
       updatedAt: recap.updatedAt,
@@ -988,7 +993,7 @@ export class BuddyService {
     };
   }
 
-  private postInclude() {
+  private postInclude(userId?: string) {
     return {
       author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       profileOwner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
@@ -997,18 +1002,17 @@ export class BuddyService {
       hashtags: { include: { hashtag: true } },
       taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' as const } },
       comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const } },
-      buddySessionRecap: true,
+      buddySessionRecap: { select: publicBuddySessionRecapSelect },
+      ...(userId ? {
+        likes: { where: { userId }, select: { userId: true } },
+        saves: { where: { userId }, select: { userId: true } },
+      } : {}),
       _count: { select: { reposts: true } },
     } as const;
   }
 
-  private presentPost(post: any) {
-    const safePost = { ...(post ?? {}) };
-    const repostCount = safePost._count?.reposts ?? 0;
-    delete safePost._count;
-    delete safePost.latitude;
-    delete safePost.longitude;
-    return { ...safePost, repostCount };
+  private presentPost(post: any, viewerId?: string) {
+    return presentPublicPost(post, { viewerId });
   }
 
   private async closeRoomIfOwnersInactive(roomId: string) {
@@ -1435,18 +1439,23 @@ export class BuddyService {
     if (dto.referenceType !== 'message' || !dto.referenceId) return {};
     const referenced = await this.prisma.buddySessionMessage.findFirst({
       where: { id: dto.referenceId, roomId, deletedAt: null },
-      select: { id: true },
+      select: {
+        id: true,
+        body: true,
+        sender: { select: { displayName: true, username: true } },
+      },
     });
-    if (!referenced) return {};
+    if (!referenced) throw new BadRequestException('Reply target is no longer available in this buddy session.');
     return {
       referenceType: 'message',
-      referenceId: dto.referenceId.trim(),
-      referenceText: dto.referenceText?.trim() || undefined,
-      referenceAuthorName: dto.referenceAuthorName?.trim() || undefined,
+      referenceId: referenced.id,
+      referenceText: referenced.body.slice(0, 500),
+      referenceAuthorName: (referenced.sender.displayName || referenced.sender.username || '').slice(0, 120) || undefined,
     };
   }
 
   private allowedReaction(emoji: string) {
+    if (typeof emoji !== 'string') throw new BadRequestException('Unsupported reaction');
     const value = emoji.trim();
     const Segmenter = (Intl as typeof Intl & {
       Segmenter: new (locale?: string, options?: { granularity: 'grapheme' }) => {
@@ -1721,7 +1730,10 @@ export class BuddyService {
       deletedById: message.deletedById,
       createdAt: message.createdAt,
       sender: message.sender,
-      reactions: message.reactions ?? [],
+      reactions: (message.reactions ?? []).map((reaction: any) => ({
+        emoji: reaction.emoji,
+        userId: reaction.userId,
+      })),
       readBy: readStates
         .filter((state) => state.userId !== message.senderId && state.lastReadAt >= message.createdAt)
         .map((state) => ({

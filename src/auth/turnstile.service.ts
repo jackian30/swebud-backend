@@ -1,6 +1,5 @@
 import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { allowedOrigins, isLocalOrigin } from '../common/security';
 
 type TurnstileVerifyResponse = {
   success: boolean;
@@ -19,16 +18,16 @@ export class TurnstileService {
     return Boolean(this.secretKey());
   }
 
-  async verify(token?: string, remoteIp?: string, expectedAction?: string, origin?: string | null) {
+  async verify(token?: string, remoteIp?: string, expectedAction?: string, _origin?: string | null) {
     const secret = this.secretKey();
     if (!secret) {
-      if (!this.canSkipMissingSecret(origin)) {
+      if (process.env.NODE_ENV === 'production') {
         throw new ServiceUnavailableException('Security check is not configured');
       }
       return { skipped: true, reason: 'CLOUDFLARE_TURNSTILE_SECRET_KEY is not configured' };
     }
     if (!token) {
-      if (this.canSkipLocalOrNativeOrigin(origin)) {
+      if (process.env.NODE_ENV !== 'production') {
         return { skipped: true, reason: 'Local/native security check skipped' };
       }
       throw new BadRequestException('Please complete the security check before continuing.');
@@ -43,7 +42,9 @@ export class TurnstileService {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
         body,
+        signal: AbortSignal.timeout(10_000),
       });
+      if (!response.ok) throw new Error('Turnstile returned a non-success status');
       payload = await response.json() as TurnstileVerifyResponse;
     } catch {
       throw new ServiceUnavailableException('Captcha verification is temporarily unavailable');
@@ -52,7 +53,7 @@ export class TurnstileService {
     if (!payload.success) {
       throw new BadRequestException({ message: 'Security check failed. Please try again.', codes: payload['error-codes'] ?? [] });
     }
-    if (expectedAction && payload.action && payload.action !== expectedAction) {
+    if (expectedAction && payload.action !== expectedAction) {
       throw new BadRequestException('Security check action mismatch. Please try again.');
     }
     return { skipped: false, hostname: payload.hostname, action: payload.action };
@@ -63,15 +64,4 @@ export class TurnstileService {
     return value && value !== '***' ? value : '';
   }
 
-  private canSkipMissingSecret(origin?: string | null) {
-    if (this.canSkipLocalOrNativeOrigin(origin)) return true;
-    return false;
-  }
-
-  private canSkipLocalOrNativeOrigin(origin?: string | null) {
-    if (process.env.NODE_ENV !== 'production') return true;
-    if (origin && isLocalOrigin(origin)) return true;
-    const origins = allowedOrigins(this.config);
-    return Boolean(origins.length) && origins.every((allowedOrigin) => isLocalOrigin(allowedOrigin));
-  }
 }

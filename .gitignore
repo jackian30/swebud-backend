@@ -6,3 +6,14 @@ dist/
 !deployment/.env.example
 .DS_Store
 npm-debug.log*
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.sqlite
+*.sqlite3
+*.db
+*.dump
+*.sql.gz

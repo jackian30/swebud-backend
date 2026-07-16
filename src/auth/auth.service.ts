@@ -15,8 +15,10 @@ import { activityPersonaLinkSelect, createActivityPersonaLinks, exposeActivityPe
 import { exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
 import { normalizeUsername } from '../common/usernames';
 import * as appRelease from '../common/app-version';
+import { accessTokenTtlSeconds, DEFAULT_REFRESH_TOKEN_TTL_SECONDS, refreshTokenTtlSeconds } from '../common/config';
+import { isAccountBanned } from './account-status';
 
-export const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7;
+export const SESSION_TTL_MS = DEFAULT_REFRESH_TOKEN_TTL_SECONDS * 1000;
 const RESET_TTL_MS = 1000 * 60 * 30;
 
 type SafeUser = {
@@ -27,16 +29,12 @@ type SafeUser = {
   usernameFinalized: boolean;
   bio?: string | null;
   profileImageUrl?: string | null;
-  latitude?: number | null;
-  longitude?: number | null;
   gender?: string | null;
   dateOfBirth?: Date | null;
   activityPersona?: string | null;
   activityPersonas?: Array<ActivityPersona | { persona: ActivityPersona }>;
   legalConsentAt?: Date | null;
   dataConsentAt?: Date | null;
-  googleId?: string | null;
-  googleEmailVerified?: boolean;
   betaUser?: boolean | null;
   hideProfileBadges?: boolean | null;
   moderationStatus?: string | null;
@@ -143,7 +141,14 @@ export class AuthService {
     const email = profile.email.toLowerCase().trim();
     const googleEmailVerified = profile.email_verified === true || profile.email_verified === 'true';
     if (!googleEmailVerified) throw new UnauthorizedException('Google email is not verified');
-    const existing = await this.prisma.user.findFirst({ where: { OR: [{ googleId: profile.sub }, { email }] }, select: this.safeUserSelect() });
+    const existing = await this.prisma.user.findUnique({ where: { googleId: profile.sub }, select: this.safeUserSelect() });
+
+    if (!existing) {
+      const emailOwner = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+      if (emailOwner) {
+        throw new UnauthorizedException('Google sign-in is not linked to this account. Sign in with your existing method.');
+      }
+    }
 
     const user = existing
       ? await this.prisma.user.update({
@@ -171,7 +176,13 @@ export class AuthService {
     return this.issueTokens(user, { metadata });
   }
 
-  async completeOnboarding(userId: string, dto: CompleteOnboardingDto, metadata?: SessionMetadata, loginSessionId?: string | null) {
+  async completeOnboarding(
+    userId: string,
+    dto: CompleteOnboardingDto,
+    metadata?: SessionMetadata,
+    loginSessionId?: string | null,
+    currentSessionId?: string | null,
+  ) {
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException('Username is required');
@@ -179,23 +190,32 @@ export class AuthService {
     if (existing && existing.id !== userId) throw new BadRequestException('Username already taken');
     const now = new Date();
     const activityPersonas = dto.activityPersonas ?? [];
-    const user = await this.prisma.user.update({
-      where: { id: userId },
-      data: {
-        username,
-        usernameFinalized: true,
-        dateOfBirth: dto.dateOfBirth,
-        legalConsentAt: now,
-        dataConsentAt: now,
-        activityPersonas: replaceActivityPersonaLinks(activityPersonas),
-      },
-      select: this.safeUserSelect(),
+    if (!currentSessionId) throw new UnauthorizedException('Session expired');
+    const user = await this.prisma.$transaction(async (tx) => {
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          username,
+          usernameFinalized: true,
+          dateOfBirth: dto.dateOfBirth,
+          legalConsentAt: now,
+          dataConsentAt: now,
+          activityPersonas: replaceActivityPersonaLinks(activityPersonas),
+        },
+        select: this.safeUserSelect(),
+      });
+      const revoked = await tx.refreshToken.updateMany({
+        where: { id: currentSessionId, userId, revokedAt: null },
+        data: { revokedAt: now },
+      });
+      if (revoked.count !== 1) throw new UnauthorizedException('Session expired');
+      return updated;
     });
     return this.issueTokens(user, { metadata, loginSessionId });
   }
 
   async refresh(refreshToken: string, metadata?: SessionMetadata) {
-    const payload = await this.jwt.verifyAsync<{ sub: string; email: string; sid?: string; lid?: string }>(refreshToken, { secret: this.refreshSecret() }).catch(() => null);
+    const payload = await this.jwt.verifyAsync<{ sub: string; sid?: string; lid?: string }>(refreshToken, { secret: this.refreshSecret() }).catch(() => null);
     if (!payload) throw new UnauthorizedException('Invalid refresh token');
 
     const storedTokens = await this.prisma.refreshToken.findMany({
@@ -206,7 +226,11 @@ export class AuthService {
     const match = await this.findMatchingToken(storedTokens, refreshToken);
     if (!match) throw new UnauthorizedException('Invalid refresh token');
 
-    await this.prisma.refreshToken.update({ where: { id: match.id }, data: { revokedAt: new Date() } });
+    const rotated = await this.prisma.refreshToken.updateMany({
+      where: { id: match.id, userId: payload.sub, revokedAt: null, expiresAt: { gt: new Date() } },
+      data: { revokedAt: new Date() },
+    });
+    if (rotated.count !== 1) throw new UnauthorizedException('Invalid refresh token');
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: payload.sub }, select: this.safeUserSelect() });
     this.assertAccountAllowed(user);
     return this.issueTokens(user, { metadata, loginSessionId: match.loginSessionId ?? payload.lid ?? null });
@@ -217,13 +241,15 @@ export class AuthService {
     const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true, email: true } });
     if (!user) return { ok: true };
 
-    const token = randomBytes(32).toString('hex');
+    const selector = randomBytes(16).toString('hex');
+    const secret = randomBytes(32).toString('hex');
+    const token = `${selector}.${secret}`;
     await this.prisma.passwordResetToken.updateMany({
       where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
       data: { usedAt: new Date() },
     });
     await this.prisma.passwordResetToken.create({
-      data: { userId: user.id, tokenHash: await bcrypt.hash(token, 12), expiresAt: new Date(Date.now() + RESET_TTL_MS) },
+      data: { id: selector, userId: user.id, tokenHash: await bcrypt.hash(secret, 12), expiresAt: new Date(Date.now() + RESET_TTL_MS) },
     });
 
     const origin = allowedOrigins(this.config)[0] ?? 'http://localhost:9000';
@@ -233,20 +259,24 @@ export class AuthService {
   }
 
   async resetPassword(token: string, password: string) {
-    const candidates = await this.prisma.passwordResetToken.findMany({
-      where: { usedAt: null, expiresAt: { gt: new Date() } },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-    });
-    const match = await this.findMatchingToken(candidates, token);
-    if (!match) throw new BadRequestException('Invalid or expired reset token');
+    const parsed = this.parseResetToken(token);
+    if (!parsed) throw new BadRequestException('Invalid or expired reset token');
+    const match = await this.prisma.passwordResetToken.findUnique({ where: { id: parsed.selector } });
+    if (!match || match.usedAt || match.expiresAt <= new Date() || !(await bcrypt.compare(parsed.secret, match.tokenHash))) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
 
-    await this.prisma.$transaction([
-      this.prisma.user.update({ where: { id: match.userId }, data: { passwordHash: await bcrypt.hash(password, 12) } }),
-      this.prisma.passwordResetToken.update({ where: { id: match.id }, data: { usedAt: new Date() } }),
-      this.prisma.refreshToken.updateMany({ where: { userId: match.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-      this.prisma.loginSession.updateMany({ where: { userId: match.userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-    ]);
+    const passwordHash = await bcrypt.hash(password, 12);
+    await this.prisma.$transaction(async (tx) => {
+      const claimed = await tx.passwordResetToken.updateMany({
+        where: { id: match.id, usedAt: null, expiresAt: { gt: new Date() } },
+        data: { usedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw new BadRequestException('Invalid or expired reset token');
+      await tx.user.update({ where: { id: match.userId }, data: { passwordHash } });
+      await tx.refreshToken.updateMany({ where: { userId: match.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      await tx.loginSession.updateMany({ where: { userId: match.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    });
     return { ok: true };
   }
 
@@ -272,11 +302,12 @@ export class AuthService {
   private async issueTokens(user: SafeUser, options: TokenIssueOptions = {}) {
     const onboarding = this.onboardingStatus(user);
     const sessionId = randomBytes(16).toString('hex');
-    const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+    const refreshTtlSeconds = refreshTokenTtlSeconds(this.config);
+    const expiresAt = new Date(Date.now() + refreshTtlSeconds * 1000);
     const loginSessionId = await this.ensureLoginSession(user.id, expiresAt, options);
-    const tokenPayload = { sub: user.id, email: user.email, sid: sessionId, lid: loginSessionId, onboarded: !onboarding.requiresOnboarding };
-    const accessToken = await this.jwt.signAsync(tokenPayload, { secret: this.accessSecret(), expiresIn: '30d' });
-    const refreshToken = await this.jwt.signAsync(tokenPayload, { secret: this.refreshSecret(), expiresIn: '30d' });
+    const tokenPayload = { sub: user.id, sid: sessionId, lid: loginSessionId, onboarded: !onboarding.requiresOnboarding };
+    const accessToken = await this.jwt.signAsync(tokenPayload, { secret: this.accessSecret(), expiresIn: accessTokenTtlSeconds(this.config) });
+    const refreshToken = await this.jwt.signAsync(tokenPayload, { secret: this.refreshSecret(), expiresIn: refreshTtlSeconds });
     await this.prisma.refreshToken.create({
       data: {
         id: sessionId,
@@ -286,8 +317,32 @@ export class AuthService {
         expiresAt,
       },
     });
+    return {
+      user: this.presentAuthUser(user, onboarding),
+      accessToken,
+      refreshToken,
+      ...onboarding,
+    };
+  }
+
+  private presentAuthUser(user: SafeUser, onboarding: ReturnType<AuthService['onboardingStatus']>) {
     const normalizedUser = exposeProfileBadges(exposeActivityPersonas(user));
-    return { user: { ...normalizedUser, ...onboarding }, accessToken, refreshToken, ...onboarding };
+    return {
+      id: normalizedUser.id,
+      email: normalizedUser.email,
+      displayName: normalizedUser.displayName,
+      username: normalizedUser.username,
+      usernameFinalized: normalizedUser.usernameFinalized,
+      bio: normalizedUser.bio,
+      profileImageUrl: normalizedUser.profileImageUrl,
+      gender: normalizedUser.gender,
+      dateOfBirth: normalizedUser.dateOfBirth,
+      activityPersona: normalizedUser.activityPersona,
+      activityPersonas: normalizedUser.activityPersonas,
+      hideProfileBadges: normalizedUser.hideProfileBadges,
+      badges: normalizedUser.badges,
+      onboardingComplete: !onboarding.requiresOnboarding,
+    };
   }
 
   private async ensureLoginSession(userId: string, expiresAt: Date, options: TokenIssueOptions) {
@@ -335,12 +390,13 @@ export class AuthService {
   }
 
   private isBanned(user: SafeUser) {
-    if (user.moderationStatus !== 'banned' && !user.bannedAt) return false;
-    return !user.bannedUntil || user.bannedUntil.getTime() > Date.now();
+    return isAccountBanned(user);
   }
 
   private async verifyGoogleIdToken(idToken: string): Promise<GoogleTokenInfo> {
-    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`).catch(() => null);
+    const response = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(idToken)}`, {
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
     if (!response?.ok) throw new UnauthorizedException('Invalid Google token');
     const profile = await response.json() as GoogleTokenInfo;
     if (!profile.sub || !profile.email) throw new UnauthorizedException('Invalid Google token');
@@ -369,6 +425,11 @@ export class AuthService {
     return null;
   }
 
+  private parseResetToken(token: string) {
+    const match = /^([a-f0-9]{32})\.([a-f0-9]{64})$/i.exec(token.trim());
+    return match ? { selector: match[1].toLowerCase(), secret: match[2].toLowerCase() } : null;
+  }
+
   private accessSecret() { return requiredSecret(this.config, 'JWT_SECRET', 'dev-secret'); }
   private refreshSecret() { return requiredSecret(this.config, 'JWT_REFRESH_SECRET', 'dev-refresh-secret'); }
   private shouldAssignBetaUser() {
@@ -383,7 +444,7 @@ export class AuthService {
       badges: betaUser ? { create: { badge: { connect: { id: 'badge_beta_user' } }, note: 'Auto-assigned during beta release' } } : undefined,
     };
   }
-  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, latitude: true, longitude: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, googleId: true, googleEmailVerified: true, betaUser: true, hideProfileBadges: true, moderationStatus: true, bannedAt: true, bannedUntil: true, banReason: true, badges: { select: profileBadgeSelect } } as const; }
+  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, betaUser: true, hideProfileBadges: true, moderationStatus: true, bannedAt: true, bannedUntil: true, banReason: true, badges: { select: profileBadgeSelect } } as const; }
 }
 
 export function sessionMetadataFromRequest(req: Request): SessionMetadata {

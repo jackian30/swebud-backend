@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { BuddyDiscoveryAudience, BuddyRoomParticipantRole, BuddySessionVisibility } from '@prisma/client';
 import { BuddyService } from './buddy.service';
 
@@ -34,6 +35,134 @@ describe('BuddyService', () => {
     service = new BuddyService(prisma, moduleRef() as any);
   });
 
+  it('keeps generated recap defaults and shared post text privacy-neutral', () => {
+    const hiddenRecap = {
+      ownerId: userId,
+      title: 'Sunday Run recap',
+      caption: (service as any).defaultRecapCaption({
+        activity: 'running',
+        group: { name: 'Private Runners' },
+      }),
+      durationSeconds: 3600,
+      participantCount: 4,
+      participantPreview: [
+        { userId, username: 'fitmaster' },
+        { userId: 'buddy-2', username: 'secretbuddy' },
+      ],
+      includeParticipants: false,
+      includeBroadArea: false,
+    };
+
+    expect(hiddenRecap.caption).toBe('Finished Running.');
+    expect((service as any).recapPostText(hiddenRecap)).toBe([
+      'Sunday Run recap',
+      '',
+      'Finished Running.',
+      '',
+      'Duration: 1h',
+      '',
+      '#BuddySession',
+    ].join('\n'));
+
+    const visibleText = (service as any).recapPostText({
+      ...hiddenRecap,
+      includeParticipants: true,
+    });
+    expect(visibleText).toContain('Buddies: 4');
+    expect(visibleText).toContain('With: @secretbuddy');
+  });
+
+  it('normalizes synthetic joined messages to the persisted message response shape', async () => {
+    const joinedAt = new Date('2026-07-16T10:00:00.000Z');
+    prisma.buddySession = { findFirst: jest.fn().mockResolvedValue({ id: 'session-1' }) };
+    prisma.buddySessionMessage = { findMany: jest.fn().mockResolvedValue([]) };
+    prisma.buddyRoomParticipant = {
+      findMany: jest.fn().mockResolvedValue([{
+        userId,
+        joinedAt,
+        user: { id: userId, displayName: 'Fit Master', username: 'fitmaster', profileImageUrl: null },
+      }]),
+    };
+    prisma.buddySessionReadState = { findMany: jest.fn().mockResolvedValue([]) };
+
+    await expect(service.roomMessages(userId, 'room-1')).resolves.toEqual([{
+      id: `participant:room-1:${userId}:joined`,
+      roomId: 'room-1',
+      senderId: userId,
+      kind: 'joined',
+      body: 'joined',
+      referenceType: null,
+      referenceId: null,
+      referenceText: null,
+      referenceAuthorName: null,
+      deletedAt: null,
+      deletedById: null,
+      createdAt: joinedAt,
+      sender: { id: userId, displayName: 'Fit Master', username: 'fitmaster', profileImageUrl: null },
+      reactions: [],
+      readBy: [],
+    }]);
+  });
+
+  it('does not expose buddy-session reaction persistence fields', () => {
+    const response = (service as any).toSessionMessage({
+      id: 'message-1',
+      roomId: 'room-1',
+      senderId: userId,
+      kind: 'text',
+      body: 'hello',
+      createdAt: new Date('2026-07-16T10:00:00.000Z'),
+      sender: { id: userId },
+      reactions: [{ id: 'reaction-1', messageId: 'message-1', userId, emoji: '👍', createdAt: new Date() }],
+    });
+
+    expect(response.reactions).toEqual([{ userId, emoji: '👍' }]);
+  });
+
+  it('uses sharedPostId without embedding a partial post in owner recaps', () => {
+    const response = (service as any).toRecap({
+      id: 'recap-1',
+      ownerId: userId,
+      roomId: 'room-1',
+      participantPreview: [],
+      sharedPostId: 'post-1',
+      sharedPost: { id: 'post-1', groupId: null, createdAt: new Date() },
+    });
+
+    expect(response.sharedPostId).toBe('post-1');
+    expect(response).not.toHaveProperty('sharedPost');
+  });
+
+  it('derives buddy-session reply previews from the target message', async () => {
+    prisma.buddySessionMessage = {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'message-original',
+        body: 'Authoritative text',
+        sender: { displayName: 'Real Author', username: 'real-author' },
+      }),
+    };
+
+    await expect((service as any).roomMessageReferenceData('room-1', {
+      referenceType: 'message',
+      referenceId: 'message-original',
+      referenceText: 'Spoofed text',
+      referenceAuthorName: 'Spoofed author',
+    })).resolves.toEqual({
+      referenceType: 'message',
+      referenceId: 'message-original',
+      referenceText: 'Authoritative text',
+      referenceAuthorName: 'Real Author',
+    });
+  });
+
+  it('rejects a missing unreact emoji before a broad reaction delete can run', async () => {
+    prisma.buddySessionMessageReaction = { deleteMany: jest.fn() };
+
+    await expect(service.unreactToRoomMessage(userId, 'room-1', 'message-1', undefined as any)).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(prisma.buddySessionMessageReaction.deleteMany).not.toHaveBeenCalled();
+  });
+
   it('defaults a blank buddy session name to the creator username', async () => {
     const room = await service.createRoom(userId, { name: '   ', visibility: BuddySessionVisibility.private });
 
@@ -51,6 +180,14 @@ describe('BuddyService', () => {
     expect(prisma.user.findUnique).not.toHaveBeenCalled();
     expect(prisma.buddyRoom.create).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({ name: 'Sunday run' }),
+    }));
+  });
+
+  it('creates an activity-neutral buddy room from an explicit null payload', async () => {
+    await service.createRoom(userId, { activity: null });
+
+    expect(prisma.buddyRoom.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ activity: null, subActivity: null }),
     }));
   });
 

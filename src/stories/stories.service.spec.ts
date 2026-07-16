@@ -112,6 +112,29 @@ describe('StoriesService', () => {
           { author: { followers: { some: { followerId: viewerId } } } },
         ],
       }),
+      include: expect.objectContaining({
+        reactions: {
+          where: { userId: viewerId },
+          select: { userId: true, emoji: true, createdAt: true },
+        },
+      }),
+      orderBy: { createdAt: 'desc' },
+    }));
+  });
+
+  it('hydrates only the current viewer reaction in create and list payloads', async () => {
+    await service.create(viewerId, { text: 'viewer-safe snap' });
+    await service.list(viewerId);
+
+    expect(prisma.story.create).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        reactions: expect.objectContaining({ where: { userId: viewerId } }),
+      }),
+    }));
+    expect(prisma.story.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      include: expect.objectContaining({
+        reactions: expect.objectContaining({ where: { userId: viewerId } }),
+      }),
     }));
   });
 

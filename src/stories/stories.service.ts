@@ -35,7 +35,7 @@ export class StoriesService {
     const stories = await this.prisma.story.findMany({
       where: this.followedVisibleStoryWhere(viewerId),
       take: 120,
-      orderBy: [{ authorId: 'asc' }, { createdAt: 'asc' }],
+      orderBy: { createdAt: 'desc' },
       include: this.include(viewerId),
     });
     const groups = new Map<string, any>();
@@ -52,7 +52,9 @@ export class StoriesService {
       if (story.createdAt > group.latestCreatedAt) group.latestCreatedAt = story.createdAt;
       groups.set(story.authorId, group);
     }
-    return [...groups.values()].sort((a, b) => Number(b.hasUnseen) - Number(a.hasUnseen) || b.latestCreatedAt.getTime() - a.latestCreatedAt.getTime());
+    return [...groups.values()]
+      .map((group) => ({ ...group, stories: group.stories.sort((a: any, b: any) => a.createdAt.getTime() - b.createdAt.getTime()) }))
+      .sort((a, b) => Number(b.hasUnseen) - Number(a.hasUnseen) || b.latestCreatedAt.getTime() - a.latestCreatedAt.getTime());
   }
 
   async activeAuthors(viewerId: string, userIds: string[]) {
@@ -155,7 +157,10 @@ export class StoriesService {
     return {
       author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       views: { where: { userId: viewerId }, select: { userId: true, viewedAt: true } },
-      reactions: { select: { userId: true, emoji: true, createdAt: true } },
+      reactions: {
+        where: { userId: viewerId },
+        select: { userId: true, emoji: true, createdAt: true },
+      },
     } as const;
   }
 

@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.41-beta**
+Current release: **0.2.44-beta**
 
 ## Stack
 
@@ -10,15 +10,15 @@ Current release: **0.2.41-beta**
 - Prisma ORM
 - PostgreSQL
 - Socket.IO realtime events
-- JWT auth with DB-backed sliding sessions
+- Short-lived JWT access tokens with rotating, DB-backed refresh sessions
 - Docker local deployment
 - Render free web service deployment config
 - Nodemailer SMTP email delivery with MailHog for local testing
 
 ## Main features
 
-- Auth: register, login, Google login scaffold, Cloudflare Turnstile checks, refresh, logout, forgot/reset password
-- Sliding sessions: authenticated API activity extends session validity up to 7 days from last activity
+- Auth: register, login, verified Google-subject login, Cloudflare Turnstile checks, refresh, logout, forgot/reset password
+- Sessions: 15-minute access tokens and 7-day refresh/login sessions by default, both configurable with bounded production validation
 - Posts: text/images/video, edit/delete owner-only, save, hide, report, repost, default privacy
 - ActSnaps: 24-hour disappearing image/video moments with privacy, views, reactions, replies, and chat reference previews
 - Salutes: post/comment salute interactions
@@ -27,19 +27,24 @@ Current release: **0.2.41-beta**
 - Hashtags: search endpoint with post counts for composer suggestions
 - Profiles/social graph: username, bio, avatar/cover, follow/unfollow, searchable profile followers/following, mutual/non-followback
 - Groups: public/private groups, membership, group posts as regular posts, group feed filtering/pagination
-- Chat: message requests, direct/group chat, typing/unread/reactions, validated ActSnap reply references, buddy-session message actions, and multi-device friendly E2EE foundation fields
+- Chat: message requests, direct/group chat, typing/unread/reactions, validated ActSnap reply references, buddy-session message actions, and legacy encrypted-message read compatibility
 - Find Buddy: discoverable nearby sessions, buddy rooms, participant rosters, room chat, movement-aware session updates, and realtime map location events
 - Notifications: login, salute, comment, reply, mention, follow, message request
 - Uploads: MediaLibrary-style collections with local storage by default and S3-ready driver config
 
 ## Current beta notes
 
-0.2.41-beta adds Buddy Room personal pins while preserving shared session pin controls:
+0.2.44-beta completes the security and contract hardening pass:
 
-- Personal pins are scoped to the current user by default.
-- Shared room pins remain explicit and guarded by owner/moderator/admin checks.
-- Personal and shared pins are stored separately so clients can render them independently.
-- Buddy room pin APIs return the isolated pin state needed by the frontend map.
+- Google sign-in binds only by the verified Google subject; a matching local email is never auto-linked.
+- Public post/profile presentation removes precise coordinates, raw provider activity payloads, hidden recap fields, and anonymous author identifiers.
+- Private groups require an invite, private channel membership is enforced for reads and message actions, and group summaries/counts are viewer-filtered.
+- Bans invalidate existing HTTP and Socket.IO sessions immediately.
+- The server no longer stores chat private keys or accepts new deterministic public-id encrypted messages.
+- Hidden and blocked buddy-group messages no longer affect history, previews, counts, search, or unread badges.
+- Group/message mutations that span multiple writes are atomic, and pagination and external-request timeouts are bounded.
+- The generated OpenAPI artifact now provides concrete schemas for every frontend-consumed operation and is enforced in CI.
+- Fresh-database migration drift and real multi-user database E2E gates run in CI and the deployment audit.
 
 ## Tags and discovery
 
@@ -59,7 +64,7 @@ The feed relevance ranker also uses the current user's recent preferred hashtags
 
 ## Chat documentation
 
-Detailed chat behavior, data flow, realtime events, and the current multi-device friendly end-to-end encryption foundation are documented in:
+Detailed chat behavior, data flow, realtime events, the current server-readable transport, and legacy compatibility are documented in:
 
 - [`docs/chats-and-e2ee.md`](docs/chats-and-e2ee.md)
 
@@ -99,12 +104,15 @@ Important variables:
 - `DATABASE_URL`
 - `JWT_SECRET`
 - `JWT_REFRESH_SECRET`
+- `JWT_ACCESS_TTL_SECONDS` — access-token lifetime; defaults to `900` (15 minutes), production range 60-3600 seconds
+- `REFRESH_TOKEN_TTL_SECONDS` — refresh-token and login-session lifetime; defaults to `604800` (7 days), production range 3600-2592000 seconds
 - `FRONTEND_ORIGIN`
 - `ALLOW_LOCAL_ORIGINS` — set to `true` only for local/LAN deployments that need `localhost` or private IP browser origins in addition to `FRONTEND_ORIGIN`
+- `NATIVE_AUTH_ENABLED`, `NATIVE_APP_ORIGIN` — enables the native refresh-token body transport only for the exact Capacitor origin; browser sessions always use the host-only HttpOnly refresh cookie
 - `BACKEND_PORT`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_IGNORE_TLS`, `SMTP_REQUIRE_TLS`, `SMTP_TLS_REJECT_UNAUTHORIZED`, `SMTP_USER`, `SMTP_PASS`, `SMTP_CONNECTION_TIMEOUT_MS`, `SMTP_GREETING_TIMEOUT_MS`, `SMTP_SOCKET_TIMEOUT_MS`, `SMTP_IP_FAMILY`, `MAIL_FROM` — Nodemailer SMTP delivery settings; MailHog local dev uses plaintext, production SMTP should set TLS/auth explicitly
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` / `GOOGLE_OAUTH_REDIRECT_URI` — Google auth placeholders; `POST /auth/google` verifies Google ID tokens and returns onboarding status
-- `CLOUDFLARE_TURNSTILE_SITE_KEY`, `CLOUDFLARE_TURNSTILE_SECRET_KEY` — Turnstile captcha config; backend skips verification in local dev when the secret is empty
+- `CLOUDFLARE_TURNSTILE_SECRET_KEY` — backend Turnstile secret; required and fail-closed in production, and optional only for local development (the site key belongs in the frontend)
 - `KLIPY_API_KEY`, `KLIPY_CLIENT_KEY` — GIF search/provider placeholders
 - `MEDIA_STORAGE_DRIVER=local|s3`, `MEDIA_S3_BUCKET`, `MEDIA_PUBLIC_BASE_URL`, `AWS_REGION`, `AWS_S3_ENDPOINT`, `AWS_S3_FORCE_PATH_STYLE` — media storage driver and S3-compatible storage config
 - `STRAVA_CLIENT_ID`, `STRAVA_CLIENT_SECRET`, `STRAVA_WEBHOOK_VERIFY_TOKEN` — reserved for Strava OAuth/webhook integration
@@ -138,6 +146,24 @@ Generate Prisma client:
 ```bash
 npm run prisma:generate
 ```
+
+## OpenAPI contract
+
+The backend is the source of truth for client request/response types:
+
+- `GET /api-json` — authoritative JSON contract in every environment
+- `GET /api-yaml` — equivalent YAML contract
+- `GET /docs` — interactive Swagger UI in non-production only; bearer tokens are never persisted by the UI
+- `openapi/v1/openapi.json` — committed, versioned client-generation artifact
+
+Regenerate and verify it with:
+
+```bash
+npm run openapi:generate
+npm run openapi:check
+```
+
+Guarded operations declare the `bearer` security requirement. Register, login, Google login, refresh, password recovery, and health operations are explicitly public.
 
 ## Docker/local deployment
 
@@ -202,6 +228,8 @@ DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1
 DIRECT_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
 FRONTEND_ORIGIN=https://<your-cloudflare-pages-domain>
 ALLOW_LOCAL_ORIGINS=false
+NATIVE_AUTH_ENABLED=true
+NATIVE_APP_ORIGIN=https://localhost
 NODE_ENV=production
 MEDIA_STORAGE_DRIVER=s3
 ```
@@ -302,9 +330,9 @@ GOOGLE_OAUTH_REDIRECT_URI=https://swebudd.com/auth/google/callback
 
 For a Netlify-hosted frontend, set `FRONTEND_ORIGIN` to the Netlify production URL and any preview URLs that should be allowed, separated by commas. Set the frontend's `VITE_API_BASE_URL` to this API origin.
 
-For future iOS/Android clients, keep the same bearer-token API contract and use an absolute HTTPS API origin. Production media should use `MEDIA_STORAGE_DRIVER=s3` plus `MEDIA_PUBLIC_BASE_URL` so native clients receive stable absolute media URLs.
+The current Capacitor Android client uses `NATIVE_AUTH_ENABLED=true` with the exact WebView origin `NATIVE_APP_ORIGIN=https://localhost`. Native clients keep refresh credentials in OS secure storage and send `X-SweBudd-Client: native`; the backend rejects that transport unless both settings match. Native builds must use an absolute HTTPS API origin. Production media should use `MEDIA_STORAGE_DRIVER=s3` plus `MEDIA_PUBLIC_BASE_URL` so native clients receive stable absolute media URLs.
 
-The backend CORS and Socket.IO handshake checks are bearer-token oriented and do not enable browser credential/cookie CORS. Browser and native clients should send `Authorization: Bearer <token>` for HTTP and the Socket.IO `auth.token` value for realtime namespaces.
+The backend allows credentialed CORS only for exact configured frontend origins so the web client can rotate its host-only HttpOnly refresh cookie. API authorization remains bearer-token based, and browser and native clients should send `Authorization: Bearer <token>` for protected HTTP routes and the Socket.IO `auth.token` value for realtime namespaces.
 
 The backend container serves the API on `BACKEND_PORT`. Frontend and admin have their own compose files in their own repos and attach to the same `SWEBUD_NETWORK` Docker network. Put a host-level reverse proxy in front of the public ports for production. A starting nginx config is available at `deployment/reverse-proxy.nginx.conf.example`.
 
@@ -316,7 +344,10 @@ Before shipping a backend change, run:
 npm run build
 npm run lint
 npm test -- --runInBand
+npm run test:e2e        # requires a migrated database whose name contains "test"
+npm run openapi:check
 npx prisma validate
+npm audit --omit=dev --audit-level=high
 ```
 
 Production startup validates strong, distinct JWT secrets, required database/frontend origin env, HTTPS-or-local frontend origins, SMTP port shape, and S3 media requirements when `MEDIA_STORAGE_DRIVER=s3`.
@@ -357,8 +388,11 @@ npm run dev              # Nest watch mode
 npm run start            # run compiled app
 npm run start:render     # deploy migrations, then run compiled app on Render
 npm run build            # compile backend
-npm test                 # Jest test gate; passes with no tests currently
+npm test                 # Jest unit/service test gate
+npm run test:e2e         # real Nest + PostgreSQL multi-user security tests
 npm run lint             # ESLint
+npm run openapi:generate # regenerate openapi/v1/openapi.json
+npm run openapi:check    # fail when the committed contract is stale/invalid
 npm run prisma:generate  # generate Prisma client
 npm run prisma:migrate   # local Prisma migration workflow
 npm run prisma:deploy    # deploy migrations
@@ -373,8 +407,8 @@ Base path when proxied locally: `/api`
 Key endpoints:
 
 - `POST /auth/register`
-- `POST /auth/login` — accepts optional `captchaToken`; required when Turnstile secret is configured
-- `POST /auth/google` — accepts Google `idToken`, creates/links an incomplete Google user if needed, returns `requiresOnboarding` + `onboardingMissing`
+- `POST /auth/login` — accepts `captchaToken`; required in production and whenever the Turnstile secret is configured
+- `POST /auth/google` — accepts a verified Google `idToken`, resolves only by Google subject, creates a new incomplete Google user when safe, and returns onboarding state
 - `POST /auth/onboarding/complete` — completes username/date-of-birth/legal+data consent and optional multiple activity personas
 - `POST /auth/refresh`
 - `POST /auth/logout`
@@ -451,8 +485,10 @@ Before pushing a beta release, run:
 ```bash
 npm run build
 npm test -- --runInBand
+npm run test:e2e
 npm run lint
-npm audit
+npm run openapi:check
+npm audit --omit=dev --audit-level=high
 npx prisma validate
 npx prisma migrate status
 ```
@@ -463,23 +499,27 @@ Then run the full Docker stack and API smokes from the workspace if available.
 
 - Protected controllers use `JwtAuthGuard`.
 - Helmet, CORS, and global validation pipe are enabled in `src/main.ts`.
-- JWTs include a refresh session id (`sid`) checked against `RefreshToken` rows and a visible login session id (`lid`) linked to `LoginSession`.
-- Session expiry is sliding: authenticated API calls extend expiry to 7 days from that activity.
+- Access JWTs include only identity/session/onboarding claims (`sub`, `sid`, `lid`, `onboarded`, timestamps); email is intentionally absent.
+- Access tokens default to 15 minutes. Refresh tokens and visible login sessions default to 7 days and stay aligned through `REFRESH_TOKEN_TTL_SECONDS`.
+- Browser refresh tokens are held only in a host-only `HttpOnly; Secure; SameSite=Strict` cookie with `Path=/` so it works through the frontend `/api` proxy; access tokens stay short-lived and clients bootstrap by calling `POST /auth/refresh`. Browser session issuance and cookie use require an exact configured frontend Origin. Native body refresh tokens require both the enabled native mode and exact configured Capacitor origin.
 - Refresh token rotation revokes the old stored token without creating a new visible login-history entry.
-- Public profile and post responses strip private account fields and exact user coordinates.
+- Public profile and post responses strip private account fields, exact coordinates, raw activity payloads, recap ownership/room identifiers, and anonymous author identifiers.
+- Google identity is matched by Google subject only. Existing password accounts with the same email must be linked through an explicit future account-link flow.
+- Private-group invites, channel visibility, message actions, preview messages, and summary counts are authorized for the current viewer.
+- Active bans are checked during guarded HTTP requests and Socket.IO handshakes, including already-issued sessions.
 - ActSnap reference context is only accepted from trusted ActSnap reply flows; generic chat sends ignore client-supplied ActSnap reference fields.
 - Google-created users do not bypass onboarding: auth responses include `requiresOnboarding` and `onboardingMissing` until username, date of birth, legal consent, and data consent are completed.
-- Turnstile is enforced on register/login when `CLOUDFLARE_TURNSTILE_SECRET_KEY` is set; with no secret it returns a local-dev skip and does not block.
+- Turnstile is enforced on production register/login, production startup requires a strong `CLOUDFLARE_TURNSTILE_SECRET_KEY`, and only local development may skip verification when the secret is empty.
 - While the backend `package.json` version contains `beta`, newly-created password and Google accounts are marked `betaUser` and assigned the `beta_user` profile badge automatically.
-- E2EE chat support is currently a foundation only. Direct buddy chats work across logged-in devices, but this is not a production-audited Signal-grade implementation.
+- New direct messages are plaintext until audited device-key distribution exists. Legacy encrypted rows remain readable by compatible clients; the server stores public keys only and never private keys.
 
 ## Release tags
 
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.41-beta -m "v0.2.41-beta"
-git push origin v0.2.41-beta
+git tag -a v0.2.44-beta -m "v0.2.44-beta"
+git push origin v0.2.44-beta
 ```
 
 ## Beta caveats
@@ -487,4 +527,4 @@ git push origin v0.2.41-beta
 - Local uploads are dev-oriented; S3-compatible storage is supported through the media storage driver env config.
 - Email delivery is configured for MailHog locally. Production email uses SMTP env settings through Nodemailer.
 - Relevance ranking is MVP-level and should be tuned with real usage data.
-- Backend unit/API coverage is in place for current 0.2.41-beta flows, but production release still needs broader end-to-end coverage.
+- Unit/service coverage and a migrated, multi-user PostgreSQL security E2E suite are enforced in CI; browser/device automation remains a separate release concern.

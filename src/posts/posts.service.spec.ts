@@ -17,9 +17,16 @@ describe('PostsService', () => {
       },
       post: {
         create: jest.fn().mockImplementation(({ data }) => Promise.resolve({ id: 'post-1', ...data })),
+        findMany: jest.fn().mockResolvedValue([]),
+        findFirst: jest.fn().mockResolvedValue({ id: 'post-1' }),
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'post-1', authorId, text: 'read only' }),
+        update: jest.fn(),
       },
+      postEditHistory: { findMany: jest.fn().mockResolvedValue([]), create: jest.fn() },
+      groupMember: { findUnique: jest.fn().mockResolvedValue({ role: 'member' }) },
       comment: {
         findMany: jest.fn().mockResolvedValue([]),
+        findUniqueOrThrow: jest.fn(),
       },
       follow: {
         findMany: jest.fn().mockResolvedValue([]),
@@ -32,6 +39,24 @@ describe('PostsService', () => {
   it('rejects posts without text or media', async () => {
     await expect(service.create(authorId, { text: '   ', images: [] })).rejects.toBeInstanceOf(BadRequestException);
     expect(prisma.post.create).not.toHaveBeenCalled();
+  });
+
+  it('clamps post-list page size to a positive bounded value', async () => {
+    await service.list(authorId, -20);
+
+    expect(prisma.post.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 1 }));
+  });
+
+  it('does not allow an edit to empty a text-only comment', async () => {
+    prisma.comment.findUniqueOrThrow.mockResolvedValueOnce({
+      authorId,
+      postId: 'post-1',
+      body: 'Original comment',
+      images: [],
+    });
+
+    await expect(service.updateComment(authorId, 'post-1', 'comment-1', { body: '   ' }))
+      .rejects.toThrow('Comment needs text or an image');
   });
 
   it('creates text posts using the user default post visibility', async () => {
@@ -164,6 +189,25 @@ describe('PostsService', () => {
     }));
   });
 
+  it('hydrates only the current viewer like and save state on every post surface', () => {
+    const include = (service as unknown as { include(viewerId?: string): any }).include('viewer-1');
+
+    expect(include.likes).toEqual({ where: { userId: 'viewer-1' }, select: { userId: true } });
+    expect(include.saves).toEqual({ where: { userId: 'viewer-1' }, select: { userId: true } });
+  });
+
+  it('keeps GET post retrieval read-only', async () => {
+    await expect(service.get('post-1', 'viewer-1')).resolves.toEqual(expect.objectContaining({
+      id: 'post-1',
+      text: 'read only',
+    }));
+
+    expect(prisma.post.findUniqueOrThrow).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'post-1' },
+    }));
+    expect(prisma.post.update).not.toHaveBeenCalled();
+  });
+
   it('does not expose post or author coordinates in post API responses', () => {
     const include = (service as unknown as { include(viewerId?: string): any }).include('viewer-1');
     expect(include.author.select).not.toHaveProperty('latitude');
@@ -200,6 +244,40 @@ describe('PostsService', () => {
     }));
   });
 
+  it('uses one comment presenter for read and write responses', () => {
+    const comment = (service as unknown as { presentComment(comment: any, viewerId?: string): any }).presentComment({
+      id: 'comment-1',
+      authorId,
+      body: 'Comment',
+      images: [{
+        id: 'image-1',
+        commentId: 'comment-1',
+        url: '/uploads/comments/image.webp',
+        alt: null,
+        filename: 'image.webp',
+        mimeType: 'image/webp',
+        size: 120,
+        width: 80,
+        height: 60,
+        sortOrder: 0,
+        createdAt: new Date('2026-07-16T00:00:00.000Z'),
+      }],
+      replies: [{ id: 'reply-1', authorId: 'other-user' }],
+      _count: { replies: 3 },
+    }, authorId);
+
+    expect(comment).toEqual(expect.objectContaining({
+      id: 'comment-1',
+      viewerCanManage: true,
+      replyCount: 3,
+      nextReplyCursor: 1,
+      replies: [expect.objectContaining({ id: 'reply-1', viewerCanManage: false })],
+    }));
+    expect(comment).not.toHaveProperty('_count');
+    expect(comment.images[0]).toHaveProperty('commentId', 'comment-1');
+    expect(comment.images[0]).not.toHaveProperty('postId');
+  });
+
   it('sorts top comments by salute count, reply count, then newest fallback', async () => {
     await service.comments('post-1', { sort: 'top', take: 10, cursor: 0 });
 
@@ -229,8 +307,97 @@ describe('PostsService', () => {
     });
     expect(prisma.comment.findMany).toHaveBeenCalledWith(expect.objectContaining({
       orderBy: [{ createdAt: 'desc' }],
+      include: expect.objectContaining({
+        _count: { select: { replies: true } },
+        replies: expect.objectContaining({ take: 20 }),
+      }),
       skip: 4,
       take: 3,
+    }));
+  });
+
+  it('blocks ordinary viewers from anonymous post edit-history identity', async () => {
+    prisma.post.findUniqueOrThrow.mockResolvedValue({
+      id: 'post-1',
+      authorId,
+      groupId: 'group-1',
+      isAnonymous: true,
+    });
+
+    await expect(service.postHistory('viewer-1', 'post-1')).rejects.toThrow('Anonymous post history is private');
+
+    expect(prisma.groupMember.findUnique).toHaveBeenCalledWith({
+      where: { groupId_userId: { groupId: 'group-1', userId: 'viewer-1' } },
+      select: { role: true },
+    });
+    expect(prisma.postEditHistory.findMany).not.toHaveBeenCalled();
+  });
+
+  it('never selects editor identity when a moderator reviews anonymous post history', async () => {
+    prisma.post.findUniqueOrThrow.mockResolvedValue({
+      id: 'post-1',
+      authorId,
+      groupId: 'group-1',
+      isAnonymous: true,
+    });
+    prisma.groupMember.findUnique.mockResolvedValue({ role: 'moderator' });
+
+    await service.postHistory('moderator-1', 'post-1');
+
+    expect(prisma.postEditHistory.findMany).toHaveBeenCalledWith({
+      where: { postId: 'post-1' },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, oldText: true, newText: true, createdAt: true },
+    });
+  });
+
+  it('paginates replies independently from root comments', async () => {
+    prisma.comment.findUniqueOrThrow = jest.fn().mockResolvedValue({
+      id: 'comment-1',
+      postId: 'post-1',
+      parentId: null,
+    });
+    prisma.comment.findMany.mockResolvedValue([
+      { id: 'reply-1', authorId },
+      { id: 'reply-2', authorId },
+      { id: 'reply-3', authorId },
+    ]);
+
+    await expect(service.replies('post-1', 'comment-1', { take: 2, cursor: 4 }, 'viewer-1')).resolves.toEqual({
+      items: [expect.objectContaining({ id: 'reply-1' }), expect.objectContaining({ id: 'reply-2' })],
+      nextCursor: 6,
+    });
+    expect(prisma.comment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { postId: 'post-1', parentId: 'comment-1' },
+      skip: 4,
+      take: 3,
+    }));
+  });
+
+  it('reconciles extracted hashtags transactionally when post text changes', async () => {
+    prisma.post.findUniqueOrThrow.mockResolvedValue({
+      authorId,
+      text: 'Old #stale',
+      images: [],
+      taggedUsers: [],
+    });
+    const tx = {
+      postEditHistory: { create: jest.fn().mockResolvedValue({}) },
+      post: {
+        update: jest.fn().mockResolvedValue({ id: 'post-1', authorId, text: 'New #Fresh #fresh' }),
+      },
+    };
+    prisma.$transaction = jest.fn((callback: (client: typeof tx) => unknown) => callback(tx));
+
+    await service.update(authorId, 'post-1', { text: 'New #Fresh #fresh' });
+
+    expect(tx.post.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        hashtags: {
+          deleteMany: {},
+          create: [{ hashtag: { connectOrCreate: { where: { name: 'fresh' }, create: { name: 'fresh' } } } }],
+        },
+      }),
     }));
   });
 });

@@ -25,6 +25,15 @@ describe('FeedService', () => {
     expect(post.author).not.toHaveProperty('longitude');
   });
 
+  it('hydrates the current viewer salute state without exposing other users likes', () => {
+    const include = (service as any).postInclude('viewer-1');
+
+    expect(include.likes).toEqual({
+      where: { userId: 'viewer-1' },
+      select: { userId: true },
+    });
+  });
+
   it('requires every selected hashtag when multiple hashtags are requested', async () => {
     const prisma = {
       follow: { findMany: jest.fn().mockResolvedValue([]) },
@@ -42,5 +51,78 @@ describe('FeedService', () => {
         ]),
       }),
     }));
+  });
+
+  it('clamps negative feed cursors and page sizes before ranking', async () => {
+    const posts = [
+      { id: 'post-1', authorId: 'author-1', createdAt: new Date('2026-07-16T02:00:00Z'), likeCount: 0, commentCount: 0, viewCount: 0, latitude: null, longitude: null },
+      { id: 'post-2', authorId: 'author-2', createdAt: new Date('2026-07-16T01:00:00Z'), likeCount: 0, commentCount: 0, viewCount: 0, latitude: null, longitude: null },
+    ];
+    const prisma = {
+      follow: { findMany: jest.fn().mockResolvedValue([]) },
+      post: { findMany: jest.fn().mockResolvedValue(posts) },
+    };
+    service = new FeedService(prisma as any);
+
+    const result = await service.feed('user-1', { take: -4, cursor: -9, sort: 'latest' });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual(expect.objectContaining({ id: 'post-1' }));
+  });
+
+  it('records each viewer/post pair once and increments the public count once', async () => {
+    let alreadyViewed = false;
+    const tx = {
+      postView: {
+        createMany: jest.fn().mockImplementation(async () => {
+          if (alreadyViewed) return { count: 0 };
+          alreadyViewed = true;
+          return { count: 1 };
+        }),
+      },
+      post: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    };
+    const prisma = {
+      post: { findMany: jest.fn().mockResolvedValue([{ id: 'post-1' }]) },
+      $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
+    };
+    service = new FeedService(prisma as any);
+
+    await expect(service.markViewed('viewer-1', ['post-1', 'post-1'])).resolves.toEqual({ count: 1 });
+    await expect(service.markViewed('viewer-1', ['post-1'])).resolves.toEqual({ count: 0 });
+
+    expect(tx.postView.createMany).toHaveBeenCalledWith({
+      data: [{ postId: 'post-1', userId: 'viewer-1' }],
+      skipDuplicates: true,
+    });
+    expect(tx.post.updateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('selects only the documented public fields for suggested groups', async () => {
+    const prisma = {
+      group: {
+        findMany: jest.fn().mockResolvedValue([{
+          id: 'group-1',
+          name: 'Runners',
+          slug: 'runners',
+          description: 'Run together',
+          _count: { members: 4, posts: 2 },
+        }]),
+      },
+    };
+    service = new FeedService(prisma as any);
+
+    const groups = await service.suggestedGroups('viewer-1');
+
+    expect(prisma.group.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        _count: { select: { members: true, posts: true } },
+      },
+    }));
+    expect(groups[0]).not.toHaveProperty('inviteCode');
   });
 });

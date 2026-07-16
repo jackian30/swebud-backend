@@ -1,16 +1,14 @@
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateActivityDto, UpdateActivityDto } from './dto';
-
-type StatsWindow = 'week' | 'month' | 'year' | 'all';
+import { ActivityStatsWindow, CreateActivityDto, UpdateActivityDto } from './dto';
 
 @Injectable()
 export class ActivitiesService {
   constructor(private prisma: PrismaService) {}
 
   list(userId: string, take = 50) {
-    return this.prisma.activity.findMany({ where: { userId }, take: Math.min(take, 100), orderBy: { startedAt: 'desc' }, include: { integration: { select: { provider: true, status: true } }, posts: { select: { id: true, visibility: true } } } });
+    return this.prisma.activity.findMany({ where: { userId }, take: Math.min(Math.max(Math.trunc(take), 1), 100), orderBy: { startedAt: 'desc' }, include: { integration: { select: { provider: true, status: true } }, posts: { select: { id: true, visibility: true } } } });
   }
 
   create(userId: string, dto: CreateActivityDto) {
@@ -29,7 +27,8 @@ export class ActivitiesService {
     return { ok: true };
   }
 
-  async stats(userId: string, window: StatsWindow = 'month') {
+  async stats(userId: string, window: ActivityStatsWindow = ActivityStatsWindow.month) {
+    if (!Object.values(ActivityStatsWindow).includes(window)) throw new BadRequestException('Unsupported activity stats window');
     const since = this.since(window);
     const where = { userId, ...(since ? { startedAt: { gte: since } } : {}) };
     const [aggregate, byType, recent] = await Promise.all([
@@ -53,7 +52,7 @@ export class ActivitiesService {
     return { ...dto, raw: dto.raw as Prisma.InputJsonValue | undefined };
   }
 
-  private since(window: StatsWindow) {
+  private since(window: ActivityStatsWindow) {
     const date = new Date();
     if (window === 'week') date.setDate(date.getDate() - 7);
     else if (window === 'month') date.setMonth(date.getMonth() - 1);

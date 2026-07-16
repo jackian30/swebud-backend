@@ -1,16 +1,17 @@
 import { IntegrationProvider, IntegrationStatus } from '@prisma/client';
-import { IsArray, IsDate, IsEnum, IsOptional, IsString } from 'class-validator';
+import { IsArray, IsDate, IsEnum, IsString } from 'class-validator';
 import { Type } from 'class-transformer';
+import { IsOptionalNonNull } from '../common/validation';
 
 export class ConnectIntegrationDto {
   @IsEnum(IntegrationProvider) provider!: IntegrationProvider;
-  @IsOptional() @IsString() providerUserId?: string;
-  @IsOptional() @IsArray() @IsString({ each: true }) scopes?: string[];
-  @IsOptional() @Type(() => Date) @IsDate() tokenExpiresAt?: Date;
+  @IsOptionalNonNull() @IsString() providerUserId?: string;
+  @IsOptionalNonNull() @IsArray() @IsString({ each: true }) scopes?: string[];
+  @IsOptionalNonNull() @Type(() => Date) @IsDate() tokenExpiresAt?: Date;
 }
 
 export class UpdateIntegrationDto {
-  @IsOptional() @IsEnum(IntegrationStatus) status?: IntegrationStatus;
-  @IsOptional() @IsString() lastSyncError?: string;
-  @IsOptional() @Type(() => Date) @IsDate() lastSyncAt?: Date;
+  @IsOptionalNonNull() @IsEnum(IntegrationStatus) status?: IntegrationStatus;
+  @IsOptionalNonNull() @IsString() lastSyncError?: string;
+  @IsOptionalNonNull() @Type(() => Date) @IsDate() lastSyncAt?: Date;
 }

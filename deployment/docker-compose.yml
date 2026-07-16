@@ -5,25 +5,14 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-swebud}
       POSTGRES_USER: ${POSTGRES_USER:-swebud}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swebud}
-    ports:
-      - "${POSTGRES_PORT:-55432}:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD to a strong random value}
     volumes:
       - swebud_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-swebud} -d ${POSTGRES_DB:-swebud}"]
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 5s
       timeout: 5s
       retries: 10
-    networks:
-      - swebud
-
-  mailhog:
-    image: mailhog/mailhog:v1.0.1
-    restart: unless-stopped
-    ports:
-      - "${MAILHOG_SMTP_PORT:-1126}:1025"
-      - "${MAILHOG_UI_PORT:-8126}:8025"
     networks:
       - swebud
 
@@ -37,9 +26,17 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${DATABASE_URL:-postgresql://swebud:swebud@postgres:5432/swebud?schema=public}
-      DIRECT_URL: ${DIRECT_URL:-postgresql://swebud:swebud@postgres:5432/swebud?schema=public}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the application database URL}
+      DIRECT_URL: ${DIRECT_URL:?Set DIRECT_URL to a direct migration database URL}
     command: sh -c 'DATABASE_URL="$$DIRECT_URL" npx prisma migrate deploy'
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
     networks:
       - swebud
 
@@ -53,22 +50,24 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
-      mailhog:
-        condition: service_started
     environment:
       NODE_ENV: production
       PORT: 3000
-      DATABASE_URL: ${DATABASE_URL:-postgresql://swebud:swebud@postgres:5432/swebud?schema=public}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the application database URL}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a strong random value}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET to a different strong random value}
-      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:9000}
-      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:9100,http://swebud-admin.loc}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-604800}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?Set FRONTEND_ORIGIN to the production frontend origin}
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:-}
       ALLOW_LOCAL_ORIGINS: ${ALLOW_LOCAL_ORIGINS:-false}
-      SMTP_HOST: ${SMTP_HOST:-mailhog}
-      SMTP_PORT: ${SMTP_PORT:-1025}
+      NATIVE_AUTH_ENABLED: ${NATIVE_AUTH_ENABLED:-false}
+      NATIVE_APP_ORIGIN: ${NATIVE_APP_ORIGIN:-}
+      SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST to a production SMTP service}
+      SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}
-      SMTP_IGNORE_TLS: ${SMTP_IGNORE_TLS:-true}
-      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-false}
+      SMTP_IGNORE_TLS: ${SMTP_IGNORE_TLS:-false}
+      SMTP_REQUIRE_TLS: ${SMTP_REQUIRE_TLS:-true}
       SMTP_TLS_REJECT_UNAUTHORIZED: ${SMTP_TLS_REJECT_UNAUTHORIZED:-true}
       SMTP_IP_FAMILY: ${SMTP_IP_FAMILY:-4}
       SMTP_CONNECTION_TIMEOUT_MS: ${SMTP_CONNECTION_TIMEOUT_MS:-10000}
@@ -76,13 +75,12 @@ services:
       SMTP_SOCKET_TIMEOUT_MS: ${SMTP_SOCKET_TIMEOUT_MS:-20000}
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
-      MAIL_FROM: ${MAIL_FROM:-SweBudd <no-reply@localhost>}
+      MAIL_FROM: ${MAIL_FROM:?Set MAIL_FROM to a verified production sender}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
       GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:3000/auth/google/callback}
       GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:9000/auth/google/callback}
-      CLOUDFLARE_TURNSTILE_SECRET_KEY: ${CLOUDFLARE_TURNSTILE_SECRET_KEY:-}
-      CLOUDFLARE_TURNSTILE_SITE_KEY: ${CLOUDFLARE_TURNSTILE_SITE_KEY:-}
+      CLOUDFLARE_TURNSTILE_SECRET_KEY: ${CLOUDFLARE_TURNSTILE_SECRET_KEY:?Set CLOUDFLARE_TURNSTILE_SECRET_KEY to the production secret}
       KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
       MEDIA_STORAGE_DRIVER: ${MEDIA_STORAGE_DRIVER:-local}
@@ -97,8 +95,17 @@ services:
       GARMIN_CONSUMER_KEY: ${GARMIN_CONSUMER_KEY:-}
       GARMIN_CONSUMER_SECRET: ${GARMIN_CONSUMER_SECRET:-}
     command: sh -c "mkdir -p uploads/profile-photos uploads/cover-photos uploads/group-photos uploads/chat-photos uploads/actsnaps uploads/posts uploads/comments uploads/images uploads/videos uploads/audio uploads/media && exec node dist/src/main.js"
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
     ports:
-      - "${BACKEND_PORT:-3002}:3000"
+      - "127.0.0.1:${BACKEND_PORT:-3002}:3000"
     volumes:
       - swebud_uploads:/app/uploads
     healthcheck:

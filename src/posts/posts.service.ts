@@ -3,6 +3,9 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { assertCanViewPost, visibleAuthorWhere, visiblePostWhere } from '../privacy/privacy';
 import { CommentDto, CreatePostDto, ReportPostDto, RepostDto, UpdateCommentDto, UpdatePostDto } from './dto';
+import { presentPublicPost, publicActivitySelect, publicBuddySessionRecapSelect } from '../common/post-presentation';
+
+const COMMENT_REPLY_PAGE_SIZE = 20;
 
 @Injectable()
 export class PostsService {
@@ -40,27 +43,29 @@ export class PostsService {
         hashtags: { create: hashtags.map((name) => ({ hashtag: { connectOrCreate: { where: { name }, create: { name } } } })) },
         taggedUsers: { create: taggedUserIds.map((userId) => ({ userId })) },
       },
-      include: this.include(),
+      include: this.include(authorId),
     });
     this.notifyTaggedUsers(authorId, post.id, taggedUserIds);
     await this.notifyMentionedUsers(authorId, post.id, text ?? '', 'Someone mentioned you in a post.');
-    return this.presentPost(post);
+    return this.presentPost(post, authorId);
   }
 
   list(viewerId: string, take = 20, cursor?: string) {
     return this.prisma.post.findMany({
       where: visiblePostWhere(viewerId),
-      take: Math.min(take, 50),
+      take: Math.min(Math.max(Math.trunc(take), 1), 50),
       ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
       orderBy: { createdAt: 'desc' },
-      include: this.include(),
-    }).then((posts) => posts.map((post) => this.presentPost(post)));
+      include: this.include(viewerId),
+    }).then((posts) => posts.map((post) => this.presentPost(post, viewerId)));
   }
 
   async get(id: string, viewerId?: string) {
     if (viewerId) await this.ensureCanViewPost(viewerId, id);
-    await this.prisma.post.update({ where: { id }, data: { viewCount: { increment: 1 } } }).catch(() => null);
-    return this.prisma.post.findUniqueOrThrow({ where: { id }, include: this.include(viewerId) }).then((post) => this.presentPost(post));
+    return this.prisma.post.findUniqueOrThrow({
+      where: { id },
+      include: this.include(viewerId),
+    }).then((post) => this.presentPost(post, viewerId));
   }
 
   async remove(userId: string, id: string) {
@@ -106,17 +111,56 @@ export class PostsService {
         await tx.postTag.deleteMany({ where: { postId: id } });
         if (taggedUserIds.length) await tx.postTag.createMany({ data: taggedUserIds.map((taggedUserId) => ({ postId: id, userId: taggedUserId })), skipDuplicates: true });
       }
-      const updated = await tx.post.update({ where: { id }, data: { text: newText, visibility: dto.visibility ?? dto.privacy, activityId: dto.activityId, editedAt: new Date() }, include: this.include() });
+      const hashtags = dto.text === undefined
+        ? undefined
+        : [...new Set(this.extractHashtags(newText).map((tag) => tag.toLowerCase().replace(/^#/, '').trim()).filter(Boolean))];
+      const updated = await tx.post.update({
+        where: { id },
+        data: {
+          text: newText,
+          visibility: dto.visibility ?? dto.privacy,
+          activityId: dto.activityId,
+          editedAt: new Date(),
+          ...(hashtags ? {
+            hashtags: {
+              deleteMany: {},
+              create: hashtags.map((name) => ({
+                hashtag: { connectOrCreate: { where: { name }, create: { name } } },
+              })),
+            },
+          } : {}),
+        },
+        include: this.include(userId),
+      });
       return updated;
     }).then((updated) => {
       if (taggedUserIds !== undefined) this.notifyTaggedUsers(userId, id, taggedUserIds.filter((taggedUserId) => !post.taggedUsers.some((tag) => tag.userId === taggedUserId)));
-      return this.presentPost(updated);
+      return this.presentPost(updated, userId);
     });
   }
 
   async postHistory(userId: string, postId: string) {
     await this.ensureCanViewPost(userId, postId);
-    return this.prisma.postEditHistory.findMany({ where: { postId }, orderBy: { createdAt: 'desc' } });
+    const post = await this.prisma.post.findUniqueOrThrow({
+      where: { id: postId },
+      select: { authorId: true, groupId: true, isAnonymous: true },
+    });
+    if (post.isAnonymous && post.authorId !== userId) {
+      const member = post.groupId
+        ? await this.prisma.groupMember.findUnique({
+          where: { groupId_userId: { groupId: post.groupId, userId } },
+          select: { role: true },
+        })
+        : null;
+      if (!member || !['owner', 'admin', 'moderator'].includes(member.role)) {
+        throw new ForbiddenException('Anonymous post history is private');
+      }
+    }
+    return this.prisma.postEditHistory.findMany({
+      where: { postId },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, oldText: true, newText: true, createdAt: true },
+    });
   }
 
   async save(userId: string, postId: string) {
@@ -132,27 +176,34 @@ export class PostsService {
     await this.ensureCanViewPost(userId, postId);
     const repost = await this.prisma.repost.create({
       data: { postId, userId, text: dto.text?.trim() },
-      include: { post: { include: this.include() }, user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } },
+      include: { post: { include: this.include(userId) }, user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } },
     });
     void this.notifications.create({ userId: repost.post.authorId, actorId: userId, type: 'repost', entityId: repost.id, message: 'Someone reposted your post.' });
-    return repost;
+    return { ...repost, post: this.presentPost(repost.post, userId) };
   }
 
   async likeRepost(userId: string, repostId: string) {
     const repost = await this.prisma.repost.findUniqueOrThrow({ where: { id: repostId }, select: { userId: true, postId: true } });
     await this.ensureCanViewPost(userId, repost.postId);
-    const existing = await this.prisma.repostLike.findUnique({ where: { repostId_userId: { repostId, userId } } });
-    if (!existing) {
-      await this.prisma.repostLike.create({ data: { repostId, userId } });
-      await this.prisma.repost.update({ where: { id: repostId }, data: { likeCount: { increment: 1 } } });
+    const created = await this.prisma.$transaction(async (tx) => {
+      const inserted = await tx.repostLike.createMany({ data: [{ repostId, userId }], skipDuplicates: true });
+      if (!inserted.count) return false;
+      await tx.repost.update({ where: { id: repostId }, data: { likeCount: { increment: 1 } } });
+      return true;
+    });
+    if (created) {
       void this.notifications.create({ userId: repost.userId, actorId: userId, type: 'repost_like', entityId: repostId, message: 'Someone saluted your repost.' });
     }
     return { liked: true };
   }
 
   async unlikeRepost(userId: string, repostId: string) {
-    const deleted = await this.prisma.repostLike.delete({ where: { repostId_userId: { repostId, userId } } }).then(() => true).catch(() => false);
-    if (deleted) await this.prisma.repost.update({ where: { id: repostId }, data: { likeCount: { decrement: 1 } } }).catch(() => null);
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.repostLike.deleteMany({ where: { repostId, userId } });
+      if (deleted.count) {
+        await tx.repost.updateMany({ where: { id: repostId, likeCount: { gt: 0 } }, data: { likeCount: { decrement: 1 } } });
+      }
+    });
     return { liked: false };
   }
 
@@ -163,13 +214,13 @@ export class PostsService {
   async pin(userId: string, id: string) {
     const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true } });
     if (post.authorId !== userId) throw new ForbiddenException('Only the author can pin this post');
-    return this.prisma.post.update({ where: { id }, data: { pinnedAt: new Date() }, include: this.include() }).then((post) => this.presentPost(post));
+    return this.prisma.post.update({ where: { id }, data: { pinnedAt: new Date() }, include: this.include(userId) }).then((post) => this.presentPost(post, userId));
   }
 
   async unpin(userId: string, id: string) {
     const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true } });
     if (post.authorId !== userId) throw new ForbiddenException('Only the author can unpin this post');
-    return this.prisma.post.update({ where: { id }, data: { pinnedAt: null }, include: this.include() }).then((post) => this.presentPost(post));
+    return this.prisma.post.update({ where: { id }, data: { pinnedAt: null }, include: this.include(userId) }).then((post) => this.presentPost(post, userId));
   }
 
   async report(userId: string, postId: string, dto: ReportPostDto) {
@@ -187,18 +238,24 @@ export class PostsService {
 
   async like(userId: string, postId: string) {
     await this.ensureCanViewPost(userId, postId);
-    const existing = await this.prisma.postLike.findUnique({ where: { postId_userId: { postId, userId } } });
-    if (!existing) {
-      await this.prisma.postLike.create({ data: { postId, userId } });
-      const post = await this.prisma.post.update({ where: { id: postId }, data: { likeCount: { increment: 1 } }, select: { authorId: true } }).catch(() => null);
-      if (post) void this.notifications.create({ userId: post.authorId, actorId: userId, type: 'salute', entityId: postId, message: 'Someone saluted your post.' });
+    const post = await this.prisma.$transaction(async (tx) => {
+      const inserted = await tx.postLike.createMany({ data: [{ postId, userId }], skipDuplicates: true });
+      if (!inserted.count) return null;
+      return tx.post.update({ where: { id: postId }, data: { likeCount: { increment: 1 } }, select: { authorId: true } });
+    });
+    if (post) {
+      void this.notifications.create({ userId: post.authorId, actorId: userId, type: 'salute', entityId: postId, message: 'Someone saluted your post.' });
     }
     return { liked: true };
   }
 
   async unlike(userId: string, postId: string) {
-    const deleted = await this.prisma.postLike.delete({ where: { postId_userId: { postId, userId } } }).then(() => true).catch(() => false);
-    if (deleted) await this.prisma.post.update({ where: { id: postId }, data: { likeCount: { decrement: 1 } } }).catch(() => null);
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.postLike.deleteMany({ where: { postId, userId } });
+      if (deleted.count) {
+        await tx.post.updateMany({ where: { id: postId, likeCount: { gt: 0 } }, data: { likeCount: { decrement: 1 } } });
+      }
+    });
     return { liked: false };
   }
 
@@ -209,7 +266,7 @@ export class PostsService {
     const comments = await this.prisma.comment.findMany({
       where: { postId, parentId: null },
       orderBy: this.commentOrderBy(filters.sort),
-      include: this.commentInclude(undefined, viewerId),
+      include: this.commentInclude(COMMENT_REPLY_PAGE_SIZE, viewerId),
       skip: cursor,
       take: take + 1,
     });
@@ -217,6 +274,28 @@ export class PostsService {
     return {
       items: this.decorateCommentOwnership(items, viewerId),
       nextCursor: comments.length > take ? cursor + take : null,
+    };
+  }
+
+  async replies(postId: string, commentId: string, filters: { take?: number; cursor?: number } = {}, viewerId?: string) {
+    if (viewerId) await this.ensureCanViewPost(viewerId, postId);
+    const root = await this.prisma.comment.findUniqueOrThrow({
+      where: { id: commentId },
+      select: { id: true, postId: true, parentId: true },
+    });
+    if (root.postId !== postId || root.parentId) throw new BadRequestException('Reply target is invalid');
+    const take = Math.min(Math.max(filters.take ?? COMMENT_REPLY_PAGE_SIZE, 1), 50);
+    const cursor = Math.max(filters.cursor ?? 0, 0);
+    const replies = await this.prisma.comment.findMany({
+      where: { postId, parentId: commentId },
+      orderBy: { createdAt: 'asc' },
+      include: this.commentReplyInclude(viewerId),
+      skip: cursor,
+      take: take + 1,
+    });
+    return {
+      items: this.decorateCommentOwnership(replies.slice(0, take), viewerId),
+      nextCursor: replies.length > take ? cursor + take : null,
     };
   }
 
@@ -233,18 +312,21 @@ export class PostsService {
       parentId = parent.parentId ?? parent.id;
       notifyParentId = parent.id;
     }
-    const comment = await this.prisma.comment.create({
-      data: {
-        postId,
-        authorId: userId,
-        parentId,
-        body,
-        images: { create: images.map((image, index) => ({ url: image.url, alt: image.alt, filename: image.filename, mimeType: image.mimeType, size: image.size ? Math.round(image.size) : undefined, width: image.width ? Math.round(image.width) : undefined, height: image.height ? Math.round(image.height) : undefined, sortOrder: index })) },
-      },
-      include: this.commentInclude(),
+    const { comment, post } = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.comment.create({
+        data: {
+          postId,
+          authorId: userId,
+          parentId,
+          body,
+          images: { create: images.map((image, index) => ({ url: image.url, alt: image.alt, filename: image.filename, mimeType: image.mimeType, size: image.size ? Math.round(image.size) : undefined, width: image.width ? Math.round(image.width) : undefined, height: image.height ? Math.round(image.height) : undefined, sortOrder: index })) },
+        },
+        include: this.commentInclude(COMMENT_REPLY_PAGE_SIZE, userId),
+      });
+      const updatedPost = await tx.post.update({ where: { id: postId }, data: { commentCount: { increment: 1 } }, select: { authorId: true } });
+      return { comment: created, post: updatedPost };
     });
-    const post = await this.prisma.post.update({ where: { id: postId }, data: { commentCount: { increment: 1 } }, select: { authorId: true } }).catch(() => null);
-    if (post) {
+    {
       if (notifyParentId) {
         const parent = await this.prisma.comment.findUnique({ where: { id: notifyParentId }, select: { authorId: true } });
         if (parent) void this.notifications.create({ userId: parent.authorId, actorId: userId, type: 'reply', entityId: postId, message: 'Someone replied to your comment.' });
@@ -253,21 +335,25 @@ export class PostsService {
       }
       await this.notifyMentionedUsers(userId, postId, body, 'Someone mentioned you in a comment.');
     }
-    return comment;
+    return this.presentComment(comment, userId);
   }
 
 
   async updateComment(userId: string, postId: string, commentId: string, dto: UpdateCommentDto) {
-    const comment = await this.prisma.comment.findUniqueOrThrow({ where: { id: commentId }, select: { authorId: true, postId: true, body: true } });
+    const comment = await this.prisma.comment.findUniqueOrThrow({
+      where: { id: commentId },
+      select: { authorId: true, postId: true, body: true, images: { take: 1, select: { id: true } } },
+    });
     if (comment.postId !== postId) throw new BadRequestException('Comment does not belong to this post');
     if (comment.authorId !== userId) throw new ForbiddenException('Only the comment author can edit this comment');
     const newBody = dto.body.trim();
+    if (!newBody && comment.images.length === 0) throw new BadRequestException('Comment needs text or an image');
     return this.prisma.$transaction(async (tx) => {
       if (comment.body !== newBody) {
         await tx.commentEditHistory.create({ data: { commentId, editorId: userId, oldBody: comment.body, newBody } });
       }
-      return tx.comment.update({ where: { id: commentId }, data: { body: newBody, editedAt: new Date() }, include: this.commentInclude() });
-    });
+      return tx.comment.update({ where: { id: commentId }, data: { body: newBody, editedAt: new Date() }, include: this.commentInclude(COMMENT_REPLY_PAGE_SIZE, userId) });
+    }).then((updated) => this.presentComment(updated, userId));
   }
 
   async commentHistory(userId: string, postId: string, commentId: string) {
@@ -281,19 +367,22 @@ export class PostsService {
     await this.ensureCanViewPost(userId, postId);
     const comment = await this.prisma.comment.findUniqueOrThrow({ where: { id: commentId }, select: { postId: true, authorId: true } });
     if (comment.postId !== postId) throw new BadRequestException('Comment does not belong to this post');
-    const existing = await this.prisma.commentLike.findUnique({ where: { commentId_userId: { commentId, userId } } });
-    if (!existing) {
-      await this.prisma.commentLike.create({ data: { commentId, userId } });
-      await this.prisma.comment.update({ where: { id: commentId }, data: { likeCount: { increment: 1 } } });
-    }
+    await this.prisma.$transaction(async (tx) => {
+      const inserted = await tx.commentLike.createMany({ data: [{ commentId, userId }], skipDuplicates: true });
+      if (inserted.count) await tx.comment.update({ where: { id: commentId }, data: { likeCount: { increment: 1 } } });
+    });
     return { liked: true };
   }
 
   async unlikeComment(userId: string, postId: string, commentId: string) {
     const comment = await this.prisma.comment.findUniqueOrThrow({ where: { id: commentId }, select: { postId: true } });
     if (comment.postId !== postId) throw new BadRequestException('Comment does not belong to this post');
-    const deleted = await this.prisma.commentLike.delete({ where: { commentId_userId: { commentId, userId } } }).then(() => true).catch(() => false);
-    if (deleted) await this.prisma.comment.update({ where: { id: commentId }, data: { likeCount: { decrement: 1 } } });
+    await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.commentLike.deleteMany({ where: { commentId, userId } });
+      if (deleted.count) {
+        await tx.comment.updateMany({ where: { id: commentId, likeCount: { gt: 0 } }, data: { likeCount: { decrement: 1 } } });
+      }
+    });
     return { liked: false };
   }
 
@@ -304,9 +393,11 @@ export class PostsService {
     });
     if (comment.postId !== postId) throw new BadRequestException('Comment does not belong to this post');
     if (comment.authorId !== userId) throw new ForbiddenException('Only the comment author can delete this comment');
-    const deletedCount = await this.countCommentTree(commentId);
-    await this.prisma.comment.delete({ where: { id: commentId } });
-    await this.prisma.post.update({ where: { id: postId }, data: { commentCount: { decrement: deletedCount } } }).catch(() => null);
+    await this.prisma.$transaction(async (tx) => {
+      await tx.comment.delete({ where: { id: commentId } });
+      const commentCount = await tx.comment.count({ where: { postId } });
+      await tx.post.update({ where: { id: postId }, data: { commentCount } });
+    });
   }
 
   private async ensureCanViewPost(userId: string, postId: string) {
@@ -321,29 +412,27 @@ export class PostsService {
     if (!profileOwner) throw new ForbiddenException('You cannot post on this profile');
   }
 
-  private async countCommentTree(commentId: string): Promise<number> {
-    const replies = await this.prisma.comment.findMany({ where: { parentId: commentId }, select: { id: true } });
-    let total = 1;
-    for (const reply of replies) total += await this.countCommentTree(reply.id);
-    return total;
-  }
-
   private commentInclude(replyTake?: number, viewerId?: string) {
     const viewerLikes = viewerId ? { likes: { where: { userId: viewerId }, select: { userId: true } } } : {};
     return {
       author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       images: { orderBy: { sortOrder: 'asc' as const } },
       ...viewerLikes,
+      _count: { select: { replies: true } },
       replies: {
         ...(replyTake ? { take: replyTake } : {}),
         where: { parentId: { not: null } },
         orderBy: { createdAt: 'asc' as const },
-        include: {
-          author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
-          images: { orderBy: { sortOrder: 'asc' as const } },
-          ...viewerLikes,
-        },
+        include: this.commentReplyInclude(viewerId),
       },
+    };
+  }
+
+  private commentReplyInclude(viewerId?: string) {
+    return {
+      author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
+      images: { orderBy: { sortOrder: 'asc' as const } },
+      ...(viewerId ? { likes: { where: { userId: viewerId }, select: { userId: true } } } : {}),
     };
   }
 
@@ -353,12 +442,24 @@ export class PostsService {
     return [{ likeCount: 'desc' as const }, { replies: { _count: 'desc' as const } }, { createdAt: 'desc' as const }];
   }
 
-  private decorateCommentOwnership<T extends { authorId: string; replies?: Array<{ authorId: string }> }>(comments: T[], viewerId?: string): (T & { viewerCanManage: boolean })[] {
-    return comments.map((comment) => ({
-      ...comment,
-      viewerCanManage: Boolean(viewerId && comment.authorId === viewerId),
-      replies: comment.replies?.map((reply) => ({ ...reply, viewerCanManage: Boolean(viewerId && reply.authorId === viewerId) })),
+  private decorateCommentOwnership<T extends { authorId: string; replies?: Array<{ authorId: string }>; _count?: { replies?: number } }>(comments: T[], viewerId?: string) {
+    return comments.map((comment) => this.presentComment(comment, viewerId));
+  }
+
+  private presentComment<T extends { authorId: string; replies?: Array<{ authorId: string }>; _count?: { replies?: number } }>(comment: T, viewerId?: string) {
+    const { _count, ...publicComment } = comment;
+    const replies = comment.replies?.map((reply) => ({
+      ...reply,
+      viewerCanManage: Boolean(viewerId && reply.authorId === viewerId),
     }));
+    const replyCount = _count?.replies ?? replies?.length ?? 0;
+    return {
+      ...publicComment,
+      viewerCanManage: Boolean(viewerId && comment.authorId === viewerId),
+      replies,
+      replyCount,
+      nextReplyCursor: replies && replyCount > replies.length ? replies.length : null,
+    };
   }
 
   private reportCategoryFromReason(reason: ReportPostDto['reason']) {
@@ -409,53 +510,27 @@ export class PostsService {
     for (const userId of taggedUserIds) void this.notifications.create({ userId, actorId, type: 'mention', entityId: postId, message: 'tagged you in a post.' });
   }
 
-  private presentPost<T extends { _count?: { reposts?: number } | null; author?: Record<string, unknown> | null }>(post: T) {
-    const { _count, ...rest } = { ...post } as T & { latitude?: unknown; longitude?: unknown };
-    delete rest.latitude;
-    delete rest.longitude;
-    const author = rest.author ? { ...rest.author } : rest.author;
-    if (author) {
-      delete author.latitude;
-      delete author.longitude;
-    }
-    return {
-      ...rest,
-      author,
-      repostCount: _count?.reposts ?? 0,
-    };
+  private presentPost(post: any, viewerId?: string) {
+    return presentPublicPost(post, { viewerId });
   }
 
   private include(viewerId?: string) {
     return {
       author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       profileOwner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
-      activity: { select: this.activitySelect() },
+      activity: { select: publicActivitySelect },
       group: { select: { id: true, name: true, slug: true, visibility: true } },
       images: { orderBy: { sortOrder: 'asc' as const } },
       hashtags: { include: { hashtag: true } },
       taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' as const } },
-      buddySessionRecap: true,
+      buddySessionRecap: { select: publicBuddySessionRecapSelect },
       comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const }, include: this.commentInclude(1, viewerId) },
       _count: { select: { reposts: true } },
-      ...(viewerId ? { saves: { where: { userId: viewerId }, select: { userId: true } } } : {}),
+      ...(viewerId ? {
+        likes: { where: { userId: viewerId }, select: { userId: true } },
+        saves: { where: { userId: viewerId }, select: { userId: true } },
+      } : {}),
     };
   }
 
-  private activitySelect() {
-    return {
-      id: true,
-      source: true,
-      type: true,
-      title: true,
-      startedAt: true,
-      durationSeconds: true,
-      distanceMeters: true,
-      elevationGainMeters: true,
-      calories: true,
-      averageHeartRate: true,
-      maxHeartRate: true,
-      averagePaceSecondsKm: true,
-      averageSpeedMetersSec: true,
-    } as const;
-  }
 }

@@ -1,8 +1,8 @@
-# Chats and End-to-End Encryption
+# Chats and Encryption Status
 
-This document describes the current SweBudd chat feature and the beta end-to-end encryption foundation.
+This document describes the current SweBudd chat feature, the retirement of unsafe deterministic encryption, and the requirements for future end-to-end encryption.
 
-Current status: `0.2.23-beta`
+Current status: `0.2.44-beta`
 
 ## Chat surfaces
 
@@ -12,7 +12,7 @@ SweBudd currently has three chat surfaces:
 - Message requests when users are not mutual followers yet.
 - Group buddies chats created from selected participants.
 
-Group community chats also exist under groups/channels and use the group APIs, but the encrypted direct-message foundation described here is implemented on the direct buddy chat path.
+Group community chats also exist under groups/channels and use the group APIs. All newly-created chat messages are plaintext until secure device-key distribution is implemented.
 
 The frontend Chat page also exposes this explanation in-app from the encryption info button so testers can read the same practical summary without opening repository docs.
 
@@ -25,7 +25,7 @@ Direct chats are allowed only when both users follow each other.
 3. It opens the `/chat` Socket.IO namespace with the JWT in `auth.token`.
 4. It sends messages through `POST /chat/messages` or the `chat:send` socket event.
 5. The backend emits `chat:message` to the sender and recipient rooms.
-6. The frontend upserts the message, decrypts encrypted payloads when possible, updates unread state, and marks active peer messages as read.
+6. The frontend upserts the message, decrypts legacy encrypted rows when possible, updates unread state, and marks active peer messages as read.
 
 Unread state is tracked with `messages.read_at`; `PATCH /chat/conversations/:peerId/read` marks peer messages as read.
 
@@ -70,7 +70,7 @@ Server-to-client:
 - `chat:buddy-group-message`
 - `chat:typing`
 
-The socket handshake validates the JWT and joins the socket to a room named by the authenticated user id.
+The socket handshake validates the JWT, rechecks current moderation/ban state, and joins the socket to a room named by the authenticated user id.
 
 ## Data model
 
@@ -81,68 +81,48 @@ Important Prisma models:
 - `MessageReaction`: one reaction per user per message.
 - `BuddyGroupChat` and `BuddyGroupChatMember`: room and membership data.
 - `ChatProfileOverride`: local per-peer display name/photo override.
-- `User.chatPublicKey` / `User.chatPrivateKey`: legacy direct-chat key fields kept for API/database compatibility. The current frontend no longer depends on these fields to send direct messages.
+- `User.chatPublicKey`: public-key registration retained for future migration work. There is no server-side private-key column or API field.
 
-Encryption-related `Message` fields:
+Legacy encryption-related `Message` fields retained for read compatibility:
 
 - `encrypted`: boolean marker.
 - `ciphertext`: base64 AES-GCM ciphertext.
 - `nonce`: base64 AES-GCM IV.
 - `body`: placeholder text such as `[encrypted]` for encrypted direct messages.
 
-## E2EE foundation
+## Current encryption policy
 
-The current direct-chat encryption is implemented in the frontend with Web Crypto:
+SweBudd does not claim that new messages are end-to-end encrypted.
 
-1. On opening Chats, the client checks for browser Web Crypto support and a logged-in user id.
-2. Before sending a direct message, the client derives a stable per-conversation AES-GCM key from the sorted pair of participant user ids.
-3. The plaintext is encrypted with a random 12-byte IV.
-4. The backend stores only `ciphertext`, `nonce`, `encrypted=true`, and a placeholder body.
-5. Any logged-in device for either participant can derive the same conversation key and decrypt locally.
+- New direct sends with `encrypted=true` are rejected by the backend.
+- Encrypted message requests are rejected.
+- New direct messages are stored as plaintext and clear any client-supplied ciphertext/nonce fields.
+- Legacy encrypted rows retain `encrypted`, `ciphertext`, and `nonce` so compatible clients can attempt historical decryption.
+- The public-key API returns and stores `chatPublicKey` only. Supplying `privateKey` is rejected by global request validation.
+- The database migration `20260716143000_drop_chat_private_key` removes the former private-key column.
 
-This replaced the earlier browser-local ECDH key-pair bootstrap so users are not blocked by an "original device" or stale registered chat key when they sign in on another phone.
+The retired design derived an AES key from public participant identifiers. Anyone with those identifiers could derive the same key, so that mechanism did not provide meaningful confidentiality and must not be used for new content.
 
-The backend does not decrypt encrypted direct messages. It stores and relays encrypted payload fields.
+## What is protected today
 
-## Fallback behavior
+Authorization and transport protections still apply:
 
-If encryption is not ready because the browser does not expose Web Crypto, the frontend currently falls back to plaintext direct send except for errors that mean a message request is required.
+- Direct chats require the existing social/message-request rules and block checks.
+- Group/channel message reads and message-ID actions require current group and private-channel access.
+- HTTP and Socket.IO authentication reject actively banned accounts, including previously-issued sessions.
+- Production clients must use HTTPS/WSS so plaintext content is encrypted in transit.
 
-If decryption fails, the frontend displays `[cannot decrypt]`.
+Message content remains visible to the backend and database operators. Participants, timestamps, read state, reactions, deletion state, request status, references, buddy/group messages, and attachments are not end-to-end encrypted.
 
-## What is and is not protected
+## Requirements before enabling E2EE
 
-Protected by the current foundation:
+Do not accept new encrypted payloads until the design includes:
 
-- Direct buddy chat message text when browser Web Crypto is available.
-- Stored direct-message body content for encrypted direct messages; the backend receives ciphertext plus nonce, not the readable text body.
+- Per-device key pairs whose private keys never leave the device.
+- Authenticated multi-device public-key distribution and device revocation.
+- User-visible key verification, key-change warnings, and recovery behavior.
+- An audited protocol such as Signal's Double Ratchet with forward secrecy and post-compromise security.
+- Encrypted attachment/reference handling where confidentiality is required.
+- Cross-device automation for enrollment, rotation, loss, revocation, send/decrypt, and downgrade prevention.
 
-Not protected by the current foundation:
-
-- Direct-chat participants, timestamps, read state, reactions, deletion state, request status, and other message metadata.
-- Chat media attachments and ActSnap reference media/text.
-- Buddy group chats, group/channel chats, and buddy session room chats.
-- Any plaintext fallback message sent when Web Crypto is unavailable or encryption fails.
-
-## Important limitations
-
-This is an MVP E2EE foundation, not production-audited secure messaging.
-
-Known limitations:
-
-- There is no key verification, safety number, fingerprint check, or trust-on-first-use warning.
-- The per-conversation key is deterministic from participant ids so it is multi-device friendly, but it is not a production-grade secret-chat design.
-- There is no forward secrecy or per-message ratchet.
-- Message metadata, participants, timestamps, reactions, deletion state, and unread state are not encrypted.
-- Group buddies chats and group/channel chats are plaintext today.
-
-## Production hardening checklist
-
-Before calling chat E2EE production-ready:
-
-- Replace deterministic conversation-key derivation with explicit device keys and real multi-device key distribution.
-- Add user-visible key verification/fingerprint UX.
-- Add key change detection and warnings.
-- Use an audited protocol design such as Signal's Double Ratchet rather than raw ECDH reuse.
-- Add encrypted attachments and encrypted ActSnap references if those need confidentiality.
-- Add browser automation tests for encrypted send/decrypt, key loss, key rotation, and plaintext fallback boundaries.
+Until those controls exist, a clear plaintext contract is safer than presenting deterministic obfuscation as E2EE.

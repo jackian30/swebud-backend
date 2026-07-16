@@ -4,8 +4,28 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsGateway } from './notifications.gateway';
 
 const actorSelect = { id: true, displayName: true, username: true, profileImageUrl: true } as const;
+const notificationSelect = {
+  id: true,
+  type: true,
+  entityId: true,
+  actorIds: true,
+  message: true,
+  readAt: true,
+  createdAt: true,
+  actor: { select: actorSelect },
+} as const;
 type NotificationActor = { id: string; displayName: string | null; username: string; profileImageUrl: string | null };
 type CreateNotificationInput = { userId: string; actorId?: string; type: NotificationType; entityId?: string; message: string };
+type NotificationRecord = {
+  id: string;
+  type: NotificationType;
+  entityId: string | null;
+  actorIds: unknown;
+  message: string;
+  readAt: Date | null;
+  createdAt: Date;
+  actor: NotificationActor | null;
+};
 
 @Injectable()
 export class NotificationsService {
@@ -20,7 +40,7 @@ export class NotificationsService {
         const existing = await this.prisma.notification.findFirst({
           where: { userId: input.userId, type: input.type, entityId: input.entityId, readAt: null },
           orderBy: { createdAt: 'desc' },
-          include: { actor: { select: actorSelect } },
+          select: { id: true, actorId: true, actorIds: true },
         });
         if (existing) return this.aggregate(existing, input, actor);
       }
@@ -32,7 +52,7 @@ export class NotificationsService {
           actorIds,
           message: this.notificationMessage(input.type, input.message, actor ? [actor] : [], actorIds?.length ?? 0),
         },
-        include: { actor: { select: actorSelect } },
+        select: notificationSelect,
       });
       return this.emitNotification(input.userId, notification);
     } catch {
@@ -40,7 +60,7 @@ export class NotificationsService {
     }
   }
 
-  private async aggregate(existing: { id: string; actorId: string | null; actorIds: unknown; actor?: NotificationActor | null }, input: CreateNotificationInput, actor: NotificationActor | null) {
+  private async aggregate(existing: { id: string; actorId: string | null; actorIds: unknown }, input: CreateNotificationInput, actor: NotificationActor | null) {
     const actorIds = this.appendActorId(this.actorIds(existing.actorIds, existing.actorId), input.actorId);
     const actors = await this.actorsById(actorIds, actor);
     const notification = await this.prisma.notification.update({
@@ -51,15 +71,32 @@ export class NotificationsService {
         message: this.notificationMessage(input.type, input.message, actors, actorIds.length),
         createdAt: new Date(),
       },
-      include: { actor: { select: actorSelect } },
+      select: notificationSelect,
     });
     return this.emitNotification(input.userId, notification);
   }
 
-  private emitNotification<T>(userId: string, notification: T) {
-    this.gateway.emitToUser(userId, 'notification:new', notification);
+  private emitNotification(userId: string, notification: NotificationRecord) {
+    const presented = this.presentNotification(notification);
+    this.gateway.emitToUser(userId, 'notification:new', presented);
     void this.unreadCount(userId).then((count) => this.gateway.emitToUser(userId, 'notification:unread-count', count));
-    return notification;
+    return presented;
+  }
+
+  private presentNotification(notification: NotificationRecord) {
+    const actorIds = Array.isArray(notification.actorIds)
+      ? notification.actorIds.filter((value): value is string => typeof value === 'string')
+      : null;
+    return {
+      id: notification.id,
+      type: notification.type,
+      entityId: notification.entityId,
+      actorIds,
+      message: notification.message,
+      readAt: notification.readAt,
+      createdAt: notification.createdAt,
+      actor: notification.actor,
+    };
   }
 
   private canAggregate(input: CreateNotificationInput) {
@@ -151,8 +188,8 @@ export class NotificationsService {
       where: this.visibleWhere(userId),
       orderBy: { createdAt: 'desc' },
       take: 50,
-      include: { actor: { select: actorSelect } },
-    });
+      select: notificationSelect,
+    }).then((notifications) => notifications.map((notification) => this.presentNotification(notification)));
   }
 
   async unreadCount(userId: string) {

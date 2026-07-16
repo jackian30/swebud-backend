@@ -1,17 +1,18 @@
 import { Type } from 'class-transformer';
 import { ActivityPersona, UserGender } from '@prisma/client';
-import { IsArray, IsBoolean, IsDate, IsEmail, IsEnum, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsArray, IsBoolean, IsDate, IsEmail, IsEnum, IsString, MaxLength, MinLength } from 'class-validator';
+import { IsOptionalNonNull } from '../common/validation';
 
 export class RegisterDto {
   @IsEmail() @MaxLength(254) email!: string;
   @IsString() @MinLength(8) @MaxLength(128) password!: string;
   @IsString() @MinLength(3) @MaxLength(32) username!: string;
-  @IsOptional() @IsString() @MaxLength(80) displayName?: string;
-  @IsOptional() @IsEnum(UserGender) gender?: UserGender;
+  @IsOptionalNonNull() @IsString() @MaxLength(80) displayName?: string;
+  @IsOptionalNonNull() @IsEnum(UserGender) gender?: UserGender;
   @Type(() => Date) @IsDate() dateOfBirth!: Date;
-  @IsOptional() @IsEnum(ActivityPersona) activityPersona?: ActivityPersona;
-  @IsOptional() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
-  @IsOptional() @IsString() @MaxLength(4096) captchaToken?: string;
+  @IsOptionalNonNull() @IsEnum(ActivityPersona) activityPersona?: ActivityPersona;
+  @IsOptionalNonNull() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
+  @IsOptionalNonNull() @IsString() @MaxLength(4096) captchaToken?: string;
   @IsBoolean() legalConsent!: boolean;
   @IsBoolean() dataConsent!: boolean;
 }
@@ -23,15 +24,15 @@ export class CompleteOnboardingDto {
   @Type(() => Date) @IsDate() dateOfBirth!: Date;
   @IsBoolean() legalConsent!: boolean;
   @IsBoolean() dataConsent!: boolean;
-  @IsOptional() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
+  @IsOptionalNonNull() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
 }
 export class LoginDto {
   @IsString() @MaxLength(254) email!: string;
   @IsString() @MinLength(8) @MaxLength(128) password!: string;
-  @IsOptional() @IsString() @MaxLength(4096) captchaToken?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(4096) captchaToken?: string;
 }
-export class RefreshDto { @IsString() @MaxLength(4096) refreshToken!: string; }
-export class LogoutDto { @IsOptional() @IsString() @MaxLength(4096) refreshToken?: string; }
+export class RefreshDto { @IsOptionalNonNull() @IsString() @MaxLength(4096) refreshToken?: string; }
+export class LogoutDto { @IsOptionalNonNull() @IsString() @MaxLength(4096) refreshToken?: string; }
 export class ForgotPasswordDto { @IsEmail() @MaxLength(254) email!: string; }
 export class ResetPasswordDto {
   @IsString() @MaxLength(256) token!: string;

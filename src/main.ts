@@ -8,6 +8,7 @@ import { join } from 'path';
 import { AppModule } from './app.module';
 import { OriginCheckedSocketIoAdapter } from './common/origin-checked-socket-io.adapter';
 import { assertProductionConfig, bearerCorsOptions } from './common/security';
+import { setupOpenApi } from './openapi';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -36,6 +37,7 @@ async function bootstrap() {
   app.use('/api/uploads', serveUploadedFile);
   app.enableCors(bearerCorsOptions(config));
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
+  setupOpenApi(app);
   await app.listen(config.get<number>('PORT') ?? 3000);
 }
 bootstrap();

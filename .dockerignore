@@ -6,3 +6,14 @@ Dockerfile
 README.md
 npm-debug.log*
 .env*
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/*.jks
+**/*.keystore
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/*.dump
+**/*.sql.gz

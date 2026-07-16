@@ -1,40 +1,53 @@
 import { ReportCategory } from '@prisma/client';
-import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { ArrayMaxSize, ArrayMinSize, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsNotEmpty, IsString, IsUUID, Max, MaxLength, Min } from 'class-validator';
+import { IsOptionalNonNull, IsOptionalOrNull } from '../common/validation';
+
+export class ChatHistoryQueryDto {
+  @IsOptionalNonNull() @IsUUID() cursor?: string;
+  @IsOptionalNonNull() @Type(() => Number) @IsInt() @Min(1) @Max(100) limit?: number;
+}
+
+export class ChatMessageSearchQueryDto {
+  @IsOptionalNonNull()
+  @Transform(({ value }) => typeof value === 'string' ? value.trim() : value)
+  @IsString()
+  @MaxLength(120)
+  q?: string;
+}
 
 export class SendDirectMessageDto {
   @IsUUID() recipientId!: string;
   @IsString() @MaxLength(4000) body!: string;
-  @IsOptional() @IsString() @MaxLength(12000) ciphertext?: string;
-  @IsOptional() @IsString() @MaxLength(512) nonce?: string;
-  @IsOptional() @IsBoolean() encrypted?: boolean;
-  @IsOptional() @IsIn(['actsnap', 'message']) referenceType?: 'actsnap' | 'message';
-  @IsOptional() @IsString() @MaxLength(120) referenceId?: string;
-  @IsOptional() @IsString() @MaxLength(12000) referenceMediaUrl?: string;
-  @IsOptional() @IsString() @MaxLength(500) referenceText?: string;
-  @IsOptional() @IsString() @MaxLength(120) referenceAuthorName?: string;
+  @IsOptionalNonNull() @IsIn([false]) encrypted?: false;
+  @IsOptionalNonNull() @IsIn(['actsnap', 'message']) referenceType?: 'actsnap' | 'message';
+  @IsOptionalNonNull() @IsString() @MaxLength(120) referenceId?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(12000) referenceMediaUrl?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(500) referenceText?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(120) referenceAuthorName?: string;
 }
 
 export class RegisterChatKeyDto {
   @IsString() @MaxLength(4096) publicKey!: string;
-  @IsOptional() @IsString() @MaxLength(4096) privateKey?: string;
 }
 export class MessageReactionDto { @IsString() @MaxLength(32) emoji!: string; }
-export class ChatMuteDto { @IsBoolean() muted!: boolean; @IsOptional() @IsDateString() mutedUntil?: string; }
+export class MessageReactionQueryDto { @IsString() @IsNotEmpty() @MaxLength(32) emoji!: string; }
+export class ChatMuteDto { @IsBoolean() muted!: boolean; @IsOptionalOrNull() @IsDateString() mutedUntil?: string | null; }
 export class ChatPinDto { @IsBoolean() pinned!: boolean; }
 export class ReportMessageDto {
-  @IsOptional() @IsEnum(ReportCategory) category?: ReportCategory;
-  @IsOptional() @IsString() @MaxLength(1000) note?: string;
-  @IsOptional() @IsString() @MaxLength(1000) details?: string;
+  @IsOptionalNonNull() @IsEnum(ReportCategory) category?: ReportCategory;
+  @IsOptionalNonNull() @IsString() @MaxLength(1000) note?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(1000) details?: string;
 }
 export class TypingDto { @IsUUID() recipientId!: string; }
 export class UpdateChatProfileDto {
-  @IsOptional() @IsString() @MaxLength(120) displayName?: string;
-  @IsOptional() @IsString() @MaxLength(12000) profileImageUrl?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(120) displayName?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(12000) profileImageUrl?: string;
 }
 
 export class CreateBuddyGroupChatDto {
   @IsString() @MaxLength(80) name!: string;
-  @IsOptional() @IsString() @MaxLength(240) description?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(240) description?: string;
   @IsArray() @ArrayMinSize(1) @ArrayMaxSize(50) @IsUUID(undefined, { each: true }) participantIds!: string[];
 }
 
@@ -44,8 +57,8 @@ export class AddBuddyGroupParticipantsDto {
 
 export class SendBuddyGroupMessageDto {
   @IsString() @MaxLength(4000) body!: string;
-  @IsOptional() @IsIn(['message']) referenceType?: 'message';
-  @IsOptional() @IsString() @MaxLength(120) referenceId?: string;
-  @IsOptional() @IsString() @MaxLength(500) referenceText?: string;
-  @IsOptional() @IsString() @MaxLength(120) referenceAuthorName?: string;
+  @IsOptionalNonNull() @IsIn(['message']) referenceType?: 'message';
+  @IsOptionalNonNull() @IsString() @MaxLength(120) referenceId?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(500) referenceText?: string;
+  @IsOptionalNonNull() @IsString() @MaxLength(120) referenceAuthorName?: string;
 }

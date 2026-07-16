@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { visiblePostWhere } from '../privacy/privacy';
 import { activityPersonaLinkSelect } from '../common/activity-personas';
+import { presentPublicPost, publicActivitySelect, publicBuddySessionRecapSelect } from '../common/post-presentation';
 
 type TrendingStats = { salutes: number; comments: number; reports: number };
 type FeedRankingContext = {
@@ -15,9 +16,9 @@ export class FeedService {
   constructor(private prisma: PrismaService) {}
 
   async feed(userId: string, options: { take?: number; hashtag?: string; cursor?: number; sort?: 'relevance' | 'latest' | 'trending' | 'unseen' | 'time'; followingOnly?: boolean; savedOnly?: boolean; timezone?: string } = {}) {
-    const requestedTake = options.take ?? 20;
+    const requestedTake = Math.min(Math.max(Math.trunc(options.take ?? 20), 1), 50);
     const sort = options.sort ?? 'relevance';
-    const cursor = options.cursor ?? 0;
+    const cursor = Math.max(Math.trunc(options.cursor ?? 0), 0);
     const normalizedHashtags = this.normalizeHashtags(options.hashtag);
     const needsRelevanceContext = sort === 'relevance';
     const [user, followingRows, preferredHashtags] = await Promise.all([
@@ -66,7 +67,7 @@ export class FeedService {
         },
       ],
     };
-    const limit = Math.min(requestedTake, 50);
+    const limit = requestedTake;
     const candidateTake = this.candidateTake(cursor, limit, sort);
     const posts = await this.prisma.post.findMany({
       where,
@@ -125,7 +126,7 @@ export class FeedService {
     const latestActivityByPostId = sort === 'relevance' ? await this.latestActivityByPostId(postIds) : new Map<string, Date>();
     const rankingContext: FeedRankingContext = { user, followingIds: new Set(followingIds), preferredHashtags };
     const ranked = this.sortPosts(feedItems, rankingContext, viewedByPostId, latestActivityByPostId, sort, trendingStats);
-    return ranked.slice(cursor, cursor + limit).map((post) => this.sanitizeFeedPostLocation(post));
+    return ranked.slice(cursor, cursor + limit).map((post) => this.sanitizeFeedPostLocation(post, userId));
   }
 
   private candidateTake(cursor: number, limit: number, sort: 'relevance' | 'latest' | 'trending' | 'unseen' | 'time') {
@@ -156,15 +157,23 @@ export class FeedService {
     if (!uniqueIds.length) return { count: 0 };
     const visibleIds = (await this.prisma.post.findMany({ where: { id: { in: uniqueIds }, ...visiblePostWhere(userId) }, select: { id: true } })).map((post) => post.id);
     if (!visibleIds.length) return { count: 0 };
-    await this.prisma.$transaction([
-      ...visibleIds.map((postId) => this.prisma.postView.upsert({
-        where: { postId_userId: { postId, userId } },
-        update: { count: { increment: 1 } },
-        create: { postId, userId },
-      })),
-      this.prisma.post.updateMany({ where: { id: { in: visibleIds } }, data: { viewCount: { increment: 1 } } }),
-    ]);
-    return { count: visibleIds.length };
+    const recorded = await this.prisma.$transaction(async (tx) => {
+      let count = 0;
+      for (const postId of visibleIds) {
+        const created = await tx.postView.createMany({
+          data: [{ postId, userId }],
+          skipDuplicates: true,
+        });
+        if (created.count !== 1) continue;
+        await tx.post.updateMany({
+          where: { id: postId },
+          data: { viewCount: { increment: 1 } },
+        });
+        count += 1;
+      }
+      return count;
+    });
+    return { count: recorded };
   }
 
   async hashtags(q = '') {
@@ -198,7 +207,13 @@ export class FeedService {
       where: { visibility: 'public', members: { none: { userId } } },
       take: 10,
       orderBy: { createdAt: 'desc' },
-      include: { _count: { select: { members: true, posts: true } } },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        _count: { select: { members: true, posts: true } },
+      },
     });
   }
 
@@ -206,48 +221,21 @@ export class FeedService {
     return {
       author: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       profileOwner: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
-      activity: { select: this.activitySelect() },
+      activity: { select: publicActivitySelect },
       group: { select: { id: true, name: true, slug: true, visibility: true } },
       images: { orderBy: { sortOrder: 'asc' as const } },
       hashtags: { include: { hashtag: true } },
       taggedUsers: { include: { user: { select: { id: true, displayName: true, username: true, profileImageUrl: true } } }, orderBy: { createdAt: 'asc' as const } },
-      buddySessionRecap: true,
+      buddySessionRecap: { select: publicBuddySessionRecapSelect },
       saves: { where: { userId }, select: { userId: true } },
+      likes: { where: { userId }, select: { userId: true } },
       comments: { take: 2, where: { parentId: null }, orderBy: { createdAt: 'desc' as const }, include: { author: { select: { id: true, displayName: true, username: true } } } },
       _count: { select: { reposts: true } },
     } as const;
   }
 
-  private activitySelect() {
-    return {
-      id: true,
-      source: true,
-      type: true,
-      title: true,
-      startedAt: true,
-      durationSeconds: true,
-      distanceMeters: true,
-      elevationGainMeters: true,
-      calories: true,
-      averageHeartRate: true,
-      maxHeartRate: true,
-      averagePaceSecondsKm: true,
-      averageSpeedMetersSec: true,
-    } as const;
-  }
-
-  private sanitizeFeedPostLocation<T extends { latitude?: number | null; longitude?: number | null; author?: { latitude?: number | null; longitude?: number | null } | null; _count?: { reposts?: number } | null }>(post: T) {
-    const { _count, ...safePost } = { ...post };
-    (safePost as T & { repostCount: number }).repostCount = _count?.reposts ?? 0;
-    delete safePost.latitude;
-    delete safePost.longitude;
-    if (safePost.author) {
-      const safeAuthor = { ...safePost.author };
-      delete safeAuthor.latitude;
-      delete safeAuthor.longitude;
-      safePost.author = safeAuthor;
-    }
-    return safePost;
+  private sanitizeFeedPostLocation(post: any, viewerId?: string) {
+    return presentPublicPost(post, { viewerId });
   }
 
   private sortPosts(

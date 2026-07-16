@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-swebud}
       POSTGRES_USER: ${POSTGRES_USER:-swebud}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-swebud}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD; deploy.sh generates it on first run}
     ports:
       - "${BACKEND_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-55432}:5432"
     volumes:
@@ -28,7 +28,12 @@ services:
       - swebud
 
   backend:
-    image: node:22-alpine
+    build:
+      context: ..
+      dockerfile: deployment/Dockerfile.dev
+      args:
+        LOCAL_UID: ${LOCAL_UID:-1000}
+        LOCAL_GID: ${LOCAL_GID:-1000}
     working_dir: /app
     restart: unless-stopped
     depends_on:
@@ -40,13 +45,17 @@ services:
       NODE_ENV: development
       PORT: 3000
       CHOKIDAR_USEPOLLING: ${CHOKIDAR_USEPOLLING:-true}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://swebud:swebud@postgres:5432/swebud?schema=public}
-      DIRECT_URL: ${DIRECT_URL:-postgresql://swebud:swebud@postgres:5432/swebud?schema=public}
-      JWT_SECRET: ${JWT_SECRET:-dev-jwt-secret-change-me}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret-change-me}
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL; deploy.sh generates it on first run}
+      DIRECT_URL: ${DIRECT_URL:?Set DIRECT_URL; deploy.sh generates it on first run}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET; deploy.sh generates it on first run}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET; deploy.sh generates it on first run}
+      JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
+      REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-604800}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:9000}
       ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:9100,http://swebud-admin.loc}
       ALLOW_LOCAL_ORIGINS: ${ALLOW_LOCAL_ORIGINS:-true}
+      NATIVE_AUTH_ENABLED: ${NATIVE_AUTH_ENABLED:-false}
+      NATIVE_APP_ORIGIN: ${NATIVE_APP_ORIGIN:-https://localhost}
       SMTP_HOST: ${SMTP_HOST:-mailhog}
       SMTP_PORT: ${SMTP_PORT:-1025}
       SMTP_SECURE: ${SMTP_SECURE:-false}
@@ -65,7 +74,6 @@ services:
       GOOGLE_CALLBACK_URL: ${GOOGLE_CALLBACK_URL:-http://localhost:3002/auth/google/callback}
       GOOGLE_OAUTH_REDIRECT_URI: ${GOOGLE_OAUTH_REDIRECT_URI:-http://localhost:9000/auth/google/callback}
       CLOUDFLARE_TURNSTILE_SECRET_KEY: ${CLOUDFLARE_TURNSTILE_SECRET_KEY:-}
-      CLOUDFLARE_TURNSTILE_SITE_KEY: ${CLOUDFLARE_TURNSTILE_SITE_KEY:-}
       KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
       MEDIA_STORAGE_DRIVER: ${MEDIA_STORAGE_DRIVER:-local}
@@ -80,8 +88,7 @@ services:
       GARMIN_CONSUMER_KEY: ${GARMIN_CONSUMER_KEY:-}
       GARMIN_CONSUMER_SECRET: ${GARMIN_CONSUMER_SECRET:-}
     command: >
-      sh -c "apk add --no-cache ffmpeg &&
-      npm ci &&
+      sh -c "npm ci &&
       npx prisma generate &&
       DATABASE_URL=\"$${DIRECT_URL}\" npx prisma migrate deploy &&
       mkdir -p uploads/profile-photos uploads/cover-photos uploads/group-photos uploads/chat-photos uploads/actsnaps uploads/posts uploads/comments uploads/images uploads/videos uploads/audio uploads/media &&
