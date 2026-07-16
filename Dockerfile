@@ -29,4 +29,5 @@ RUN mkdir -p uploads/images uploads/videos uploads/audio && chown -R node:node u
 USER node
 
 EXPOSE 3000
-CMD ["node", "scripts/render-start.js"]
+ENTRYPOINT ["node", "scripts/docker-entrypoint.js"]
+CMD ["node", "dist/src/main.js"]

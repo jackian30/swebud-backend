@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { booleanConfig } from '../common/config';
 
 type TurnstileVerifyResponse = {
   success: boolean;
@@ -18,7 +19,13 @@ export class TurnstileService {
     return Boolean(this.secretKey());
   }
 
-  async verify(token?: string, remoteIp?: string, expectedAction?: string, _origin?: string | null) {
+  async verify(
+    token?: string,
+    remoteIp?: string,
+    expectedAction?: string,
+    origin?: string | null,
+    options: { legacyNativeClient?: boolean } = {},
+  ) {
     const secret = this.secretKey();
     if (!secret) {
       if (process.env.NODE_ENV === 'production') {
@@ -27,6 +34,9 @@ export class TurnstileService {
       return { skipped: true, reason: 'CLOUDFLARE_TURNSTILE_SECRET_KEY is not configured' };
     }
     if (!token) {
+      if (options.legacyNativeClient && this.legacyNativeCaptchaBridgeActive(origin)) {
+        return { skipped: true, reason: 'Legacy native captcha compatibility bridge' };
+      }
       if (process.env.NODE_ENV !== 'production') {
         return { skipped: true, reason: 'Local/native security check skipped' };
       }
@@ -62,6 +72,15 @@ export class TurnstileService {
   private secretKey() {
     const value = this.config.get<string>('CLOUDFLARE_TURNSTILE_SECRET_KEY')?.trim();
     return value && value !== '***' ? value : '';
+  }
+
+  private legacyNativeCaptchaBridgeActive(origin?: string | null) {
+    if (!booleanConfig(this.config, 'NATIVE_AUTH_ENABLED', false)) return false;
+    if (!origin || origin !== this.config.get<string>('NATIVE_APP_ORIGIN')?.trim()) return false;
+    const rawExpiry = this.config.get<string>('LEGACY_NATIVE_AUTH_COMPAT_UNTIL')?.trim();
+    if (!rawExpiry) return false;
+    const expiry = Date.parse(rawExpiry);
+    return Number.isFinite(expiry) && Date.now() < expiry;
   }
 
 }

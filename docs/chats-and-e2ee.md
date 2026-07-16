@@ -2,7 +2,7 @@
 
 This document describes the current SweBudd chat feature, the retirement of unsafe deterministic encryption, and the requirements for future end-to-end encryption.
 
-Current status: `0.2.48-beta`
+Current status: `0.2.49-beta`
 
 ## Chat surfaces
 
@@ -99,7 +99,7 @@ SweBudd does not claim that new messages are end-to-end encrypted.
 - New direct messages are stored as plaintext and clear any client-supplied ciphertext/nonce fields.
 - Legacy encrypted rows retain `encrypted`, `ciphertext`, and `nonce` so compatible clients can attempt historical decryption.
 - The public-key API returns and stores `chatPublicKey` only. Supplying `privateKey` is rejected by global request validation.
-- The database migration `20260716143000_drop_chat_private_key` removes the former private-key column.
+- The current Prisma Client ignores the former private-key field and every API rejects private-key input. The nullable database column is temporarily retained only so a `v0.2.43` rollback remains schema-compatible; it must be dropped after that rollback window closes.
 
 The retired design derived an AES key from public participant identifiers. Anyone with those identifiers could derive the same key, so that mechanism did not provide meaningful confidentiality and must not be used for new content.
 

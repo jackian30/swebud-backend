@@ -26,6 +26,9 @@ async function deployMigrations(env) {
   const attempts = Number.parseInt(env.PRISMA_MIGRATE_ATTEMPTS || '3', 10);
   const retrySeconds = Number.parseInt(env.PRISMA_MIGRATE_RETRY_SECONDS || '20', 10);
 
+  const prepareCode = await run('node', ['scripts/prepare-compatible-migrations.js'], env);
+  if (prepareCode !== 0) process.exit(prepareCode);
+
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     const code = await run('npx', ['prisma', 'migrate', 'deploy'], env);
     if (code === 0) return;
@@ -77,4 +80,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { withMaxSearchParam };
+module.exports = { deployMigrations, withMaxSearchParam };

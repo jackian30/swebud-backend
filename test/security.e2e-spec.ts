@@ -6,6 +6,7 @@ import { AppModule } from '../src/app.module';
 import { MailService } from '../src/mail/mail.service';
 import { PrismaService } from '../src/prisma/prisma.service';
 import { LocalStorageDriver } from '../src/uploads/media-library/local-storage.driver';
+import { TurnstileService } from '../src/auth/turnstile.service';
 
 type TestUser = {
   id: string;
@@ -31,6 +32,7 @@ describe('security boundaries (e2e)', () => {
     process.env.FRONTEND_ORIGIN ??= 'http://localhost:9000';
     process.env.NATIVE_AUTH_ENABLED = 'true';
     process.env.NATIVE_APP_ORIGIN = 'https://localhost';
+    process.env.LEGACY_WEB_AUTH_COMPAT_UNTIL = '2999-10-01T00:00:00.000Z';
 
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(MailService)
@@ -83,6 +85,7 @@ describe('security boundaries (e2e)', () => {
     const registered = await request(app.getHttpServer())
       .post('/auth/register')
       .set('Origin', 'http://localhost:9000')
+      .set('X-SweBudd-Client', 'web')
       .send({
         email: `${label}@example.com`,
         password: 'Password123!',
@@ -104,14 +107,139 @@ describe('security boundaries (e2e)', () => {
     const refreshed = await request(app.getHttpServer())
       .post('/auth/refresh')
       .set('Origin', 'http://localhost:9000')
+      .set('X-SweBudd-Client', 'web')
       .set('Cookie', cookie.split(';')[0])
-      .send({})
       .expect(200);
 
     expect(refreshed.body.accessToken).toBeTruthy();
     expect(refreshed.body).not.toHaveProperty('refreshToken');
     expect(refreshed.headers['set-cookie']?.[0]).toContain('swebud.refresh=');
     expect(refreshed.headers['cache-control']).toBe('no-store');
+  });
+
+  it('keeps an already-running pre-cookie browser bundle functional during the bounded rollout window', async () => {
+    const label = `cached-web-${runId}`;
+    const registered = await request(app.getHttpServer())
+      .post('/auth/register')
+      .set('Origin', 'http://localhost:9000')
+      .send({
+        email: `${label}@example.com`,
+        password: 'Password123!',
+        username: label,
+        dateOfBirth: '1990-01-01T00:00:00.000Z',
+        legalConsent: true,
+        dataConsent: true,
+      })
+      .expect(201);
+    userIds.push(registered.body.user.id);
+
+    expect(registered.body.refreshToken).toBeTruthy();
+    expect(registered.headers['set-cookie']?.[0]).toContain('swebud.refresh=');
+
+    const refreshed = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('Origin', 'http://localhost:9000')
+      .send({ refreshToken: registered.body.refreshToken })
+      .expect(200);
+
+    expect(refreshed.body.accessToken).toBeTruthy();
+    expect(refreshed.body.refreshToken).toBeTruthy();
+
+    const cookie = refreshed.headers['set-cookie']?.[0];
+    expect(cookie).toContain('swebud.refresh=');
+
+    const cookieOnlyRefresh = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('Origin', 'http://localhost:9000')
+      .set('Cookie', cookie.split(';')[0])
+      .send({})
+      .expect(200);
+
+    expect(cookieOnlyRefresh.body.accessToken).toBeTruthy();
+    expect(cookieOnlyRefresh.body).not.toHaveProperty('refreshToken');
+    expect(cookieOnlyRefresh.headers['set-cookie']?.[0]).toContain('swebud.refresh=');
+  });
+
+  it('keeps installed pre-header Android clients compatible on the exact native origin', async () => {
+    const verifyCaptcha = jest.spyOn(app.get(TurnstileService), 'verify');
+    const label = `legacy-native-${runId}`;
+    const registered = await request(app.getHttpServer())
+      .post('/auth/register')
+      .set('Origin', 'https://localhost')
+      .send({
+        email: `${label}@example.com`,
+        password: 'Password123!',
+        username: label,
+        dateOfBirth: '1990-01-01T00:00:00.000Z',
+        legalConsent: true,
+        dataConsent: true,
+      })
+      .expect(201);
+    userIds.push(registered.body.user.id);
+
+    expect(registered.body.refreshToken).toBeTruthy();
+    expect(registered.headers['set-cookie']).toBeUndefined();
+    expect(verifyCaptcha).toHaveBeenCalledWith(
+      undefined,
+      expect.anything(),
+      'signup',
+      'https://localhost',
+      { legacyNativeClient: true },
+    );
+
+    const refreshed = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('Origin', 'https://localhost')
+      .send({ refreshToken: registered.body.refreshToken })
+      .expect(200);
+
+    expect(refreshed.body.accessToken).toBeTruthy();
+    expect(refreshed.body.refreshToken).toBeTruthy();
+
+    await request(app.getHttpServer())
+      .post('/auth/logout')
+      .set('Origin', 'https://localhost')
+      .set('Authorization', `Bearer ${refreshed.body.accessToken}`)
+      .expect(204);
+  });
+
+  it('migrates a legacy browser body refresh token into the HttpOnly cookie once', async () => {
+    const label = `legacy-web-${runId}`;
+    const legacySession = await request(app.getHttpServer())
+      .post('/auth/register')
+      .set('Origin', 'https://localhost')
+      .set('X-SweBudd-Client', 'native')
+      .send({
+        email: `${label}@example.com`,
+        password: 'Password123!',
+        username: label,
+        dateOfBirth: '1990-01-01T00:00:00.000Z',
+        legalConsent: true,
+        dataConsent: true,
+      })
+      .expect(201);
+    userIds.push(legacySession.body.user.id);
+
+    const migrated = await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('Origin', 'http://localhost:9000')
+      .set('X-SweBudd-Client', 'web')
+      .set('X-SweBudd-Session-Migration', 'legacy-web-v1')
+      .send({ refreshToken: legacySession.body.refreshToken })
+      .expect(200);
+
+    expect(migrated.body.accessToken).toBeTruthy();
+    expect(migrated.body).not.toHaveProperty('refreshToken');
+    const cookie = migrated.headers['set-cookie']?.[0];
+    expect(cookie).toContain('swebud.refresh=');
+
+    await request(app.getHttpServer())
+      .post('/auth/refresh')
+      .set('Origin', 'http://localhost:9000')
+      .set('X-SweBudd-Client', 'web')
+      .set('Cookie', cookie.split(';')[0])
+      .send({})
+      .expect(200);
   });
 
   it('blocks direct private-group joins and filters private channels, previews, and counts per viewer', async () => {

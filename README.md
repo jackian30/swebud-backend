@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.48-beta**
+Current release: **0.2.49-beta**
 
 ## Stack
 
@@ -34,10 +34,12 @@ Current release: **0.2.48-beta**
 
 ## Current beta notes
 
-0.2.48-beta keeps the security and contract hardening from 0.2.44-beta and fixes the Render production-origin rollout:
+0.2.49-beta keeps the security and contract hardening from 0.2.48-beta and prepares a backward-compatible Render rollout:
 
-- The Render Blueprint pins the public Cloudflare Pages origin to `https://swebudd.com`, explicitly clears the unused admin origin, and reserves `https://localhost` for the Capacitor native origin only.
-- The backend's first production bootstrap import migrates the exact historical Render dashboard value `FRONTEND_ORIGIN=https://localhost` to the production Cloudflare origin. It does not rely on Render-specific environment flags, so a dashboard-managed Docker service can launch `dist/src/main.js` directly without bypassing the migration.
+- The Docker Render Blueprint pins the public Cloudflare Pages origin to `https://swebudd.com`; its temporary `ADMIN_ORIGIN=https://localhost` value can support a deliberately redeployed v0.2.43 compatibility target, and current startup clears that exact alias before validation.
+- The backend's first bootstrap import migrates the exact historical Render dashboard value `FRONTEND_ORIGIN=https://localhost` only for the SweBudd Render service. The Docker entrypoint still runs migration preparation and `prisma migrate deploy` when the dashboard overrides the image command with `node dist/src/main.js`.
+- Published migration files remain immutable. Startup records the two premature contract migrations as logically applied when necessary, then a forward repair retains the v0.2.43 column and removes its incompatible unique index during the rollback window.
+- Already-running pre-cookie web bundles and Android releases through v0.2.68 remain functional through bounded compatibility windows ending October 1, 2026.
 - Production startup errors identify the exact browser-origin variable that is invalid without weakening the HTTPS/local-network rejection.
 
 - Google sign-in binds only by the verified Google subject; a matching local email is never auto-linked.
@@ -113,6 +115,8 @@ Important variables:
 - `FRONTEND_ORIGIN`
 - `ALLOW_LOCAL_ORIGINS` — set to `true` only for local/LAN deployments that need `localhost` or private IP browser origins in addition to `FRONTEND_ORIGIN`
 - `NATIVE_AUTH_ENABLED`, `NATIVE_APP_ORIGIN` — enables the native refresh-token body transport only for the exact Capacitor origin; browser sessions always use the host-only HttpOnly refresh cookie
+- `LEGACY_NATIVE_AUTH_COMPAT_UNTIL` — optional ISO timestamp for the temporary Android ≤0.2.68 no-Turnstile bridge; it applies only to pre-header clients on the exact configured native origin
+- `LEGACY_WEB_AUTH_COMPAT_UNTIL` — optional ISO timestamp for the temporary exact-origin JSON refresh-token bridge used only by already-running pre-cookie browser bundles
 - `BACKEND_PORT`
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_IGNORE_TLS`, `SMTP_REQUIRE_TLS`, `SMTP_TLS_REJECT_UNAUTHORIZED`, `SMTP_USER`, `SMTP_PASS`, `SMTP_CONNECTION_TIMEOUT_MS`, `SMTP_GREETING_TIMEOUT_MS`, `SMTP_SOCKET_TIMEOUT_MS`, `SMTP_IP_FAMILY`, `MAIL_FROM` — Nodemailer SMTP delivery settings; MailHog local dev uses plaintext, production SMTP should set TLS/auth explicitly
 - `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_CALLBACK_URL` / `GOOGLE_OAUTH_REDIRECT_URI` — Google auth placeholders; `POST /auth/google` verifies Google ID tokens and returns onboarding status
@@ -199,7 +203,7 @@ Backend code is baked into the Docker image. After backend code or dependency ch
 docker compose --env-file deployment/.env -f deployment/docker-compose.yml up -d --build backend
 ```
 
-The `migrate` compose service is a one-shot Prisma runner. It waits for product Postgres, runs `npx prisma migrate deploy` against `DIRECT_URL`, exits, and only then lets the backend container start. Keep it in the backend repo because the backend owns `prisma/schema.prisma` and all product DB migrations.
+The `migrate` compose service is a one-shot Prisma runner. It waits for product Postgres, runs `npm run prisma:deploy` against `DIRECT_URL`, exits, and only then lets the backend container start. That command first prepares the immutable migration history for backward-compatible rollout, then runs `prisma migrate deploy`. Keep it in the backend repo because the backend owns `prisma/schema.prisma` and all product DB migrations.
 
 Database schema changes still need Prisma migrations (`npm run prisma:migrate` locally, `npm run prisma:deploy` for deploy flows).
 
@@ -214,15 +218,14 @@ GET /health/ready
 
 ## Render + Supabase free web deployment
 
-Use `render.yaml` to create the free backend web service on Render:
+Use `render.yaml` to create the free backend Docker web service on Render:
 
 ```text
-Runtime: Node
+Runtime: Docker
 Region: Singapore
 Plan: Free
-Build command: npm ci && npm run prisma:generate && npm run build
-Start command: npm run start:render
-Health check path: /health/live
+Dockerfile: ./Dockerfile
+Health check path: /health/ready
 ```
 
 Set these Render environment variables:
@@ -231,15 +234,17 @@ Set these Render environment variables:
 DATABASE_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&connection_limit=3
 DIRECT_URL=postgresql://postgres:<password>@db.<project-ref>.supabase.co:5432/postgres?sslmode=require
 FRONTEND_ORIGIN=https://swebudd.com
-ADMIN_ORIGIN=
+ADMIN_ORIGIN=https://localhost
 ALLOW_LOCAL_ORIGINS=false
 NATIVE_AUTH_ENABLED=true
 NATIVE_APP_ORIGIN=https://localhost
+LEGACY_NATIVE_AUTH_COMPAT_UNTIL=2026-10-01T00:00:00.000Z
+LEGACY_WEB_AUTH_COMPAT_UNTIL=2026-10-01T00:00:00.000Z
 NODE_ENV=production
 MEDIA_STORAGE_DRIVER=s3
 ```
 
-`FRONTEND_ORIGIN` is the public Cloudflare Pages browser origin. `ADMIN_ORIGIN` is optional and must remain empty while no public admin site exists. `https://localhost` belongs only in `NATIVE_APP_ORIGIN` for the signed Capacitor WebView; putting it in either browser-origin variable intentionally fails production startup. Render ignores `sync: false` variables when updating an existing Blueprint and preserves omitted variables, so the Blueprint pins `FRONTEND_ORIGIN` and explicitly clears `ADMIN_ORIGIN` on sync instead of inheriting an old local value.
+`FRONTEND_ORIGIN` is the public Cloudflare Pages browser origin. There is no deployed admin. During this compatibility window only, keep the raw Render dashboard value `ADMIN_ORIGIN=https://localhost`: current startup clears that exact historical alias before config validation, while a deliberately redeployed v0.2.43 target can use it to allow the Capacitor WebView origin. A historical Render rollback target keeps the environment captured by that old deploy, so do not assume the existing v0.2.43 target receives these corrected values. After the new release is healthy, use it as the rollback baseline. Remove the alias, `LEGACY_NATIVE_AUTH_COMPAT_UNTIL`, and `LEGACY_WEB_AUTH_COMPAT_UNTIL` after the legacy-client window closes. Other browser-origin localhost values remain invalid in production.
 
 Get the Supabase values step by step:
 
@@ -267,7 +272,7 @@ On Supabase free projects, direct DB is usually IPv6-only. If Render cannot reac
 DIRECT_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&connection_limit=1
 ```
 
-Prisma uses `DATABASE_URL` for the running app and `DIRECT_URL` for `prisma migrate deploy`. Do not run migrations through Supabase's transaction pooler.
+Prisma uses `DATABASE_URL` for the running app and `DIRECT_URL` for `npm run prisma:deploy`, which performs compatibility preparation before `prisma migrate deploy`. Do not run migrations through Supabase's transaction pooler.
 
 For **Supabase Storage**, create a public bucket for app media and set:
 
@@ -338,9 +343,9 @@ GOOGLE_OAUTH_REDIRECT_URI=https://swebudd.com/auth/google/callback
 
 For another hosted frontend, set `FRONTEND_ORIGIN` to its production URL and any preview URLs that should be allowed, separated by commas. Set the frontend's `VITE_API_BASE_URL` to this API origin. Configure `ADMIN_ORIGIN` only after an admin site has a public HTTPS origin.
 
-The current Capacitor Android client uses `NATIVE_AUTH_ENABLED=true` with the exact WebView origin `NATIVE_APP_ORIGIN=https://localhost`. Native clients keep refresh credentials in OS secure storage and send `X-SweBudd-Client: native`; the backend rejects that transport unless both settings match. Native builds must use an absolute HTTPS API origin. Production media should use `MEDIA_STORAGE_DRIVER=s3` plus `MEDIA_PUBLIC_BASE_URL` so native clients receive stable absolute media URLs.
+The current Capacitor Android client uses `NATIVE_AUTH_ENABLED=true` with the exact WebView origin `NATIVE_APP_ORIGIN=https://localhost`. Native clients keep refresh credentials in OS secure storage and send `X-SweBudd-Client: native`; Android ≤0.2.68 is accepted without that header and may omit Turnstile only until `LEGACY_NATIVE_AUTH_COMPAT_UNTIL`. Native builds still use the absolute API origin `https://api.swebudd.com`; `https://localhost` is solely the WebView origin. Production media should use `MEDIA_STORAGE_DRIVER=s3` plus `MEDIA_PUBLIC_BASE_URL` so native clients receive stable absolute media URLs.
 
-The backend allows credentialed CORS only for exact configured frontend origins so the web client can rotate its host-only HttpOnly refresh cookie. API authorization remains bearer-token based, and browser and native clients should send `Authorization: Bearer <token>` for protected HTTP routes and the Socket.IO `auth.token` value for realtime namespaces.
+The backend allows credentialed CORS only for exact configured frontend origins so the web client can rotate its host-only HttpOnly refresh cookie. During the bounded `LEGACY_WEB_AUTH_COMPAT_UNTIL` window, an exact-origin request that supplies a legacy refresh token in its body also receives the rotated token in JSON so an already-running older bundle is not signed out. Cookie-only requests never receive refresh credentials in JSON, and current clients remain cookie-only. API authorization remains bearer-token based, and browser and native clients should send `Authorization: Bearer <token>` for protected HTTP routes and the Socket.IO `auth.token` value for realtime namespaces.
 
 The backend container serves the API on `BACKEND_PORT`. Frontend and admin have their own compose files in their own repos and attach to the same `SWEBUD_NETWORK` Docker network. Put a host-level reverse proxy in front of the public ports for production. A starting nginx config is available at `deployment/reverse-proxy.nginx.conf.example`.
 
@@ -526,8 +531,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.48-beta -m "v0.2.48-beta"
-git push origin v0.2.48-beta
+git tag -a v0.2.49-beta -m "v0.2.49-beta"
+git push origin v0.2.49-beta
 ```
 
 ## Beta caveats

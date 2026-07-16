@@ -61,6 +61,7 @@ export type SessionMetadata = {
   origin?: string | null;
   deviceLabel?: string | null;
   locationLabel?: string | null;
+  legacyNativeClient?: boolean;
 };
 
 type TokenIssueOptions = {
@@ -82,7 +83,9 @@ export class AuthService {
   ) {}
 
   async register(dto: RegisterDto, metadata?: SessionMetadata) {
-    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'signup', metadata?.origin);
+    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'signup', metadata?.origin, {
+      legacyNativeClient: metadata?.legacyNativeClient,
+    });
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
     if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
 
@@ -116,7 +119,9 @@ export class AuthService {
   }
 
   async login(dto: LoginDto, metadata?: SessionMetadata) {
-    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'login', metadata?.origin);
+    await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'login', metadata?.origin, {
+      legacyNativeClient: metadata?.legacyNativeClient,
+    });
     const identifier = dto.email.toLowerCase().trim();
     const user = await this.prisma.user.findFirst({
       where: {

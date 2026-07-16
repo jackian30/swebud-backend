@@ -1,6 +1,6 @@
 {
   "name": "swebudd-backend",
-  "version": "0.2.48-beta",
+  "version": "0.2.49-beta",
   "private": true,
   "description": "SweBudd NestJS backend",
   "scripts": {
@@ -15,7 +15,8 @@
     "openapi:check": "npm run build && OPENAPI_CHECK=1 node dist/src/openapi.generate.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
-    "prisma:deploy": "prisma migrate deploy",
+    "prisma:prepare-deploy": "node scripts/prepare-compatible-migrations.js",
+    "prisma:deploy": "npm run prisma:prepare-deploy && prisma migrate deploy",
     "seed": "ts-node prisma/seed.ts",
     "seed:realistic": "ts-node prisma/realistic-seed.ts"
   },

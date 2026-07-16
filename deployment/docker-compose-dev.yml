@@ -56,6 +56,8 @@ services:
       ALLOW_LOCAL_ORIGINS: ${ALLOW_LOCAL_ORIGINS:-true}
       NATIVE_AUTH_ENABLED: ${NATIVE_AUTH_ENABLED:-false}
       NATIVE_APP_ORIGIN: ${NATIVE_APP_ORIGIN:-https://localhost}
+      LEGACY_NATIVE_AUTH_COMPAT_UNTIL: ${LEGACY_NATIVE_AUTH_COMPAT_UNTIL:-}
+      LEGACY_WEB_AUTH_COMPAT_UNTIL: ${LEGACY_WEB_AUTH_COMPAT_UNTIL:-}
       SMTP_HOST: ${SMTP_HOST:-mailhog}
       SMTP_PORT: ${SMTP_PORT:-1025}
       SMTP_SECURE: ${SMTP_SECURE:-false}
@@ -90,7 +92,7 @@ services:
     command: >
       sh -c "npm ci &&
       npx prisma generate &&
-      DATABASE_URL=\"$${DIRECT_URL}\" npx prisma migrate deploy &&
+      DATABASE_URL=\"$${DIRECT_URL}\" npm run prisma:deploy &&
       mkdir -p uploads/profile-photos uploads/cover-photos uploads/group-photos uploads/chat-photos uploads/actsnaps uploads/posts uploads/comments uploads/images uploads/videos uploads/audio uploads/media &&
       npm run dev"
     ports:

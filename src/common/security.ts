@@ -34,7 +34,10 @@ export function requiredSecret(config: ConfigService, key: string, fallback: str
 }
 
 export function allowedOrigins(config: ConfigService) {
-  return [config.get<string>('FRONTEND_ORIGIN'), config.get<string>('ADMIN_ORIGIN'), config.get<string>('NATIVE_APP_ORIGIN')]
+  const nativeOrigin = booleanConfig(config, 'NATIVE_AUTH_ENABLED', false)
+    ? config.get<string>('NATIVE_APP_ORIGIN')
+    : undefined;
+  return [config.get<string>('FRONTEND_ORIGIN'), config.get<string>('ADMIN_ORIGIN'), nativeOrigin]
     .filter(Boolean)
     .join(',')
     .split(',')
@@ -116,6 +119,14 @@ export function assertProductionConfig(config: ConfigService) {
     if (!['https://localhost', 'capacitor://localhost'].includes(nativeOrigin)) {
       throw new Error('NATIVE_APP_ORIGIN must be an exact trusted Capacitor origin.');
     }
+    const legacyCompatUntil = config.get<string>('LEGACY_NATIVE_AUTH_COMPAT_UNTIL')?.trim();
+    if (legacyCompatUntil && !Number.isFinite(Date.parse(legacyCompatUntil))) {
+      throw new Error('LEGACY_NATIVE_AUTH_COMPAT_UNTIL must be a valid ISO timestamp.');
+    }
+  }
+  const legacyWebCompatUntil = config.get<string>('LEGACY_WEB_AUTH_COMPAT_UNTIL')?.trim();
+  if (legacyWebCompatUntil && !Number.isFinite(Date.parse(legacyWebCompatUntil))) {
+    throw new Error('LEGACY_WEB_AUTH_COMPAT_UNTIL must be a valid ISO timestamp.');
   }
 
   const smtpPort = numericEnv(config, 'SMTP_PORT');

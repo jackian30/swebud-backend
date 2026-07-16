@@ -308,6 +308,9 @@ model User {
   legalConsentAt          DateTime?            @map("legal_consent_at")
   dataConsentAt           DateTime?            @map("data_consent_at")
   chatPublicKey           String?              @map("chat_public_key")
+  // Expand/contract compatibility only: current code cannot read or write
+  // this field, while the nullable column keeps a v0.2.43 rollback operable.
+  chatPrivateKey          String?              @map("chat_private_key") @ignore
   latitude                Float?
   longitude               Float?
   createdAt               DateTime             @default(now()) @map("created_at")

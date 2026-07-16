@@ -6,7 +6,12 @@ type MutableEnvironment = Record<string, string | undefined>;
 export function normalizeLegacyRenderBrowserOrigins(
   env: MutableEnvironment = process.env,
 ) {
-  if (env.NODE_ENV !== 'production') return false;
+  const isSweBuddRenderService = env.SWEBUDD_RENDER_ORIGIN_COMPAT === 'true'
+    || (
+      env.RENDER === 'true'
+      && env.RENDER_SERVICE_NAME === 'swebudd-backend'
+    );
+  if (env.NODE_ENV !== 'production' || !isSweBuddRenderService) return false;
 
   let changed = false;
   if (env.FRONTEND_ORIGIN?.trim() === LEGACY_RENDER_LOCAL_ORIGIN) {

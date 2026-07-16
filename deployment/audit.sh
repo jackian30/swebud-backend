@@ -73,18 +73,51 @@ fi
 for key in CLOUDFLARE_TURNSTILE_SECRET_KEY MEDIA_S3_BUCKET MEDIA_PUBLIC_BASE_URL AWS_S3_ENDPOINT MAIL_FROM; do
   grep -A1 -- "- key: $key" "$SCRIPT_DIR/../render.yaml" | grep -q 'sync: false'
 done
-# Browser origins are public, non-secret deployment values. Keep the deployed
-# Cloudflare origin pinned and explicitly clear the unused admin origin so an
-# existing Render service cannot retain a historical localhost value.
+# Browser origins are public, non-secret deployment values. The current
+# backend normalizes the exact legacy admin localhost alias to empty before
+# validation; a deliberately redeployed v0.2.43 target can use it for Android.
 grep -A1 -- '- key: FRONTEND_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://swebudd.com'
-grep -A1 -- '- key: ADMIN_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: ""'
-if sed -n '/- key: FRONTEND_ORIGIN/,+1p; /- key: ADMIN_ORIGIN/,+1p' "$SCRIPT_DIR/../render.yaml" | grep -q 'localhost'; then
-  echo "Render blueprint configures a public browser origin as localhost." >&2
-  exit 1
-fi
+grep -A4 -- '- key: ADMIN_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://localhost'
 grep -A1 -- '- key: NATIVE_AUTH_ENABLED' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "true"'
 grep -A1 -- '- key: NATIVE_APP_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://localhost'
+grep -A1 -- '- key: LEGACY_NATIVE_AUTH_COMPAT_UNTIL' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "2026-10-01T00:00:00.000Z"'
+grep -A1 -- '- key: LEGACY_WEB_AUTH_COMPAT_UNTIL' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "2026-10-01T00:00:00.000Z"'
+grep -q '^    healthCheckPath: /health/ready$' "$SCRIPT_DIR/../render.yaml"
+grep -q '^    autoDeployTrigger: checksPass$' "$SCRIPT_DIR/../render.yaml"
+grep -q '^    runtime: docker$' "$SCRIPT_DIR/../render.yaml"
+grep -q '^    dockerfilePath: ./Dockerfile$' "$SCRIPT_DIR/../render.yaml"
+grep -A1 -- '- key: SWEBUDD_RENDER_ORIGIN_COMPAT' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "true"'
 node --test "$SCRIPT_DIR/../scripts/render-start.test.js"
+node --test "$SCRIPT_DIR/../scripts/docker-entrypoint.test.js"
+node --test "$SCRIPT_DIR/../scripts/prepare-compatible-migrations.test.js"
+
+# Every supported manual and Compose migration path must run the immutable
+# migration-history compatibility preparation before Prisma deploys SQL.
+node - "$SCRIPT_DIR/../package.json" <<'NODE'
+const packageJson = require(process.argv[2]);
+if (packageJson.scripts['prisma:prepare-deploy'] !== 'node scripts/prepare-compatible-migrations.js') {
+  throw new Error('prisma:prepare-deploy does not run the compatibility preparation script');
+}
+const deploy = packageJson.scripts['prisma:deploy'];
+if (deploy !== 'npm run prisma:prepare-deploy && prisma migrate deploy') {
+  throw new Error('prisma:deploy must prepare compatibility before deploying migrations');
+}
+NODE
+for compose_file in docker-compose.yml docker-compose-dev.yml; do
+  grep -q 'npm run prisma:deploy' "$SCRIPT_DIR/$compose_file"
+  if grep -q 'npx prisma migrate deploy' "$SCRIPT_DIR/$compose_file"; then
+    echo "$compose_file bypasses the compatibility-aware Prisma deploy script." >&2
+    exit 1
+  fi
+done
+grep -q 'scripts/prepare-compatible-migrations.js' "$SCRIPT_DIR/../scripts/render-start.js"
+grep -q "require('./render-start')" "$SCRIPT_DIR/../scripts/docker-entrypoint.js"
+grep -q '^ENTRYPOINT \["node", "scripts/docker-entrypoint.js"\]$' "$SCRIPT_DIR/../Dockerfile"
+git -C "$SCRIPT_DIR/.." diff --exit-code HEAD -- \
+  prisma/migrations/20260716143000_drop_chat_private_key/migration.sql \
+  prisma/migrations/20260716161000_coalesce_pending_message_requests/migration.sql
+grep -q 'ADD COLUMN IF NOT EXISTS "chat_private_key"' "$SCRIPT_DIR/../prisma/migrations/20260716235000_restore_legacy_chat_column_for_rollback/migration.sql"
+grep -q 'DROP INDEX IF EXISTS "message_requests_one_pending_pair_key"' "$SCRIPT_DIR/../prisma/migrations/20260716235000_restore_legacy_chat_column_for_rollback/migration.sql"
 if [[ "$(head -n 1 "$SCRIPT_DIR/../src/main.ts")" != "import './common/render-environment';" ]]; then
   echo "Render environment migration is not the first backend bootstrap import." >&2
   exit 1

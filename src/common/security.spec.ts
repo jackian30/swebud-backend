@@ -53,6 +53,24 @@ describe('security helpers', () => {
     expect(callback).toHaveBeenCalledWith('Origin is not allowed', false);
   });
 
+  it('allows the native origin only while native authentication is enabled', () => {
+    const disabled = config({
+      FRONTEND_ORIGIN: 'https://app.example.com',
+      NATIVE_AUTH_ENABLED: 'false',
+      NATIVE_APP_ORIGIN: 'https://localhost',
+      ALLOW_LOCAL_ORIGINS: 'false',
+    });
+    const enabled = config({
+      FRONTEND_ORIGIN: 'https://app.example.com',
+      NATIVE_AUTH_ENABLED: 'true',
+      NATIVE_APP_ORIGIN: 'https://localhost',
+      ALLOW_LOCAL_ORIGINS: 'false',
+    });
+
+    expect(isAllowedOrigin(disabled, 'https://localhost')).toBe(false);
+    expect(isAllowedOrigin(enabled, 'https://localhost')).toBe(true);
+  });
+
   it('can explicitly allow local LAN origins for dev deployments', () => {
     process.env.NODE_ENV = 'production';
     const cfg = config({ FRONTEND_ORIGIN: 'https://app.example.com', ALLOW_LOCAL_ORIGINS: 'true' });
@@ -153,6 +171,19 @@ describe('security helpers', () => {
       NATIVE_AUTH_ENABLED: 'true',
       NATIVE_APP_ORIGIN: 'https://localhost',
     }))).not.toThrow();
+    expect(() => assertProductionConfig(productionConfig({
+      NATIVE_AUTH_ENABLED: 'true',
+      NATIVE_APP_ORIGIN: 'https://localhost',
+      LEGACY_NATIVE_AUTH_COMPAT_UNTIL: 'not-a-date',
+    }))).toThrow('must be a valid ISO timestamp');
+  });
+
+  it('rejects an invalid legacy web compatibility deadline', () => {
+    process.env.NODE_ENV = 'production';
+
+    expect(() => assertProductionConfig(productionConfig({
+      LEGACY_WEB_AUTH_COMPAT_UNTIL: 'not-a-date',
+    }))).toThrow('LEGACY_WEB_AUTH_COMPAT_UNTIL must be a valid ISO timestamp');
   });
 
   it('accepts a complete public HTTPS and TLS production configuration', () => {

@@ -69,19 +69,28 @@ export class ChatService {
     if (dto.encrypted) throw new BadRequestException('Encrypted message requests are not supported');
     if (typeof dto.body !== 'string' || !dto.body.trim()) throw new BadRequestException('Message cannot be empty');
     await this.ensureNotBlocked(senderId, dto.recipientId);
-    if (await this.canSendDirectly(senderId, dto.recipientId)) return this.send(senderId, dto, trustedReference);
     const pendingWhere = this.pendingMessageRequestWhere(senderId, dto.recipientId);
-    const existing = await this.prisma.messageRequest.findFirst({ where: pendingWhere, include: this.requestInclude() });
-    if (existing) return existing;
-    let request;
-    try {
-      request = await this.prisma.messageRequest.create({ data: { senderId, recipientId: dto.recipientId, body: dto.body.trim(), ...this.referenceData(dto, trustedReference) }, include: this.requestInclude() });
-    } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
-      request = await this.prisma.messageRequest.findFirstOrThrow({ where: pendingWhere, include: this.requestInclude() });
+    const pairKey = this.messageRequestPairKey(senderId, dto.recipientId);
+    const result = await this.prisma.$transaction(async (tx) => {
+      // Serialize this unordered pair while the database uniqueness constraint
+      // is intentionally deferred for v0.2.43 rollback compatibility.
+      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${pairKey}, 0))`);
+      // Re-check after acquiring the same lock used by accept(). Otherwise an
+      // acceptance between the pre-check and insert could leave a new pending
+      // request after the users are already allowed to message directly.
+      if (await this.canSendDirectly(senderId, dto.recipientId, tx)) {
+        return { direct: true as const };
+      }
+      const existing = await tx.messageRequest.findFirst({ where: pendingWhere, include: this.requestInclude() });
+      if (existing) return { direct: false as const, request: existing, created: false };
+      const request = await tx.messageRequest.create({ data: { senderId, recipientId: dto.recipientId, body: dto.body.trim(), ...this.referenceData(dto, trustedReference) }, include: this.requestInclude() });
+      return { direct: false as const, request, created: true };
+    });
+    if (result.direct) return this.send(senderId, dto, trustedReference);
+    if (result.created) {
+      void this.notifications.create({ userId: dto.recipientId, actorId: senderId, type: 'message_request', entityId: result.request.id, message: 'sent you a message request' });
     }
-    void this.notifications.create({ userId: dto.recipientId, actorId: senderId, type: 'message_request', entityId: request.id, message: 'sent you a message request' });
-    return request;
+    return result.request;
   }
 
   async requests(userId: string) {
@@ -104,6 +113,8 @@ export class ChatService {
     if (request.recipientId !== userId) throw new ForbiddenException();
     await this.ensureNotBlocked(request.senderId, request.recipientId);
     return this.prisma.$transaction(async (tx) => {
+      const pairKey = this.messageRequestPairKey(request.senderId, request.recipientId);
+      await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${pairKey}, 0))`);
       const claimed = await tx.messageRequest.updateMany({
         where: { id, recipientId: userId, status: 'pending' },
         data: { status: 'accepted' },
@@ -648,21 +659,33 @@ export class ChatService {
     return new Set(pins.map((pin) => pin.peerId));
   }
 
-  private async isMutual(userId: string, peerId: string) {
+  private async isMutual(
+    userId: string,
+    peerId: string,
+    client: Pick<Prisma.TransactionClient, 'follow'> = this.prisma,
+  ) {
     const [following, followsMe] = await Promise.all([
-      this.prisma.follow.findUnique({ where: { followerId_followingId: { followerId: userId, followingId: peerId } } }),
-      this.prisma.follow.findUnique({ where: { followerId_followingId: { followerId: peerId, followingId: userId } } }),
+      client.follow.findUnique({ where: { followerId_followingId: { followerId: userId, followingId: peerId } } }),
+      client.follow.findUnique({ where: { followerId_followingId: { followerId: peerId, followingId: userId } } }),
     ]);
     return Boolean(following && followsMe);
   }
 
-  private async canSendDirectly(userId: string, peerId: string) {
-    if (await this.isMutual(userId, peerId)) return true;
-    return this.hasAcceptedMessageRequest(userId, peerId);
+  private async canSendDirectly(
+    userId: string,
+    peerId: string,
+    client: Pick<Prisma.TransactionClient, 'follow' | 'messageRequest'> = this.prisma,
+  ) {
+    if (await this.isMutual(userId, peerId, client)) return true;
+    return this.hasAcceptedMessageRequest(userId, peerId, client);
   }
 
-  private async hasAcceptedMessageRequest(userId: string, peerId: string) {
-    const request = await this.prisma.messageRequest.findFirst({
+  private async hasAcceptedMessageRequest(
+    userId: string,
+    peerId: string,
+    client: Pick<Prisma.TransactionClient, 'messageRequest'> = this.prisma,
+  ) {
+    const request = await client.messageRequest.findFirst({
       where: {
         status: 'accepted',
         OR: [
@@ -673,6 +696,10 @@ export class ChatService {
       select: { id: true },
     });
     return Boolean(request);
+  }
+
+  private messageRequestPairKey(userId: string, peerId: string) {
+    return [userId, peerId].sort().join(':');
   }
 
   private pendingMessageRequestWhere(userId: string, peerId: string) {

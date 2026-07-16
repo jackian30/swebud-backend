@@ -1,18 +1,20 @@
 services:
   - type: web
     name: swebudd-backend
-    runtime: node
+    runtime: docker
     plan: free
     region: singapore
-    buildCommand: npm ci && npm run prisma:generate && npm run build
-    startCommand: npm run start:render
-    healthCheckPath: /health/live
-    autoDeploy: true
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health/ready
+    autoDeployTrigger: checksPass
     envVars:
       - key: NODE_VERSION
         value: "22"
       - key: NODE_ENV
         value: production
+      - key: SWEBUDD_RENDER_ORIGIN_COMPAT
+        value: "true"
       - key: DATABASE_URL
         sync: false
       - key: DIRECT_URL
@@ -24,13 +26,21 @@ services:
       - key: FRONTEND_ORIGIN
         value: https://swebudd.com
       - key: ADMIN_ORIGIN
-        value: ""
+        # Compatibility alias for a deliberately redeployed v0.2.43 target,
+        # which predates NATIVE_APP_ORIGIN. Current startup clears it.
+        value: https://localhost
       - key: ALLOW_LOCAL_ORIGINS
         value: "false"
       - key: NATIVE_AUTH_ENABLED
         value: "true"
       - key: NATIVE_APP_ORIGIN
         value: https://localhost
+      # Temporary bridge for Android <=0.2.68, which predates native Turnstile.
+      - key: LEGACY_NATIVE_AUTH_COMPAT_UNTIL
+        value: "2026-10-01T00:00:00.000Z"
+      # Temporary bridge for already-running pre-cookie browser bundles.
+      - key: LEGACY_WEB_AUTH_COMPAT_UNTIL
+        value: "2026-10-01T00:00:00.000Z"
       - key: CLOUDFLARE_TURNSTILE_SECRET_KEY
         sync: false
       - key: MEDIA_STORAGE_DRIVER

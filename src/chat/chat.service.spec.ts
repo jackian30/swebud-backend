@@ -149,6 +149,21 @@ describe('ChatService', () => {
     await expect(service.request(userId, { recipientId: peerId, body: 'again' }))
       .resolves.toEqual(expect.objectContaining({ id: 'pending-1' }));
     expect(prisma.messageRequest.create).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(notifications.create).not.toHaveBeenCalled();
+  });
+
+  it('serializes a new pending request by unordered user pair before inserting', async () => {
+    prisma.follow.findUnique.mockResolvedValue(null);
+    prisma.messageRequest.findFirst.mockResolvedValue(null);
+
+    await expect(service.request(userId, { recipientId: peerId, body: 'hello' }))
+      .resolves.toEqual(expect.objectContaining({ id: 'request-1' }));
+
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.messageRequest.create).toHaveBeenCalledTimes(1);
+    expect(notifications.create).toHaveBeenCalledTimes(1);
   });
 
   it('accepts a message request exactly once through an atomic pending-state claim', async () => {

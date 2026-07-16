@@ -13,13 +13,13 @@ export class AuthController {
   constructor(private auth: AuthService, private config: ConfigService) {}
 
   @Post('register') register(@Body() dto: RegisterDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    return this.issueSession(req, res, () => this.auth.register(dto, sessionMetadataFromRequest(req)));
+    return this.issueSession(req, res, (metadata) => this.auth.register(dto, metadata));
   }
   @Post('login') @HttpCode(200) login(@Body() dto: LoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    return this.issueSession(req, res, () => this.auth.login(dto, sessionMetadataFromRequest(req)));
+    return this.issueSession(req, res, (metadata) => this.auth.login(dto, metadata));
   }
   @Post('google') @HttpCode(200) google(@Body() dto: GoogleLoginDto, @Req() req: Request, @Res({ passthrough: true }) res: Response) {
-    return this.issueSession(req, res, () => this.auth.googleLogin(dto, sessionMetadataFromRequest(req)));
+    return this.issueSession(req, res, (metadata) => this.auth.googleLogin(dto, metadata));
   }
   @UseGuards(JwtAuthGuard)
   @AllowPendingOnboarding()
@@ -42,7 +42,7 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const credential = refreshCredential(req, dto.refreshToken, this.config);
+    const credential = refreshCredential(req, dto?.refreshToken, this.config);
     const session = await this.auth.refresh(credential.token!, sessionMetadataFromRequest(req));
     return presentAuthSession(session, credential.mode, res, this.config);
   }
@@ -59,14 +59,20 @@ export class AuthController {
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const credential = refreshCredential(req, dto.refreshToken, this.config, { allowMissing: true });
+    const credential = refreshCredential(req, dto?.refreshToken, this.config, { allowMissing: true });
     await this.auth.logout(user.id, credential.token, user.loginSessionId);
-    if (credential.mode === 'web') clearWebRefreshCookie(res, this.config);
+    if (credential.mode !== 'native') clearWebRefreshCookie(res, this.config);
   }
 
-  private async issueSession(req: Request, res: Response, issue: () => Promise<{ refreshToken: string } & Record<string, unknown>>) {
+  private async issueSession(
+    req: Request,
+    res: Response,
+    issue: (metadata: ReturnType<typeof sessionMetadataFromRequest>) => Promise<{ refreshToken: string } & Record<string, unknown>>,
+  ) {
     const mode = authTransportMode(req, this.config);
-    const session = await issue();
+    const metadata = sessionMetadataFromRequest(req);
+    metadata.legacyNativeClient = mode === 'native' && !req.get('x-swebudd-client');
+    const session = await issue(metadata);
     return presentAuthSession(session, mode, res, this.config);
   }
 }

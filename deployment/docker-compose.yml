@@ -26,9 +26,10 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      SWEBUDD_SKIP_ENTRYPOINT_MIGRATIONS: "true"
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the application database URL}
       DIRECT_URL: ${DIRECT_URL:?Set DIRECT_URL to a direct migration database URL}
-    command: sh -c 'DATABASE_URL="$$DIRECT_URL" npx prisma migrate deploy'
+    command: sh -c 'DATABASE_URL="$$DIRECT_URL" npm run prisma:deploy'
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m,mode=1777
@@ -52,6 +53,7 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      SWEBUDD_SKIP_ENTRYPOINT_MIGRATIONS: "true"
       PORT: 3000
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the application database URL}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a strong random value}
@@ -63,6 +65,8 @@ services:
       ALLOW_LOCAL_ORIGINS: ${ALLOW_LOCAL_ORIGINS:-false}
       NATIVE_AUTH_ENABLED: ${NATIVE_AUTH_ENABLED:-false}
       NATIVE_APP_ORIGIN: ${NATIVE_APP_ORIGIN:-}
+      LEGACY_NATIVE_AUTH_COMPAT_UNTIL: ${LEGACY_NATIVE_AUTH_COMPAT_UNTIL:-}
+      LEGACY_WEB_AUTH_COMPAT_UNTIL: ${LEGACY_WEB_AUTH_COMPAT_UNTIL:-}
       SMTP_HOST: ${SMTP_HOST:?Set SMTP_HOST to a production SMTP service}
       SMTP_PORT: ${SMTP_PORT:-587}
       SMTP_SECURE: ${SMTP_SECURE:-false}

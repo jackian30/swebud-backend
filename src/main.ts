@@ -13,6 +13,7 @@ import { setupOpenApi } from './openapi';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
   const config = app.get(ConfigService);
   assertProductionConfig(config);
   app.useWebSocketAdapter(new OriginCheckedSocketIoAdapter(app, config));
