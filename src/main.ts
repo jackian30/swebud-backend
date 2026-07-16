@@ -1,3 +1,4 @@
+import './common/render-environment';
 import 'reflect-metadata';
 import { ValidationPipe } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';

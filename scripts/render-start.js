@@ -2,27 +2,6 @@ const { spawn } = require('node:child_process');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-const RENDER_BROWSER_ORIGIN = 'https://swebudd.com';
-const LEGACY_RENDER_LOCAL_ORIGIN = 'https://localhost';
-
-function normalizedRenderBrowserOrigins(env) {
-  const normalized = { ...env };
-  if (normalized.RENDER !== 'true') return normalized;
-
-  if (normalized.FRONTEND_ORIGIN?.trim() === LEGACY_RENDER_LOCAL_ORIGIN) {
-    console.warn(
-      `Replacing legacy Render FRONTEND_ORIGIN=${LEGACY_RENDER_LOCAL_ORIGIN} with ${RENDER_BROWSER_ORIGIN}.`,
-    );
-    normalized.FRONTEND_ORIGIN = RENDER_BROWSER_ORIGIN;
-  }
-  if (normalized.ADMIN_ORIGIN?.trim() === LEGACY_RENDER_LOCAL_ORIGIN) {
-    console.warn('Clearing legacy Render ADMIN_ORIGIN because no public admin deployment exists.');
-    normalized.ADMIN_ORIGIN = '';
-  }
-
-  return normalized;
-}
-
 function withMaxSearchParam(value, key, maxValue) {
   try {
     const url = new URL(value);
@@ -74,10 +53,10 @@ async function main() {
   };
   await deployMigrations(migrationEnv);
 
-  const appEnv = normalizedRenderBrowserOrigins({
+  const appEnv = {
     ...process.env,
     DATABASE_URL: withMaxSearchParam(process.env.DATABASE_URL, 'connection_limit', 3),
-  });
+  };
   const app = spawn('node', ['dist/src/main.js'], { stdio: 'inherit', env: appEnv });
   for (const signal of ['SIGINT', 'SIGTERM']) {
     process.on(signal, () => app.kill(signal));
@@ -98,4 +77,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { normalizedRenderBrowserOrigins, withMaxSearchParam };
+module.exports = { withMaxSearchParam };

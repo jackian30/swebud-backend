@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.46-beta**
+Current release: **0.2.47-beta**
 
 ## Stack
 
@@ -34,10 +34,10 @@ Current release: **0.2.46-beta**
 
 ## Current beta notes
 
-0.2.46-beta keeps the security and contract hardening from 0.2.44-beta and fixes the Render production-origin rollout:
+0.2.47-beta keeps the security and contract hardening from 0.2.44-beta and fixes the Render production-origin rollout:
 
 - The Render Blueprint pins the public Cloudflare Pages origin to `https://swebudd.com`, explicitly clears the unused admin origin, and reserves `https://localhost` for the Capacitor native origin only.
-- The Render start wrapper migrates the exact historical dashboard value `FRONTEND_ORIGIN=https://localhost` to the production Cloudflare origin, allowing manually managed services to recover without accepting any other invalid origin.
+- The backend's first bootstrap import migrates the exact historical Render dashboard value `FRONTEND_ORIGIN=https://localhost` to the production Cloudflare origin. This remains effective when a dashboard-managed Docker service overrides the image command and launches `dist/src/main.js` directly.
 - Production startup errors identify the exact browser-origin variable that is invalid without weakening the HTTPS/local-network rejection.
 
 - Google sign-in binds only by the verified Google subject; a matching local email is never auto-linked.
@@ -526,8 +526,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.46-beta -m "v0.2.46-beta"
-git push origin v0.2.46-beta
+git tag -a v0.2.47-beta -m "v0.2.47-beta"
+git push origin v0.2.47-beta
 ```
 
 ## Beta caveats

@@ -85,6 +85,11 @@ fi
 grep -A1 -- '- key: NATIVE_AUTH_ENABLED' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "true"'
 grep -A1 -- '- key: NATIVE_APP_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://localhost'
 node --test "$SCRIPT_DIR/../scripts/render-start.test.js"
+if [[ "$(head -n 1 "$SCRIPT_DIR/../src/main.ts")" != "import './common/render-environment';" ]]; then
+  echo "Render environment migration is not the first backend bootstrap import." >&2
+  exit 1
+fi
+grep -q 'normalizeLegacyRenderBrowserOrigins();' "$SCRIPT_DIR/../src/common/render-environment.ts"
 
 # Production validation must inspect shell overrides exactly as Compose does.
 # These cases exit before any Docker operation.
