@@ -38,6 +38,7 @@ describe('Render environment compatibility migration', () => {
       NODE_ENV: 'production',
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       FRONTEND_ORIGIN: 'https://localhost',
       ADMIN_ORIGIN: 'https://localhost',
       NATIVE_APP_ORIGIN: 'https://localhost',
@@ -48,6 +49,7 @@ describe('Render environment compatibility migration', () => {
       NODE_ENV: 'production',
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       FRONTEND_ORIGIN: 'https://swebudd.com',
       ADMIN_ORIGIN: '',
       ALLOW_LOCAL_ORIGINS: 'false',
@@ -62,6 +64,7 @@ describe('Render environment compatibility migration', () => {
       NODE_ENV: 'production',
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       FRONTEND_ORIGIN: 'https://swebudd.com',
       ADMIN_ORIGIN: '',
     };
@@ -71,6 +74,7 @@ describe('Render environment compatibility migration', () => {
       NODE_ENV: 'production',
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       FRONTEND_ORIGIN: 'https://swebudd.com',
       ADMIN_ORIGIN: '',
       ALLOW_LOCAL_ORIGINS: 'false',
@@ -85,6 +89,7 @@ describe('Render environment compatibility migration', () => {
       NODE_ENV: 'production',
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       FRONTEND_ORIGIN: 'https://swebudd.com',
       NATIVE_AUTH_ENABLED: 'false',
       NATIVE_APP_ORIGIN: 'capacitor://localhost',
@@ -92,9 +97,11 @@ describe('Render environment compatibility migration', () => {
     };
 
     expect(normalizeLegacyRenderBrowserOrigins(env)).toBe(true);
-    expect(env.NATIVE_AUTH_ENABLED).toBe('true');
-    expect(env.NATIVE_APP_ORIGIN).toBe('https://localhost');
-    expect(env.ALLOW_LOCAL_ORIGINS).toBe('false');
+    expect(env).toMatchObject({
+      NATIVE_AUTH_ENABLED: 'true',
+      NATIVE_APP_ORIGIN: 'https://localhost',
+      ALLOW_LOCAL_ORIGINS: 'false',
+    });
   });
 
   it('supports a separate explicit native-auth emergency shutdown', () => {
@@ -103,6 +110,7 @@ describe('Render environment compatibility migration', () => {
       NODE_ENV: 'production',
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       FRONTEND_ORIGIN: 'https://swebudd.com',
       SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED: 'true',
       NATIVE_AUTH_ENABLED: 'true',
@@ -113,6 +121,7 @@ describe('Render environment compatibility migration', () => {
       NODE_ENV: 'production',
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       FRONTEND_ORIGIN: 'https://swebudd.com',
       SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED: 'true',
       NATIVE_AUTH_ENABLED: 'false',
@@ -126,6 +135,7 @@ describe('Render environment compatibility migration', () => {
       NODE_ENV: 'production',
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       FRONTEND_ORIGIN: 'https://swebudd.com',
       SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED: 'yes',
     };
@@ -133,6 +143,56 @@ describe('Render environment compatibility migration', () => {
     expect(() => normalizeLegacyRenderBrowserOrigins(env)).toThrow(
       'SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED must be "true" or "false" when set.',
     );
+  });
+
+  it('repairs the production repo deploy when the dashboard service name differs', () => {
+    jest.spyOn(console, 'warn').mockImplementation();
+    const env = {
+      NODE_ENV: 'production',
+      RENDER: 'true',
+      RENDER_SERVICE_NAME: 'swebud-api-production',
+      RENDER_SERVICE_TYPE: 'web',
+      RENDER_GIT_REPO_SLUG: 'jackian30/swebud-backend',
+      RENDER_GIT_BRANCH: 'master',
+      IS_PULL_REQUEST: 'false',
+      FRONTEND_ORIGIN: 'https://swebudd.com',
+      NATIVE_AUTH_ENABLED: 'false',
+    };
+
+    expect(normalizeLegacyRenderBrowserOrigins(env)).toBe(true);
+    expect(env).toMatchObject({
+      NATIVE_AUTH_ENABLED: 'true',
+      NATIVE_APP_ORIGIN: 'https://localhost',
+      ALLOW_LOCAL_ORIGINS: 'false',
+    });
+  });
+
+  it('does not pin native auth for previews, feature branches, workers, or other repositories', () => {
+    const base = {
+      NODE_ENV: 'production',
+      RENDER: 'true',
+      RENDER_SERVICE_NAME: 'swebud-noncanonical',
+      RENDER_SERVICE_TYPE: 'web',
+      RENDER_GIT_REPO_SLUG: 'jackian30/swebud-backend',
+      RENDER_GIT_BRANCH: 'master',
+      IS_PULL_REQUEST: 'false',
+      FRONTEND_ORIGIN: 'https://preview.swebudd.com',
+      NATIVE_AUTH_ENABLED: 'false',
+    };
+    const variants = [
+      { RENDER_GIT_BRANCH: 'feature/native-auth' },
+      { IS_PULL_REQUEST: 'true' },
+      { IS_PULL_REQUEST: undefined },
+      { RENDER_SERVICE_TYPE: 'worker' },
+      { RENDER_GIT_REPO_SLUG: 'someone/other-backend' },
+    ];
+
+    for (const variant of variants) {
+      const env = { ...base, ...variant };
+      expect(normalizeLegacyRenderBrowserOrigins(env)).toBe(false);
+      expect(env.NATIVE_AUTH_ENABLED).toBe('false');
+      expect(env).not.toHaveProperty('NATIVE_APP_ORIGIN');
+    }
   });
 
   it('does not weaken validation for any other invalid browser origin', () => {

@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.50-beta**
+Current release: **0.2.51-beta**
 
 ## Stack
 
@@ -34,11 +34,11 @@ Current release: **0.2.50-beta**
 
 ## Current beta notes
 
-0.2.50-beta repairs Android authentication for dashboard-managed Render services that did not inherit the Blueprint's native-origin values:
+0.2.51-beta repairs Android authentication for dashboard-managed Render services that did not inherit the Blueprint's native-origin values:
 
 - The exact production Render service pins `NATIVE_AUTH_ENABLED=true`, `NATIVE_APP_ORIGIN=https://localhost`, and `ALLOW_LOCAL_ORIGINS=false` before Nest reads dashboard-managed configuration.
 - Native auth can be shut down deliberately with the separate `SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED=true` emergency switch; stale or malformed generic native values can no longer silently break every installed Android client.
-- The native-origin repair is scoped to the canonical production `swebudd-backend` service on Render; the older compatibility flag can normalize browser origins but cannot enable native transport on self-hosted, preview, or development services.
+- The native-origin repair recognizes the canonical Render web service by its exact name or the documented production repository/branch/non-preview identity. The older compatibility flag cannot enable native transport on self-hosted, preview, worker, feature-branch, or development services.
 - The Docker Render Blueprint pins the public Cloudflare Pages origin to `https://swebudd.com`; its temporary `ADMIN_ORIGIN=https://localhost` value can support a deliberately redeployed v0.2.43 compatibility target, and current startup clears that exact alias before validation.
 - The backend's first bootstrap import migrates the exact historical Render dashboard value `FRONTEND_ORIGIN=https://localhost` only for the SweBudd Render service. The Docker entrypoint still runs migration preparation and `prisma migrate deploy` when the dashboard overrides the image command with `node dist/src/main.js`.
 - Published migration files remain immutable. Startup records the two premature contract migrations as logically applied when necessary, then a forward repair retains the v0.2.43 column and removes its incompatible unique index during the rollback window.
@@ -535,8 +535,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.50-beta -m "v0.2.50-beta"
-git push origin v0.2.50-beta
+git tag -a v0.2.51-beta -m "v0.2.51-beta"
+git push origin v0.2.51-beta
 ```
 
 ## Beta caveats

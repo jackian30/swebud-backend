@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { Request, Response, NextFunction } from 'express';
 import { IncomingMessage } from 'http';
 import { accessTokenTtlSeconds, booleanConfig, refreshTokenTtlSeconds } from './config';
+import { isCanonicalSweBuddRenderService } from './render-identity';
 
 const weakSecretValues = new Set([
   '',
@@ -101,8 +102,14 @@ export function assertProductionConfig(config: ConfigService) {
   requiredSecret(config, 'CLOUDFLARE_TURNSTILE_SECRET_KEY', '');
 
   if (allowLocalOrigins(config)) throw new Error('ALLOW_LOCAL_ORIGINS must be false in production.');
-  const canonicalRenderService = config.get<string>('RENDER') === 'true'
-    && config.get<string>('RENDER_SERVICE_NAME') === 'swebudd-backend';
+  const canonicalRenderService = isCanonicalSweBuddRenderService({
+    RENDER: config.get<string>('RENDER'),
+    RENDER_SERVICE_NAME: config.get<string>('RENDER_SERVICE_NAME'),
+    RENDER_SERVICE_TYPE: config.get<string>('RENDER_SERVICE_TYPE'),
+    RENDER_GIT_REPO_SLUG: config.get<string>('RENDER_GIT_REPO_SLUG'),
+    RENDER_GIT_BRANCH: config.get<string>('RENDER_GIT_BRANCH'),
+    IS_PULL_REQUEST: config.get<string>('IS_PULL_REQUEST'),
+  });
   const nativeEmergencySetting = config.get<string>('SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED')?.trim();
   if (nativeEmergencySetting && !['true', 'false'].includes(nativeEmergencySetting)) {
     throw new Error('SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED must be "true" or "false" when set.');

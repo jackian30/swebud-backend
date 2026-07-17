@@ -2,7 +2,7 @@
 
 This document describes the current SweBudd chat feature, the retirement of unsafe deterministic encryption, and the requirements for future end-to-end encryption.
 
-Current status: `0.2.50-beta`
+Current status: `0.2.51-beta`
 
 ## Chat surfaces
 

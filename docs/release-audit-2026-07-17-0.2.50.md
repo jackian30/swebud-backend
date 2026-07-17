@@ -40,3 +40,7 @@ Push `master` so GitHub CI can gate Render auto-deployment. Deployment is comple
 4. Login and refresh recovery work on the existing signed Android `0.2.71-beta` build.
 
 The Android AAB does not need to be rebuilt for this server-side CORS incident.
+
+## Deployment result
+
+GitHub CI passed and Render served `0.2.50-beta`, but the mandatory live smoke still returned `403` for `https://localhost`. The dashboard service's actual `RENDER_SERVICE_NAME` differs from the Blueprint name, so the name-only canonical predicate did not activate. This candidate was not tagged and is superseded by `0.2.51-beta`.

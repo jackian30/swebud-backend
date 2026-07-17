@@ -1,3 +1,5 @@
+import { isCanonicalSweBuddRenderService } from './render-identity';
+
 const RENDER_BROWSER_ORIGIN = 'https://swebudd.com';
 const LEGACY_RENDER_LOCAL_ORIGIN = 'https://localhost';
 const RENDER_NATIVE_AUTH_EMERGENCY_DISABLED = 'SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED';
@@ -7,8 +9,7 @@ type MutableEnvironment = Record<string, string | undefined>;
 export function normalizeLegacyRenderBrowserOrigins(
   env: MutableEnvironment = process.env,
 ) {
-  const isCanonicalRenderService = env.RENDER === 'true'
-    && env.RENDER_SERVICE_NAME === 'swebudd-backend';
+  const isCanonicalRenderService = isCanonicalSweBuddRenderService(env);
   const usesBrowserOriginCompatibility = env.SWEBUDD_RENDER_ORIGIN_COMPAT === 'true'
     || isCanonicalRenderService;
   if (env.NODE_ENV !== 'production' || !usesBrowserOriginCompatibility) return false;

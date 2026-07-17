@@ -12,7 +12,7 @@ function response(status, headers = {}, body) {
 function healthyFetch({ nativeStatus = 204, nativeHeaders = true } = {}) {
   return async (url, init = {}) => {
     if (url.endsWith('/health/ready')) {
-      return response(200, {}, { ok: true, database: 'ok', version: '0.2.50-beta' });
+      return response(200, {}, { ok: true, database: 'ok', version: '0.2.51-beta' });
     }
     assert.equal(init.method, 'OPTIONS');
     const origin = init.headers.Origin;
@@ -35,18 +35,18 @@ function healthyFetch({ nativeStatus = 204, nativeHeaders = true } = {}) {
 test('passes only when native and web origins work and a hostile origin is rejected', async () => {
   const result = await verifyLiveCors({
     apiOrigin: 'https://api.swebudd.test/',
-    expectedVersion: '0.2.50-beta',
+    expectedVersion: '0.2.51-beta',
     fetchImpl: healthyFetch(),
   });
 
-  assert.deepEqual(result, { apiOrigin: 'https://api.swebudd.test', version: '0.2.50-beta' });
+  assert.deepEqual(result, { apiOrigin: 'https://api.swebudd.test', version: '0.2.51-beta' });
 });
 
 test('detects the production native-origin regression', async () => {
   await assert.rejects(
     verifyLiveCors({
       apiOrigin: 'https://api.swebudd.test',
-      expectedVersion: '0.2.50-beta',
+      expectedVersion: '0.2.51-beta',
       fetchImpl: healthyFetch({ nativeStatus: 403 }),
     }),
     /https:\/\/localhost preflight returned 403/,
@@ -57,7 +57,7 @@ test('requires browser-visible CORS headers, not only a 204 status', async () =>
   await assert.rejects(
     verifyLiveCors({
       apiOrigin: 'https://api.swebudd.test',
-      expectedVersion: '0.2.50-beta',
+      expectedVersion: '0.2.51-beta',
       fetchImpl: healthyFetch({ nativeHeaders: false }),
     }),
   );

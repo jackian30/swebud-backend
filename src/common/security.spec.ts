@@ -185,6 +185,7 @@ describe('security helpers', () => {
     const render = {
       RENDER: 'true',
       RENDER_SERVICE_NAME: 'swebudd-backend',
+      RENDER_SERVICE_TYPE: 'web',
       NATIVE_APP_ORIGIN: 'https://localhost',
     };
 
@@ -216,6 +217,24 @@ describe('security helpers', () => {
       NATIVE_AUTH_ENABLED: 'false',
       SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED: 'yes',
     }))).toThrow('must be "true" or "false" when set');
+
+    const productionRepoDeploy = {
+      RENDER: 'true',
+      RENDER_SERVICE_NAME: 'swebud-api-production',
+      RENDER_SERVICE_TYPE: 'web',
+      RENDER_GIT_REPO_SLUG: 'jackian30/swebud-backend',
+      RENDER_GIT_BRANCH: 'master',
+      IS_PULL_REQUEST: 'false',
+      NATIVE_APP_ORIGIN: 'https://localhost',
+    };
+    expect(() => assertProductionConfig(productionConfig({
+      ...productionRepoDeploy,
+      NATIVE_AUTH_ENABLED: 'false',
+    }))).toThrow('SweBudd Render requires native auth');
+    expect(() => assertProductionConfig(productionConfig({
+      ...productionRepoDeploy,
+      NATIVE_AUTH_ENABLED: 'true',
+    }))).not.toThrow();
   });
 
   it('rejects an invalid legacy web compatibility deadline', () => {
