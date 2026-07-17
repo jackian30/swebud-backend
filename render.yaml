@@ -35,6 +35,9 @@ services:
         value: "true"
       - key: NATIVE_APP_ORIGIN
         value: https://localhost
+      # Set true only to stop native CORS/session transport during an incident.
+      - key: SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED
+        value: "false"
       # Temporary bridge for Android <=0.2.68, which predates native Turnstile.
       - key: LEGACY_NATIVE_AUTH_COMPAT_UNTIL
         value: "2026-10-01T00:00:00.000Z"

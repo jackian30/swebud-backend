@@ -101,6 +101,21 @@ export function assertProductionConfig(config: ConfigService) {
   requiredSecret(config, 'CLOUDFLARE_TURNSTILE_SECRET_KEY', '');
 
   if (allowLocalOrigins(config)) throw new Error('ALLOW_LOCAL_ORIGINS must be false in production.');
+  const canonicalRenderService = config.get<string>('RENDER') === 'true'
+    && config.get<string>('RENDER_SERVICE_NAME') === 'swebudd-backend';
+  const nativeEmergencySetting = config.get<string>('SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED')?.trim();
+  if (nativeEmergencySetting && !['true', 'false'].includes(nativeEmergencySetting)) {
+    throw new Error('SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED must be "true" or "false" when set.');
+  }
+  if (canonicalRenderService) {
+    const nativeEnabled = booleanConfig(config, 'NATIVE_AUTH_ENABLED', false);
+    const nativeOrigin = config.get<string>('NATIVE_APP_ORIGIN')?.trim();
+    if (nativeEmergencySetting === 'true') {
+      if (nativeEnabled) throw new Error('SweBudd Render native auth must be disabled while the emergency switch is active.');
+    } else if (!nativeEnabled || nativeOrigin !== 'https://localhost') {
+      throw new Error('SweBudd Render requires native auth on the exact https://localhost origin.');
+    }
+  }
   const publicOrigins = (['FRONTEND_ORIGIN', 'ADMIN_ORIGIN'] as const).flatMap((key) =>
     (config.get<string>(key) ?? '')
       .split(',')

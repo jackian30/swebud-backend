@@ -80,6 +80,7 @@ grep -A1 -- '- key: FRONTEND_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'val
 grep -A4 -- '- key: ADMIN_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://localhost'
 grep -A1 -- '- key: NATIVE_AUTH_ENABLED' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "true"'
 grep -A1 -- '- key: NATIVE_APP_ORIGIN' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: https://localhost'
+grep -A1 -- '- key: SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "false"'
 grep -A1 -- '- key: LEGACY_NATIVE_AUTH_COMPAT_UNTIL' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "2026-10-01T00:00:00.000Z"'
 grep -A1 -- '- key: LEGACY_WEB_AUTH_COMPAT_UNTIL' "$SCRIPT_DIR/../render.yaml" | grep -q 'value: "2026-10-01T00:00:00.000Z"'
 grep -q '^    healthCheckPath: /health/ready$' "$SCRIPT_DIR/../render.yaml"
@@ -90,6 +91,7 @@ grep -A1 -- '- key: SWEBUDD_RENDER_ORIGIN_COMPAT' "$SCRIPT_DIR/../render.yaml" |
 node --test "$SCRIPT_DIR/../scripts/render-start.test.js"
 node --test "$SCRIPT_DIR/../scripts/docker-entrypoint.test.js"
 node --test "$SCRIPT_DIR/../scripts/prepare-compatible-migrations.test.js"
+node --test "$SCRIPT_DIR/../scripts/smoke-live-cors.test.js"
 
 # Every supported manual and Compose migration path must run the immutable
 # migration-history compatibility preparation before Prisma deploys SQL.

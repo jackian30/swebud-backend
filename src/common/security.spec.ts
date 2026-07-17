@@ -180,6 +180,44 @@ describe('security helpers', () => {
     }))).toThrow('must be a valid ISO timestamp');
   });
 
+  it('enforces the canonical Render native profile and its explicit emergency switch', () => {
+    process.env.NODE_ENV = 'production';
+    const render = {
+      RENDER: 'true',
+      RENDER_SERVICE_NAME: 'swebudd-backend',
+      NATIVE_APP_ORIGIN: 'https://localhost',
+    };
+
+    expect(() => assertProductionConfig(productionConfig({
+      ...render,
+      NATIVE_AUTH_ENABLED: 'true',
+    }))).not.toThrow();
+    expect(() => assertProductionConfig(productionConfig({
+      ...render,
+      NATIVE_AUTH_ENABLED: 'false',
+    }))).toThrow('SweBudd Render requires native auth');
+    expect(() => assertProductionConfig(productionConfig({
+      ...render,
+      NATIVE_AUTH_ENABLED: 'true',
+      NATIVE_APP_ORIGIN: 'capacitor://localhost',
+    }))).toThrow('exact https://localhost origin');
+    expect(() => assertProductionConfig(productionConfig({
+      ...render,
+      NATIVE_AUTH_ENABLED: 'false',
+      SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED: 'true',
+    }))).not.toThrow();
+    expect(() => assertProductionConfig(productionConfig({
+      ...render,
+      NATIVE_AUTH_ENABLED: 'true',
+      SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED: 'true',
+    }))).toThrow('must be disabled while the emergency switch is active');
+    expect(() => assertProductionConfig(productionConfig({
+      ...render,
+      NATIVE_AUTH_ENABLED: 'false',
+      SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED: 'yes',
+    }))).toThrow('must be "true" or "false" when set');
+  });
+
   it('rejects an invalid legacy web compatibility deadline', () => {
     process.env.NODE_ENV = 'production';
 

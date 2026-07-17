@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.49-beta**
+Current release: **0.2.50-beta**
 
 ## Stack
 
@@ -34,8 +34,11 @@ Current release: **0.2.49-beta**
 
 ## Current beta notes
 
-0.2.49-beta keeps the security and contract hardening from 0.2.48-beta and prepares a backward-compatible Render rollout:
+0.2.50-beta repairs Android authentication for dashboard-managed Render services that did not inherit the Blueprint's native-origin values:
 
+- The exact production Render service pins `NATIVE_AUTH_ENABLED=true`, `NATIVE_APP_ORIGIN=https://localhost`, and `ALLOW_LOCAL_ORIGINS=false` before Nest reads dashboard-managed configuration.
+- Native auth can be shut down deliberately with the separate `SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED=true` emergency switch; stale or malformed generic native values can no longer silently break every installed Android client.
+- The native-origin repair is scoped to the canonical production `swebudd-backend` service on Render; the older compatibility flag can normalize browser origins but cannot enable native transport on self-hosted, preview, or development services.
 - The Docker Render Blueprint pins the public Cloudflare Pages origin to `https://swebudd.com`; its temporary `ADMIN_ORIGIN=https://localhost` value can support a deliberately redeployed v0.2.43 compatibility target, and current startup clears that exact alias before validation.
 - The backend's first bootstrap import migrates the exact historical Render dashboard value `FRONTEND_ORIGIN=https://localhost` only for the SweBudd Render service. The Docker entrypoint still runs migration preparation and `prisma migrate deploy` when the dashboard overrides the image command with `node dist/src/main.js`.
 - Published migration files remain immutable. Startup records the two premature contract migrations as logically applied when necessary, then a forward repair retains the v0.2.43 column and removes its incompatible unique index during the rollback window.
@@ -523,6 +526,7 @@ Then run the full Docker stack and API smokes from the workspace if available.
 - ActSnap reference context is only accepted from trusted ActSnap reply flows; generic chat sends ignore client-supplied ActSnap reference fields.
 - Google-created users do not bypass onboarding: auth responses include `requiresOnboarding` and `onboardingMissing` until username, date of birth, legal consent, and data consent are completed.
 - Turnstile is enforced on production register/login, production startup requires a strong `CLOUDFLARE_TURNSTILE_SECRET_KEY`, and only local development may skip verification when the secret is empty.
+- `SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED=true` disables the canonical Render service's native CORS/session transport only. Incident response for compromised credentials must also revoke sessions and rotate affected secrets.
 - While the backend `package.json` version contains `beta`, newly-created password and Google accounts are marked `betaUser` and assigned the `beta_user` profile badge automatically.
 - New direct messages are plaintext until audited device-key distribution exists. Legacy encrypted rows remain readable by compatible clients; the server stores public keys only and never private keys.
 
@@ -531,8 +535,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.49-beta -m "v0.2.49-beta"
-git push origin v0.2.49-beta
+git tag -a v0.2.50-beta -m "v0.2.50-beta"
+git push origin v0.2.50-beta
 ```
 
 ## Beta caveats
