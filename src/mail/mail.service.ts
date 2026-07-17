@@ -19,7 +19,7 @@ export class MailService {
     const localHost = ['mailhog', 'localhost', '127.0.0.1'].includes(host.toLowerCase());
     const secure = booleanConfig(this.config, 'SMTP_SECURE', port === 465 && !localHost);
     const ignoreTLS = booleanConfig(this.config, 'SMTP_IGNORE_TLS', localHost);
-    const requireTLS = booleanConfig(this.config, 'SMTP_REQUIRE_TLS', false);
+    const requireTLS = booleanConfig(this.config, 'SMTP_REQUIRE_TLS', !localHost);
     const rejectUnauthorized = booleanConfig(this.config, 'SMTP_TLS_REJECT_UNAUTHORIZED', true);
     const user = this.config.get<string>('SMTP_USER');
     const pass = this.config.get<string>('SMTP_PASS');

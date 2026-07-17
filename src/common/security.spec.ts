@@ -135,6 +135,8 @@ describe('security helpers', () => {
       .toThrow('Missing required production env: SMTP_HOST');
     expect(() => assertProductionConfig(productionConfig({ SMTP_HOST: 'mailhog' })))
       .toThrow('production mail service');
+    expect(() => assertProductionConfig(productionConfig({ SMTP_REQUIRE_TLS: undefined })))
+      .not.toThrow();
     expect(() => assertProductionConfig(productionConfig({ SMTP_REQUIRE_TLS: 'false' })))
       .toThrow('must require TLS');
     expect(() => assertProductionConfig(productionConfig({ SMTP_TLS_REJECT_UNAUTHORIZED: 'false' })))

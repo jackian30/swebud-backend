@@ -62,6 +62,19 @@ describe('MailService', () => {
     }));
   });
 
+  it('requires TLS by default for remote SMTP', () => {
+    new MailService(config({ SMTP_HOST: 'smtp.example.com', SMTP_PORT: 587 }));
+
+    expect(nodemailer.createTransport).toHaveBeenCalledWith(expect.objectContaining({
+      host: 'smtp.example.com',
+      port: 587,
+      secure: false,
+      ignoreTLS: false,
+      requireTLS: true,
+      tls: { rejectUnauthorized: true },
+    }));
+  });
+
   it('can use the system default IP family when configured', () => {
     new MailService(config({
       SMTP_HOST: 'smtp.example.com',

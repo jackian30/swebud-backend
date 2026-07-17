@@ -135,7 +135,7 @@ export function assertProductionConfig(config: ConfigService) {
   if (smtpHost === 'mailhog' || smtpHost === 'localhost' || smtpHost === '127.0.0.1') {
     throw new Error('SMTP_HOST must use a production mail service.');
   }
-  if (booleanConfig(config, 'SMTP_IGNORE_TLS', false) || !booleanConfig(config, 'SMTP_REQUIRE_TLS', false)) {
+  if (booleanConfig(config, 'SMTP_IGNORE_TLS', false) || !booleanConfig(config, 'SMTP_REQUIRE_TLS', true)) {
     throw new Error('Production SMTP must require TLS and must not ignore TLS.');
   }
   if (!booleanConfig(config, 'SMTP_TLS_REJECT_UNAUTHORIZED', true)) {
