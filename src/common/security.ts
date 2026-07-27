@@ -14,7 +14,6 @@ import {
   refreshTokenTtlSeconds,
 } from './config';
 import { isCanonicalSweBuddRenderService } from './render-identity';
-import { assertUploadPolicyConfig } from '../uploads/v2/upload-policy';
 
 const weakSecretValues = new Set([
   '',
@@ -112,7 +111,6 @@ export function assertProductionConfig(config: ConfigService) {
   }
   emailVerificationTtlSeconds(config);
   emailVerificationResendCooldownSeconds(config);
-  assertUploadPolicyConfig(config);
 
   const requiredKeys = [
     'DATABASE_URL',
@@ -198,46 +196,24 @@ export function assertProductionConfig(config: ConfigService) {
     'AWS_REGION',
     'MEDIA_S3_BUCKET',
     'MEDIA_PUBLIC_BASE_URL',
-    'MEDIA_QUARANTINE_S3_BUCKET',
   ];
   const s3Missing = s3Required.filter((key) => !config.get<string>(key)?.trim());
   if (s3Missing.length) throw new Error(`Missing required S3 media env: ${s3Missing.join(', ')}`);
   const publicBucket = config.get<string>('MEDIA_S3_BUCKET')!.trim();
-  const quarantineBucket = config.get<string>('MEDIA_QUARANTINE_S3_BUCKET')!.trim();
-  if (publicBucket === quarantineBucket) {
-    throw new Error('MEDIA_QUARANTINE_S3_BUCKET must be separate from MEDIA_S3_BUCKET.');
-  }
-  for (const [key, bucket] of [
-    ['MEDIA_S3_BUCKET', publicBucket],
-    ['MEDIA_QUARANTINE_S3_BUCKET', quarantineBucket],
-  ] as const) {
-    if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) {
-      throw new Error(`${key} must be a valid S3 bucket name.`);
-    }
+  if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(publicBucket)) {
+    throw new Error('MEDIA_S3_BUCKET must be a valid S3 bucket name.');
   }
   assertHttpsUrl(config.get<string>('MEDIA_PUBLIC_BASE_URL')!, 'MEDIA_PUBLIC_BASE_URL');
   const s3Endpoint = config.get<string>('AWS_S3_ENDPOINT')?.trim();
   if (s3Endpoint) assertHttpsUrl(s3Endpoint, 'AWS_S3_ENDPOINT');
 
-  if (booleanConfig(config, 'MEDIA_LEGACY_PROXY_UPLOADS_ENABLED', false)) {
-    throw new Error('MEDIA_LEGACY_PROXY_UPLOADS_ENABLED must be false in production.');
+  const processingConcurrency = numericEnv(config, 'MEDIA_PROCESSING_CONCURRENCY');
+  if (processingConcurrency != null && (processingConcurrency < 1 || processingConcurrency > 8)) {
+    throw new Error('MEDIA_PROCESSING_CONCURRENCY must be between 1 and 8.');
   }
-  if (!booleanConfig(config, 'MEDIA_UPLOAD_WORKER_ENABLED', false)) {
-    throw new Error('MEDIA_UPLOAD_WORKER_ENABLED must be true in production.');
-  }
-  const scanner = config.get<string>('MEDIA_MALWARE_SCANNER')?.trim().toLowerCase();
-  if (!scanner || !['clamdscan', 'clamd-tcp'].includes(scanner)) {
-    throw new Error('MEDIA_MALWARE_SCANNER must be "clamdscan" or "clamd-tcp" in production.');
-  }
-  if (scanner === 'clamd-tcp') {
-    if (!booleanConfig(config, 'MEDIA_CLAMD_TRUSTED_NETWORK', false)) {
-      throw new Error('MEDIA_CLAMD_TRUSTED_NETWORK must be true for clamd TCP.');
-    }
-    if (!config.get<string>('MEDIA_CLAMD_TCP_HOST')?.trim()) {
-      throw new Error('MEDIA_CLAMD_TCP_HOST is required for clamd TCP.');
-    }
-    const clamdPort = numericEnv(config, 'MEDIA_CLAMD_TCP_PORT') ?? 3310;
-    if (clamdPort < 1 || clamdPort > 65_535) throw new Error('MEDIA_CLAMD_TCP_PORT must be between 1 and 65535.');
+  const processingMaxQueue = numericEnv(config, 'MEDIA_PROCESSING_MAX_QUEUE');
+  if (processingMaxQueue != null && (processingMaxQueue < 0 || processingMaxQueue > 100)) {
+    throw new Error('MEDIA_PROCESSING_MAX_QUEUE must be between 0 and 100.');
   }
   const processingTemp = config.get<string>('MEDIA_PROCESSING_TEMP_DIR')?.trim();
   if (!processingTemp) throw new Error('Missing required production env: MEDIA_PROCESSING_TEMP_DIR');

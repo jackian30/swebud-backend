@@ -28,11 +28,9 @@ function productionConfig(overrides: Record<string, string | undefined> = {}) {
     AWS_REGION: 'us-east-1',
     MEDIA_S3_BUCKET: 'swebudd-public-media',
     MEDIA_PUBLIC_BASE_URL: 'https://media.example.com',
-    MEDIA_QUARANTINE_S3_BUCKET: 'swebudd-private-quarantine',
-    MEDIA_LEGACY_PROXY_UPLOADS_ENABLED: 'false',
-    MEDIA_UPLOAD_WORKER_ENABLED: 'true',
-    MEDIA_MALWARE_SCANNER: 'clamdscan',
     MEDIA_PROCESSING_TEMP_DIR: '/var/lib/swebudd-media-processing',
+    MEDIA_PROCESSING_CONCURRENCY: '2',
+    MEDIA_PROCESSING_MAX_QUEUE: '16',
     ...overrides,
   });
 }
@@ -126,37 +124,34 @@ describe('security helpers', () => {
     process.env.NODE_ENV = 'production';
     const cfg = productionConfig({
       MEDIA_STORAGE_DRIVER: 's3',
-      MEDIA_QUARANTINE_S3_BUCKET: undefined,
+      MEDIA_S3_BUCKET: undefined,
     });
 
     expect(() => assertProductionConfig(cfg)).toThrow('Missing required S3 media env');
   });
 
-  it('requires separate public/quarantine buckets and fail-closed malware scanning', () => {
+  it('requires a valid public media bucket without quarantine or scanner configuration', () => {
     process.env.NODE_ENV = 'production';
 
     expect(() => assertProductionConfig(productionConfig({
-      MEDIA_QUARANTINE_S3_BUCKET: 'swebudd-public-media',
-    }))).toThrow('must be separate');
+      MEDIA_S3_BUCKET: 'Not A Bucket',
+    }))).toThrow('MEDIA_S3_BUCKET must be a valid S3 bucket name');
     expect(() => assertProductionConfig(productionConfig({
-      MEDIA_MALWARE_SCANNER: 'disabled',
-    }))).toThrow('must be "clamdscan" or "clamd-tcp"');
-    expect(() => assertProductionConfig(productionConfig({
-      MEDIA_MALWARE_SCANNER: 'clamd-tcp',
-      MEDIA_CLAMD_TCP_HOST: 'clamd.internal',
-      MEDIA_CLAMD_TRUSTED_NETWORK: 'false',
-    }))).toThrow('MEDIA_CLAMD_TRUSTED_NETWORK must be true');
+      MEDIA_QUARANTINE_S3_BUCKET: undefined,
+      MEDIA_MALWARE_SCANNER: undefined,
+      MEDIA_CLAMD_TCP_HOST: undefined,
+    }))).not.toThrow();
   });
 
-  it('requires the v2 worker and disables legacy proxy uploads in production', () => {
+  it('bounds synchronous media processing concurrency and queue size', () => {
     process.env.NODE_ENV = 'production';
 
     expect(() => assertProductionConfig(productionConfig({
-      MEDIA_UPLOAD_WORKER_ENABLED: 'false',
-    }))).toThrow('MEDIA_UPLOAD_WORKER_ENABLED must be true');
+      MEDIA_PROCESSING_CONCURRENCY: '9',
+    }))).toThrow('MEDIA_PROCESSING_CONCURRENCY must be between 1 and 8');
     expect(() => assertProductionConfig(productionConfig({
-      MEDIA_LEGACY_PROXY_UPLOADS_ENABLED: 'true',
-    }))).toThrow('MEDIA_LEGACY_PROXY_UPLOADS_ENABLED must be false');
+      MEDIA_PROCESSING_MAX_QUEUE: '101',
+    }))).toThrow('MEDIA_PROCESSING_MAX_QUEUE must be between 0 and 100');
   });
 
   it('requires a dedicated disk-backed media processing directory in production', () => {

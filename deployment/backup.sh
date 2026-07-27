@@ -226,14 +226,8 @@ if [[ "$media_driver" == "s3" ]]; then
   done
   media_public_bucket="$(resolved_value MEDIA_S3_BUCKET)"
   media_public_prefix="$(resolved_value MEDIA_S3_PREFIX)"
-  media_quarantine_bucket="$(resolved_value MEDIA_QUARANTINE_S3_BUCKET)"
-  media_quarantine_prefix=""
   [[ "$media_public_bucket" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
     { fail "MEDIA_S3_BUCKET is required and contains unsupported characters."; exit 1; }
-  [[ "$media_quarantine_bucket" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
-    { fail "MEDIA_QUARANTINE_S3_BUCKET is required and contains unsupported characters."; exit 1; }
-  [[ "$media_public_bucket" != "$media_quarantine_bucket" ]] ||
-    { fail "MEDIA_S3_BUCKET and MEDIA_QUARANTINE_S3_BUCKET must be different."; exit 1; }
   case "$media_public_prefix" in
     /*|*'..'*)
       fail "MEDIA_S3_PREFIX must be relative and cannot contain '..'."
@@ -270,7 +264,6 @@ backend_stopped=false
 backup_complete=false
 database_url_file="$temporary_dir/database-url"
 signing_public_key="$temporary_dir/backup-signing-public.pem"
-media_database_references_plain="$temporary_dir/media-database-references.json"
 
 compose=(
   docker compose
@@ -412,24 +405,6 @@ done
 [[ "$database_name" != *$'\n'* && "$database_name" != *'='* ]] ||
   { fail "Database identity contains unsupported characters."; exit 1; }
 
-docker run --rm \
-  --network "$network" \
-  --read-only \
-  --tmpfs /tmp:rw,noexec,nosuid,size=16m,mode=1777 \
-  --cap-drop ALL \
-  --security-opt no-new-privileges:true \
-  --pids-limit 64 \
-  --volume "$database_url_file:/run/secrets/database-url:ro" \
-  --volume "$SCRIPT_DIR/backup-media-references.sql:/deployment/backup-media-references.sql:ro" \
-  "$postgres_image" \
-  sh -ceu '
-    PGDATABASE="$(cat /run/secrets/database-url)"
-    export PGDATABASE
-    export PGCONNECT_TIMEOUT=10
-    exec psql --quiet --no-psqlrc --file /deployment/backup-media-references.sql
-  ' > "$media_database_references_plain"
-chmod 0600 "$media_database_references_plain"
-
 database_archive="$partial_dir/database.dump.age"
 docker run --rm \
   --network "$network" \
@@ -463,39 +438,14 @@ empty_sha256="$(
 )"
 media_metadata_count=0
 media_metadata_sha256="$empty_sha256"
-media_public_source="none"
-media_public_file_count=0
-media_public_inventory_sha256="$empty_sha256"
-media_public_metadata_file="none"
-media_public_metadata_count=0
-media_public_metadata_sha256="$empty_sha256"
-media_quarantine_source="none"
-media_quarantine_file_count=0
-media_quarantine_inventory_sha256="$empty_sha256"
-media_quarantine_metadata_file="none"
-media_quarantine_metadata_count=0
-media_quarantine_metadata_sha256="$empty_sha256"
-media_database_references_file="none"
-media_database_references_sha256="$empty_sha256"
-media_database_public_reference_count=0
-media_database_quarantine_reference_count=0
-media_unfinished_multipart_count=0
+media_store_source="none"
+media_store_file_count=0
+media_store_inventory_sha256="$empty_sha256"
+media_store_metadata_file="none"
+media_store_metadata_count=0
+media_store_metadata_sha256="$empty_sha256"
 
 if [[ "$media_driver" == "local" ]]; then
-  jq -e '
-    type == "object" and
-    (keys | sort) == (
-      ["format", "public", "quarantine", "unfinishedMultipart"] | sort
-    ) and
-    .format == "swebudd-media-backup-references-v1" and
-    .public == [] and
-    .quarantine == [] and
-    .unfinishedMultipart == []
-  ' "$media_database_references_plain" >/dev/null ||
-    {
-      fail "Local media backup cannot preserve persisted S3 upload state. Drain or migrate upload-v2 state before changing storage drivers."
-      exit 1
-    }
   mapfile -t media_volumes < <(
     docker volume ls \
       --filter "label=com.docker.compose.project=$PROJECT" \
@@ -551,12 +501,8 @@ if [[ "$media_driver" == "local" ]]; then
 else
   media_export_dir="$temporary_dir/media-export"
   mkdir -m 0700 "$media_export_dir"
-  media_source="s3-dual-export"
-  media_archive_layout="s3-dual-store-with-metadata-v1"
-  media_database_references_file="media-database-references.json"
-  cp -- "$media_database_references_plain" \
-    "$media_export_dir/$media_database_references_file"
-  chmod 0600 "$media_export_dir/$media_database_references_file"
+  media_source="s3-single-export"
+  media_archive_layout="s3-single-store-with-metadata-v1"
   media_aws_global_args=()
   if [[ -n "$(resolved_value AWS_S3_ENDPOINT)" ]]; then
     media_aws_global_args+=(--endpoint-url "$(resolved_value AWS_S3_ENDPOINT)")
@@ -569,7 +515,7 @@ else
     local store="$1"
     local bucket="$2"
     local prefix="$3"
-    local store_dir="$media_export_dir/stores/$store"
+    local store_dir="$media_export_dir/store"
     local objects_dir="$store_dir/objects"
     local metadata_path="$store_dir/s3-object-metadata.json"
     local metadata_entries="$temporary_dir/s3-${store}-metadata.entries.jsonl"
@@ -582,7 +528,7 @@ else
     local source file_count inventory_sha256 metadata_count metadata_sha256
 
     mkdir -p "$objects_dir"
-    chmod 0700 "$media_export_dir/stores" "$store_dir" "$objects_dir"
+    chmod 0700 "$store_dir" "$objects_dir"
     : > "$metadata_entries"
 
     aws "${media_aws_global_args[@]}" \
@@ -731,53 +677,16 @@ else
     printf -v "media_${store}_source" '%s' "$source"
     printf -v "media_${store}_file_count" '%s' "$file_count"
     printf -v "media_${store}_inventory_sha256" '%s' "$inventory_sha256"
-    printf -v "media_${store}_metadata_file" '%s' "stores/${store}/s3-object-metadata.json"
+    printf -v "media_${store}_metadata_file" '%s' "store/s3-object-metadata.json"
     printf -v "media_${store}_metadata_count" '%s' "$metadata_count"
     printf -v "media_${store}_metadata_sha256" '%s' "$metadata_sha256"
   }
 
-  export_s3_store public "$media_public_bucket" "$media_public_prefix"
-  export_s3_store quarantine "$media_quarantine_bucket" "$media_quarantine_prefix"
-
-  media_reference_summary="$(
-    "$SCRIPT_DIR/verify-media-backup-references.sh" \
-      "$media_export_dir/$media_database_references_file" \
-      "$media_public_bucket" \
-      "$media_quarantine_bucket" \
-      "$media_export_dir/$media_public_metadata_file" \
-      "$media_export_dir/$media_quarantine_metadata_file"
-  )"
-  IFS='|' read -r \
-    media_database_public_reference_count \
-    media_database_quarantine_reference_count \
-    media_unfinished_multipart_count \
-    media_reference_extra \
-    <<< "$media_reference_summary"
-  [[ -z "${media_reference_extra:-}" &&
-     "$media_database_public_reference_count" =~ ^[0-9]+$ &&
-     "$media_database_quarantine_reference_count" =~ ^[0-9]+$ &&
-     "$media_unfinished_multipart_count" =~ ^[0-9]+$ ]] ||
-    { fail "Media database reference summary had an unexpected shape."; exit 1; }
-  media_database_references_sha256="$(
-    sha256sum "$media_export_dir/$media_database_references_file" |
-      awk '{print $1}'
-  )"
-  media_file_count="$(( media_public_file_count + media_quarantine_file_count ))"
-  media_inventory_sha256="$(
-    cd "$media_export_dir"
-    find stores/public/objects stores/quarantine/objects -type f -exec sha256sum {} \; |
-      LC_ALL=C sort |
-      sha256sum |
-      awk '{print $1}'
-  )"
-  media_metadata_count="$(( media_public_metadata_count + media_quarantine_metadata_count ))"
-  media_metadata_sha256="$(
-    printf 'public=%s\nquarantine=%s\n' \
-      "$media_public_metadata_sha256" \
-      "$media_quarantine_metadata_sha256" |
-      sha256sum |
-      awk '{print $1}'
-  )"
+  export_s3_store store "$media_public_bucket" "$media_public_prefix"
+  media_file_count="$media_store_file_count"
+  media_inventory_sha256="$media_store_inventory_sha256"
+  media_metadata_count="$media_store_metadata_count"
+  media_metadata_sha256="$media_store_metadata_sha256"
   tar --create --gzip --file - --directory "$media_export_dir" . |
     age --recipient "$age_recipient" --output "$media_archive"
   media_inventory="${media_file_count}|${media_inventory_sha256}"
@@ -790,44 +699,27 @@ IFS='|' read -r media_file_count media_inventory_sha256 media_extra <<< "$media_
 [[ "$media_metadata_count" =~ ^[0-9]+$ &&
    "$media_metadata_sha256" =~ ^[a-f0-9]{64}$ ]] ||
   { fail "Media metadata inventory did not have the expected shape."; exit 1; }
-for store in public quarantine; do
-  store_source_variable="media_${store}_source"
-  store_file_count_variable="media_${store}_file_count"
-  store_inventory_variable="media_${store}_inventory_sha256"
-  store_metadata_file_variable="media_${store}_metadata_file"
-  store_metadata_count_variable="media_${store}_metadata_count"
-  store_metadata_hash_variable="media_${store}_metadata_sha256"
-  [[ "${!store_file_count_variable}" =~ ^[0-9]+$ &&
-     "${!store_inventory_variable}" =~ ^[a-f0-9]{64}$ &&
-     "${!store_metadata_count_variable}" =~ ^[0-9]+$ &&
-     "${!store_metadata_hash_variable}" =~ ^[a-f0-9]{64}$ ]] ||
-    { fail "$store media inventory did not have the expected shape."; exit 1; }
-  if [[ "$media_driver" == "local" ]]; then
-    [[ "${!store_source_variable}" == "none" &&
-       "${!store_file_count_variable}" == "0" &&
-       "${!store_inventory_variable}" == "$empty_sha256" &&
-       "${!store_metadata_file_variable}" == "none" &&
-       "${!store_metadata_count_variable}" == "0" &&
-       "${!store_metadata_hash_variable}" == "$empty_sha256" ]] ||
-      { fail "Local-media backup has nonempty $store S3 metadata."; exit 1; }
-  else
-    [[ "${!store_source_variable}" =~ ^s3://[A-Za-z0-9][A-Za-z0-9._-]*/ &&
-       "${!store_metadata_file_variable}" == "stores/${store}/s3-object-metadata.json" ]] ||
-      { fail "$store S3 backup metadata has an invalid source or sidecar path."; exit 1; }
-  fi
-done
-[[ "$media_database_references_sha256" =~ ^[a-f0-9]{64}$ &&
-   "$media_database_public_reference_count" =~ ^[0-9]+$ &&
-   "$media_database_quarantine_reference_count" =~ ^[0-9]+$ &&
-   "$media_unfinished_multipart_count" =~ ^[0-9]+$ ]] ||
-  { fail "Media database reference inventory did not have the expected shape."; exit 1; }
+[[ "$media_store_file_count" =~ ^[0-9]+$ &&
+   "$media_store_inventory_sha256" =~ ^[a-f0-9]{64}$ &&
+   "$media_store_metadata_count" =~ ^[0-9]+$ &&
+   "$media_store_metadata_sha256" =~ ^[a-f0-9]{64}$ ]] ||
+  { fail "Media-store inventory did not have the expected shape."; exit 1; }
 if [[ "$media_driver" == "local" ]]; then
-  [[ "$media_database_references_file" == "none" &&
-     "$media_database_references_sha256" == "$empty_sha256" ]] ||
-    { fail "Local media backup has an invalid database-reference sentinel."; exit 1; }
+  [[ "$media_store_source" == "none" &&
+     "$media_store_file_count" == "0" &&
+     "$media_store_inventory_sha256" == "$empty_sha256" &&
+     "$media_store_metadata_file" == "none" &&
+     "$media_store_metadata_count" == "0" &&
+     "$media_store_metadata_sha256" == "$empty_sha256" ]] ||
+    { fail "Local-media backup has nonempty S3 store metadata."; exit 1; }
 else
-  [[ "$media_database_references_file" == "media-database-references.json" ]] ||
-    { fail "S3 media backup has an invalid database-reference path."; exit 1; }
+  [[ "$media_store_source" =~ ^s3://[A-Za-z0-9][A-Za-z0-9._-]*/ &&
+     "$media_store_metadata_file" == "store/s3-object-metadata.json" &&
+     "$media_file_count" == "$media_store_file_count" &&
+     "$media_inventory_sha256" == "$media_store_inventory_sha256" &&
+     "$media_metadata_count" == "$media_store_metadata_count" &&
+     "$media_metadata_sha256" == "$media_store_metadata_sha256" ]] ||
+    { fail "S3 media backup has invalid single-store metadata."; exit 1; }
 fi
 media_sha256="$(sha256sum "$media_archive" | awk '{print $1}')"
 
@@ -845,7 +737,7 @@ cat_manifest_value() {
 }
 
 : > "$manifest_plain"
-cat_manifest_value format swebudd-backup-v2
+cat_manifest_value format swebudd-backup-v3
 cat_manifest_value backup_id "$backup_id"
 cat_manifest_value backup_purpose "$backup_purpose"
 cat_manifest_value created_at_utc "$timestamp"
@@ -869,23 +761,12 @@ cat_manifest_value media_inventory_sha256 "$media_inventory_sha256"
 cat_manifest_value media_archive_layout "$media_archive_layout"
 cat_manifest_value media_metadata_count "$media_metadata_count"
 cat_manifest_value media_metadata_sha256 "$media_metadata_sha256"
-cat_manifest_value media_public_source "$media_public_source"
-cat_manifest_value media_public_file_count "$media_public_file_count"
-cat_manifest_value media_public_inventory_sha256 "$media_public_inventory_sha256"
-cat_manifest_value media_public_metadata_file "$media_public_metadata_file"
-cat_manifest_value media_public_metadata_count "$media_public_metadata_count"
-cat_manifest_value media_public_metadata_sha256 "$media_public_metadata_sha256"
-cat_manifest_value media_quarantine_source "$media_quarantine_source"
-cat_manifest_value media_quarantine_file_count "$media_quarantine_file_count"
-cat_manifest_value media_quarantine_inventory_sha256 "$media_quarantine_inventory_sha256"
-cat_manifest_value media_quarantine_metadata_file "$media_quarantine_metadata_file"
-cat_manifest_value media_quarantine_metadata_count "$media_quarantine_metadata_count"
-cat_manifest_value media_quarantine_metadata_sha256 "$media_quarantine_metadata_sha256"
-cat_manifest_value media_database_references_file "$media_database_references_file"
-cat_manifest_value media_database_references_sha256 "$media_database_references_sha256"
-cat_manifest_value media_database_public_reference_count "$media_database_public_reference_count"
-cat_manifest_value media_database_quarantine_reference_count "$media_database_quarantine_reference_count"
-cat_manifest_value media_unfinished_multipart_count "$media_unfinished_multipart_count"
+cat_manifest_value media_store_source "$media_store_source"
+cat_manifest_value media_store_file_count "$media_store_file_count"
+cat_manifest_value media_store_inventory_sha256 "$media_store_inventory_sha256"
+cat_manifest_value media_store_metadata_file "$media_store_metadata_file"
+cat_manifest_value media_store_metadata_count "$media_store_metadata_count"
+cat_manifest_value media_store_metadata_sha256 "$media_store_metadata_sha256"
 cat_manifest_value rpo_target_hours "$rpo_hours"
 cat_manifest_value rto_target_hours "$rto_hours"
 cat_manifest_value retention_days "$retention_days"
@@ -899,7 +780,7 @@ age --recipient "$age_recipient" --output "$manifest_archive" "$manifest_plain"
 manifest_sha256="$(sha256sum "$manifest_archive" | awk '{print $1}')"
 
 cat > "$partial_dir/COMPLETE" <<EOF
-format=swebudd-backup-v2
+format=swebudd-backup-v3
 backup_id=$backup_id
 manifest_sha256=$manifest_sha256
 signing_algorithm=ed25519
@@ -981,7 +862,7 @@ while IFS= read -r -d '' expired_backup; do
     { fail "Refusing to prune unexpected backup path: $expired_backup"; exit 1; }
   [[ ! -L "$expired_backup" && -f "$expired_backup/COMPLETE" ]] ||
     { fail "Refusing to prune incomplete or symlinked backup: $expired_backup"; exit 1; }
-  grep -qx 'format=swebudd-backup-v2' "$expired_backup/COMPLETE" ||
+  grep -Eqx 'format=swebudd-backup-v(2|3)' "$expired_backup/COMPLETE" ||
     { fail "Refusing to prune a backup with an unknown marker: $expired_backup"; exit 1; }
   rm -rf -- "$expired_backup"
 done < <(

@@ -38,7 +38,7 @@ Current release: **0.4.0**
 
 - Password and Google accounts use verification-aware flows, anti-enumeration controls, short-lived tokens, and server-enforced adults-only policy.
 - Scoped, MFA-backed moderation APIs support report workflows, reversible quarantine, session revocation, idempotency, audit records, and outbox events.
-- Resumable multipart uploads enter private quarantine, pass malware and media validation, and complete through bounded asynchronous processing.
+- Authenticated uploads stream through bounded temporary disk storage, media validation, and canonical re-encoding before processed output reaches the existing public bucket.
 - Database roles, encrypted and signed backups, restore drills, migration safeguards, rollback tooling, and deployment audits are documented and automated.
 - Generated OpenAPI, CI security gates, dependency audits, and fresh-database migration validation cover the release contract.
 
@@ -258,10 +258,8 @@ particular:
 - set `ADMIN_JWT_SECRET` to a cryptographically random value of at least 32
   characters, different from both consumer JWT secrets, and configure the
   trusted Laravel admin issuer with that exact same value;
-- configure distinct public and private-quarantine buckets plus the required
-  S3 credentials/policies; never make `MEDIA_QUARANTINE_S3_BUCKET` public;
-- provision a private-network ClamAV service and set `MEDIA_CLAMD_TCP_HOST`;
-  TCP 3310 must not be exposed publicly; and
+- configure the existing public media bucket plus the required server-only S3
+  credentials and keep anonymous writes disabled; and
 - fill the remaining `sync: false` entries in `render.yaml`, including
   database, Turnstile, SMTP/sender, and media provider values.
 

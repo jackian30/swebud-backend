@@ -218,7 +218,8 @@ parse_key_value_document \
   complete_marker \
   format backup_id manifest_sha256 signing_algorithm || exit 1
 
-[[ "${complete_marker[format]}" == "swebudd-backup-v2" ]] ||
+[[ "${complete_marker[format]}" == "swebudd-backup-v2" ||
+   "${complete_marker[format]}" == "swebudd-backup-v3" ]] ||
   { fail "Unsupported COMPLETE marker format."; exit 1; }
 [[ "${complete_marker[signing_algorithm]}" == "ed25519" ]] ||
   { fail "Unsupported backup creator-signature algorithm."; exit 1; }
@@ -328,7 +329,7 @@ age \
   "$backup_dir/manifest.age"
 chmod 0600 "$manifest_plain"
 
-manifest_keys=(
+common_manifest_keys=(
   format
   backup_id
   backup_purpose
@@ -353,6 +354,15 @@ manifest_keys=(
   media_archive_layout
   media_metadata_count
   media_metadata_sha256
+  rpo_target_hours
+  rto_target_hours
+  retention_days
+  postgres_helper_image
+  media_helper_image
+  signing_algorithm
+  signing_public_key_sha256
+)
+legacy_manifest_keys=(
   media_public_source
   media_public_file_count
   media_public_inventory_sha256
@@ -370,18 +380,34 @@ manifest_keys=(
   media_database_public_reference_count
   media_database_quarantine_reference_count
   media_unfinished_multipart_count
-  rpo_target_hours
-  rto_target_hours
-  retention_days
-  postgres_helper_image
-  media_helper_image
-  signing_algorithm
-  signing_public_key_sha256
+)
+single_store_manifest_keys=(
+  media_store_source
+  media_store_file_count
+  media_store_inventory_sha256
+  media_store_metadata_file
+  media_store_metadata_count
+  media_store_metadata_sha256
 )
 declare -A manifest=()
-parse_key_value_document "$manifest_plain" manifest "${manifest_keys[@]}"
+case "${complete_marker[format]}" in
+  swebudd-backup-v2)
+    parse_key_value_document \
+      "$manifest_plain" \
+      manifest \
+      "${common_manifest_keys[@]}" \
+      "${legacy_manifest_keys[@]}" || exit 1
+    ;;
+  swebudd-backup-v3)
+    parse_key_value_document \
+      "$manifest_plain" \
+      manifest \
+      "${common_manifest_keys[@]}" \
+      "${single_store_manifest_keys[@]}" || exit 1
+    ;;
+esac
 
-[[ "${manifest[format]}" == "swebudd-backup-v2" ]] ||
+[[ "${manifest[format]}" == "${complete_marker[format]}" ]] ||
   { fail "Unsupported creator-signed manifest format."; exit 1; }
 [[ "${manifest[backup_id]}" == "$backup_id" ]] ||
   { fail "Creator-signed manifest backup_id does not match COMPLETE."; exit 1; }
@@ -392,13 +418,23 @@ parse_key_value_document "$manifest_plain" manifest "${manifest_keys[@]}"
    "${manifest[media_sha256]}" =~ ^[a-f0-9]{64}$ &&
    "${manifest[media_inventory_sha256]}" =~ ^[a-f0-9]{64}$ &&
    "${manifest[media_metadata_sha256]}" =~ ^[a-f0-9]{64}$ &&
-   "${manifest[media_public_inventory_sha256]}" =~ ^[a-f0-9]{64}$ &&
-   "${manifest[media_public_metadata_sha256]}" =~ ^[a-f0-9]{64}$ &&
-   "${manifest[media_quarantine_inventory_sha256]}" =~ ^[a-f0-9]{64}$ &&
-   "${manifest[media_quarantine_metadata_sha256]}" =~ ^[a-f0-9]{64}$ &&
-   "${manifest[media_database_references_sha256]}" =~ ^[a-f0-9]{64}$ &&
    "${manifest[signing_public_key_sha256]}" =~ ^[a-f0-9]{64}$ ]] ||
   { fail "Creator-signed manifest contains an invalid hash."; exit 1; }
+case "${manifest[format]}" in
+  swebudd-backup-v2)
+    [[ "${manifest[media_public_inventory_sha256]}" =~ ^[a-f0-9]{64}$ &&
+       "${manifest[media_public_metadata_sha256]}" =~ ^[a-f0-9]{64}$ &&
+       "${manifest[media_quarantine_inventory_sha256]}" =~ ^[a-f0-9]{64}$ &&
+       "${manifest[media_quarantine_metadata_sha256]}" =~ ^[a-f0-9]{64}$ &&
+       "${manifest[media_database_references_sha256]}" =~ ^[a-f0-9]{64}$ ]] ||
+      { fail "Legacy creator-signed manifest contains an invalid media hash."; exit 1; }
+    ;;
+  swebudd-backup-v3)
+    [[ "${manifest[media_store_inventory_sha256]}" =~ ^[a-f0-9]{64}$ &&
+       "${manifest[media_store_metadata_sha256]}" =~ ^[a-f0-9]{64}$ ]] ||
+      { fail "Single-store creator-signed manifest contains an invalid media hash."; exit 1; }
+    ;;
+esac
 [[ "${manifest[created_at_utc]}" =~ ^[0-9]{8}T[0-9]{6}Z$ &&
    "${manifest[created_epoch]}" =~ ^[0-9]+$ ]] ||
   { fail "Creator-signed manifest contains an invalid creation time."; exit 1; }
@@ -418,44 +454,6 @@ empty_sha256="$(
     sha256sum |
     awk '{print $1}'
 )"
-case "${manifest[media_driver]}" in
-  local)
-    [[ "${manifest[media_archive_layout]}" == "flat-v1" &&
-       "${manifest[media_source]}" == docker-volume:* &&
-       "${manifest[media_metadata_count]}" == "0" &&
-       "${manifest[media_metadata_sha256]}" == "$empty_sha256" &&
-       "${manifest[media_public_source]}" == "none" &&
-       "${manifest[media_public_file_count]}" == "0" &&
-       "${manifest[media_public_inventory_sha256]}" == "$empty_sha256" &&
-       "${manifest[media_public_metadata_file]}" == "none" &&
-       "${manifest[media_public_metadata_count]}" == "0" &&
-       "${manifest[media_public_metadata_sha256]}" == "$empty_sha256" &&
-       "${manifest[media_quarantine_source]}" == "none" &&
-       "${manifest[media_quarantine_file_count]}" == "0" &&
-       "${manifest[media_quarantine_inventory_sha256]}" == "$empty_sha256" &&
-       "${manifest[media_quarantine_metadata_file]}" == "none" &&
-       "${manifest[media_quarantine_metadata_count]}" == "0" &&
-       "${manifest[media_quarantine_metadata_sha256]}" == "$empty_sha256" &&
-       "${manifest[media_database_references_file]}" == "none" &&
-       "${manifest[media_database_references_sha256]}" == "$empty_sha256" &&
-       "${manifest[media_database_public_reference_count]}" == "0" &&
-       "${manifest[media_database_quarantine_reference_count]}" == "0" &&
-       "${manifest[media_unfinished_multipart_count]}" == "0" ]] ||
-      { fail "Local-media manifest has an invalid archive layout."; exit 1; }
-    ;;
-  s3)
-    [[ "${manifest[media_archive_layout]}" == "s3-dual-store-with-metadata-v1" &&
-       "${manifest[media_source]}" == "s3-dual-export" &&
-       "${manifest[media_public_source]}" =~ ^s3://[A-Za-z0-9][A-Za-z0-9._-]*/ &&
-       "${manifest[media_quarantine_source]}" =~ ^s3://[A-Za-z0-9][A-Za-z0-9._-]*/ &&
-       "${manifest[media_public_source]}" != "${manifest[media_quarantine_source]}" &&
-       "${manifest[media_public_metadata_file]}" == "stores/public/s3-object-metadata.json" &&
-       "${manifest[media_quarantine_metadata_file]}" == "stores/quarantine/s3-object-metadata.json" &&
-       "${manifest[media_database_references_file]}" == "media-database-references.json" ]] ||
-      { fail "S3-media manifest has an invalid archive layout."; exit 1; }
-    ;;
-esac
-
 numeric_keys=(
   database_server_version_num
   database_migrations_count
@@ -464,39 +462,138 @@ numeric_keys=(
   database_groups_count
   media_file_count
   media_metadata_count
-  media_public_file_count
-  media_public_metadata_count
-  media_quarantine_file_count
-  media_quarantine_metadata_count
-  media_database_public_reference_count
-  media_database_quarantine_reference_count
-  media_unfinished_multipart_count
   rpo_target_hours
   rto_target_hours
   retention_days
 )
+case "${manifest[format]}" in
+  swebudd-backup-v2)
+    numeric_keys+=(
+      media_public_file_count
+      media_public_metadata_count
+      media_quarantine_file_count
+      media_quarantine_metadata_count
+      media_database_public_reference_count
+      media_database_quarantine_reference_count
+      media_unfinished_multipart_count
+    )
+    case "${manifest[media_driver]}" in
+      local)
+        [[ "${manifest[media_archive_layout]}" == "flat-v1" &&
+           "${manifest[media_source]}" == docker-volume:* &&
+           "${manifest[media_metadata_count]}" == "0" &&
+           "${manifest[media_metadata_sha256]}" == "$empty_sha256" &&
+           "${manifest[media_public_source]}" == "none" &&
+           "${manifest[media_public_file_count]}" == "0" &&
+           "${manifest[media_public_inventory_sha256]}" == "$empty_sha256" &&
+           "${manifest[media_public_metadata_file]}" == "none" &&
+           "${manifest[media_public_metadata_count]}" == "0" &&
+           "${manifest[media_public_metadata_sha256]}" == "$empty_sha256" &&
+           "${manifest[media_quarantine_source]}" == "none" &&
+           "${manifest[media_quarantine_file_count]}" == "0" &&
+           "${manifest[media_quarantine_inventory_sha256]}" == "$empty_sha256" &&
+           "${manifest[media_quarantine_metadata_file]}" == "none" &&
+           "${manifest[media_quarantine_metadata_count]}" == "0" &&
+           "${manifest[media_quarantine_metadata_sha256]}" == "$empty_sha256" &&
+           "${manifest[media_database_references_file]}" == "none" &&
+           "${manifest[media_database_references_sha256]}" == "$empty_sha256" &&
+           "${manifest[media_database_public_reference_count]}" == "0" &&
+           "${manifest[media_database_quarantine_reference_count]}" == "0" &&
+           "${manifest[media_unfinished_multipart_count]}" == "0" ]] ||
+          { fail "Legacy local-media manifest has an invalid archive layout."; exit 1; }
+        ;;
+      s3)
+        [[ "${manifest[media_archive_layout]}" == "s3-dual-store-with-metadata-v1" &&
+           "${manifest[media_source]}" == "s3-dual-export" &&
+           "${manifest[media_public_source]}" =~ ^s3://[A-Za-z0-9][A-Za-z0-9._-]*/ &&
+           "${manifest[media_quarantine_source]}" =~ ^s3://[A-Za-z0-9][A-Za-z0-9._-]*/ &&
+           "${manifest[media_public_source]}" != "${manifest[media_quarantine_source]}" &&
+           "${manifest[media_public_metadata_file]}" == "stores/public/s3-object-metadata.json" &&
+           "${manifest[media_quarantine_metadata_file]}" == "stores/quarantine/s3-object-metadata.json" &&
+           "${manifest[media_database_references_file]}" == "media-database-references.json" ]] ||
+          { fail "Legacy S3-media manifest has an invalid archive layout."; exit 1; }
+        ;;
+    esac
+    ;;
+  swebudd-backup-v3)
+    numeric_keys+=(media_store_file_count media_store_metadata_count)
+    case "${manifest[media_driver]}" in
+      local)
+        [[ "${manifest[media_archive_layout]}" == "flat-v1" &&
+           "${manifest[media_source]}" == docker-volume:* &&
+           "${manifest[media_metadata_count]}" == "0" &&
+           "${manifest[media_metadata_sha256]}" == "$empty_sha256" &&
+           "${manifest[media_store_source]}" == "none" &&
+           "${manifest[media_store_file_count]}" == "0" &&
+           "${manifest[media_store_inventory_sha256]}" == "$empty_sha256" &&
+           "${manifest[media_store_metadata_file]}" == "none" &&
+           "${manifest[media_store_metadata_count]}" == "0" &&
+           "${manifest[media_store_metadata_sha256]}" == "$empty_sha256" ]] ||
+          { fail "Single-store local-media manifest has an invalid archive layout."; exit 1; }
+        ;;
+      s3)
+        [[ "${manifest[media_archive_layout]}" == "s3-single-store-with-metadata-v1" &&
+           "${manifest[media_source]}" == "s3-single-export" &&
+           "${manifest[media_store_source]}" =~ ^s3://[A-Za-z0-9][A-Za-z0-9._-]*/ &&
+           "${manifest[media_store_metadata_file]}" == "store/s3-object-metadata.json" ]] ||
+          { fail "Single-store S3-media manifest has an invalid archive layout."; exit 1; }
+        ;;
+    esac
+    ;;
+esac
 for numeric_key in "${numeric_keys[@]}"; do
   [[ "${manifest[$numeric_key]}" =~ ^[0-9]+$ ]] ||
     { fail "Manifest key $numeric_key must be numeric."; exit 1; }
 done
 if [[ "${manifest[media_driver]}" == "s3" ]]; then
-  (( ${manifest[media_file_count]} ==
-     ${manifest[media_public_file_count]} +
-     ${manifest[media_quarantine_file_count]} )) ||
-    { fail "S3 media file count does not equal its two store counts."; exit 1; }
-  (( ${manifest[media_metadata_count]} ==
-     ${manifest[media_public_metadata_count]} +
-     ${manifest[media_quarantine_metadata_count]} )) ||
-    { fail "S3 media metadata count does not equal its two store counts."; exit 1; }
-  expected_combined_metadata_sha256="$(
-    printf 'public=%s\nquarantine=%s\n' \
-      "${manifest[media_public_metadata_sha256]}" \
-      "${manifest[media_quarantine_metadata_sha256]}" |
-      sha256sum |
-      awk '{print $1}'
-  )"
-  [[ "$expected_combined_metadata_sha256" == "${manifest[media_metadata_sha256]}" ]] ||
-    { fail "S3 media metadata aggregate hash is invalid."; exit 1; }
+  if [[ "${manifest[format]}" == "swebudd-backup-v2" ]]; then
+    (( ${manifest[media_file_count]} ==
+       ${manifest[media_public_file_count]} +
+       ${manifest[media_quarantine_file_count]} )) ||
+      { fail "Legacy S3 media file count does not equal its two store counts."; exit 1; }
+    (( ${manifest[media_metadata_count]} ==
+       ${manifest[media_public_metadata_count]} +
+       ${manifest[media_quarantine_metadata_count]} )) ||
+      { fail "Legacy S3 media metadata count does not equal its two store counts."; exit 1; }
+    expected_combined_metadata_sha256="$(
+      printf 'public=%s\nquarantine=%s\n' \
+        "${manifest[media_public_metadata_sha256]}" \
+        "${manifest[media_quarantine_metadata_sha256]}" |
+        sha256sum |
+        awk '{print $1}'
+    )"
+    [[ "$expected_combined_metadata_sha256" == "${manifest[media_metadata_sha256]}" ]] ||
+      { fail "Legacy S3 media metadata aggregate hash is invalid."; exit 1; }
+  else
+    [[ "${manifest[media_file_count]}" == "${manifest[media_store_file_count]}" &&
+       "${manifest[media_inventory_sha256]}" == "${manifest[media_store_inventory_sha256]}" &&
+       "${manifest[media_metadata_count]}" == "${manifest[media_store_metadata_count]}" &&
+       "${manifest[media_metadata_sha256]}" == "${manifest[media_store_metadata_sha256]}" ]] ||
+      { fail "Single-store S3 media aggregate inventory is invalid."; exit 1; }
+  fi
+fi
+
+# Normalize the v3 single-store schema to the internal comparison fields used
+# by the extraction verifier. The exact signed v3 manifest itself never
+# contains the retired quarantine or upload-v2 reference keys.
+if [[ "${manifest[format]}" == "swebudd-backup-v3" ]]; then
+  manifest[media_public_source]="${manifest[media_store_source]}"
+  manifest[media_public_file_count]="${manifest[media_store_file_count]}"
+  manifest[media_public_inventory_sha256]="${manifest[media_store_inventory_sha256]}"
+  manifest[media_public_metadata_file]="${manifest[media_store_metadata_file]}"
+  manifest[media_public_metadata_count]="${manifest[media_store_metadata_count]}"
+  manifest[media_public_metadata_sha256]="${manifest[media_store_metadata_sha256]}"
+  manifest[media_quarantine_source]="none"
+  manifest[media_quarantine_file_count]="0"
+  manifest[media_quarantine_inventory_sha256]="$empty_sha256"
+  manifest[media_quarantine_metadata_file]="none"
+  manifest[media_quarantine_metadata_count]="0"
+  manifest[media_quarantine_metadata_sha256]="$empty_sha256"
+  manifest[media_database_references_file]="none"
+  manifest[media_database_references_sha256]="$empty_sha256"
+  manifest[media_database_public_reference_count]="0"
+  manifest[media_database_quarantine_reference_count]="0"
+  manifest[media_unfinished_multipart_count]="0"
 fi
 for positive_key in rpo_target_hours rto_target_hours retention_days; do
   (( ${manifest[$positive_key]} > 0 && ${manifest[$positive_key]} <= 8760 )) ||
@@ -527,70 +624,80 @@ if [[ "${manifest[media_driver]}" == "s3" ]]; then
       --to-stdout \
       --file - \
       "./${manifest[media_public_metadata_file]}" > "$s3_public_metadata_plain"
-  age --decrypt --identity "$identity_file" "$backup_dir/media.tar.gz.age" |
-    tar \
-      --extract \
-      --gzip \
-      --to-stdout \
-      --file - \
-      "./${manifest[media_quarantine_metadata_file]}" > "$s3_quarantine_metadata_plain"
-  age --decrypt --identity "$identity_file" "$backup_dir/media.tar.gz.age" |
-    tar \
-      --extract \
-      --gzip \
-      --to-stdout \
-      --file - \
-      "./${manifest[media_database_references_file]}" > "$media_database_references_plain"
-  chmod 0600 \
-    "$s3_public_metadata_plain" \
-    "$s3_quarantine_metadata_plain" \
-    "$media_database_references_plain"
+  chmod 0600 "$s3_public_metadata_plain"
 
-  "$SCRIPT_DIR/verify-s3-backup-sidecar.sh" \
-    public \
-    "$s3_public_metadata_plain" \
-    "${manifest[media_public_metadata_sha256]}" \
-    "${manifest[media_public_metadata_count]}" \
-    "${manifest[media_public_source]}" > "$expected_public_media_paths"
-  "$SCRIPT_DIR/verify-s3-backup-sidecar.sh" \
-    quarantine \
-    "$s3_quarantine_metadata_plain" \
-    "${manifest[media_quarantine_metadata_sha256]}" \
-    "${manifest[media_quarantine_metadata_count]}" \
-    "${manifest[media_quarantine_source]}" > "$expected_quarantine_media_paths"
-
-  public_source_without_scheme="${manifest[media_public_source]#s3://}"
-  quarantine_source_without_scheme="${manifest[media_quarantine_source]#s3://}"
-  source_public_bucket="${public_source_without_scheme%%/*}"
-  source_quarantine_bucket="${quarantine_source_without_scheme%%/*}"
-  [[ "$source_public_bucket" != "$source_quarantine_bucket" ]] ||
-    { fail "S3 public and quarantine sidecars must use different buckets."; exit 1; }
-
-  actual_references_sha256="$(
-    sha256sum "$media_database_references_plain" |
-      awk '{print $1}'
-  )"
-  [[ "$actual_references_sha256" == "${manifest[media_database_references_sha256]}" ]] ||
-    { fail "Media database-reference hash does not match the creator-signed manifest."; exit 1; }
-  restored_reference_summary="$(
-    "$SCRIPT_DIR/verify-media-backup-references.sh" \
-      "$media_database_references_plain" \
-      "$source_public_bucket" \
-      "$source_quarantine_bucket" \
+  if [[ "${manifest[format]}" == "swebudd-backup-v3" ]]; then
+    "$SCRIPT_DIR/verify-s3-backup-sidecar.sh" \
+      store \
       "$s3_public_metadata_plain" \
-      "$s3_quarantine_metadata_plain"
-  )"
-  IFS='|' read -r \
-    restored_public_reference_count \
-    restored_quarantine_reference_count \
-    restored_unfinished_multipart_count \
-    restored_reference_extra \
-    <<< "$restored_reference_summary"
-  [[ -z "${restored_reference_extra:-}" &&
-     "$restored_public_reference_count" == "${manifest[media_database_public_reference_count]}" &&
-     "$restored_quarantine_reference_count" == "${manifest[media_database_quarantine_reference_count]}" &&
-     "$restored_unfinished_multipart_count" == "${manifest[media_unfinished_multipart_count]}" ]] ||
-    { fail "Media database-reference counts do not match the creator-signed manifest."; exit 1; }
+      "${manifest[media_public_metadata_sha256]}" \
+      "${manifest[media_public_metadata_count]}" \
+      "${manifest[media_public_source]}" > "$expected_public_media_paths"
+  else
+    age --decrypt --identity "$identity_file" "$backup_dir/media.tar.gz.age" |
+      tar \
+        --extract \
+        --gzip \
+        --to-stdout \
+        --file - \
+        "./${manifest[media_quarantine_metadata_file]}" > "$s3_quarantine_metadata_plain"
+    age --decrypt --identity "$identity_file" "$backup_dir/media.tar.gz.age" |
+      tar \
+        --extract \
+        --gzip \
+        --to-stdout \
+        --file - \
+        "./${manifest[media_database_references_file]}" > "$media_database_references_plain"
+    chmod 0600 \
+      "$s3_quarantine_metadata_plain" \
+      "$media_database_references_plain"
+
+    "$SCRIPT_DIR/verify-s3-backup-sidecar.sh" \
+      public \
+      "$s3_public_metadata_plain" \
+      "${manifest[media_public_metadata_sha256]}" \
+      "${manifest[media_public_metadata_count]}" \
+      "${manifest[media_public_source]}" > "$expected_public_media_paths"
+    "$SCRIPT_DIR/verify-s3-backup-sidecar.sh" \
+      quarantine \
+      "$s3_quarantine_metadata_plain" \
+      "${manifest[media_quarantine_metadata_sha256]}" \
+      "${manifest[media_quarantine_metadata_count]}" \
+      "${manifest[media_quarantine_source]}" > "$expected_quarantine_media_paths"
+
+    public_source_without_scheme="${manifest[media_public_source]#s3://}"
+    quarantine_source_without_scheme="${manifest[media_quarantine_source]#s3://}"
+    source_public_bucket="${public_source_without_scheme%%/*}"
+    source_quarantine_bucket="${quarantine_source_without_scheme%%/*}"
+    [[ "$source_public_bucket" != "$source_quarantine_bucket" ]] ||
+      { fail "S3 public and quarantine sidecars must use different buckets."; exit 1; }
+
+    actual_references_sha256="$(
+      sha256sum "$media_database_references_plain" |
+        awk '{print $1}'
+    )"
+    [[ "$actual_references_sha256" == "${manifest[media_database_references_sha256]}" ]] ||
+      { fail "Media database-reference hash does not match the creator-signed manifest."; exit 1; }
+    restored_reference_summary="$(
+      "$SCRIPT_DIR/verify-media-backup-references.sh" \
+        "$media_database_references_plain" \
+        "$source_public_bucket" \
+        "$source_quarantine_bucket" \
+        "$s3_public_metadata_plain" \
+        "$s3_quarantine_metadata_plain"
+    )"
+    IFS='|' read -r \
+      restored_public_reference_count \
+      restored_quarantine_reference_count \
+      restored_unfinished_multipart_count \
+      restored_reference_extra \
+      <<< "$restored_reference_summary"
+    [[ -z "${restored_reference_extra:-}" &&
+       "$restored_public_reference_count" == "${manifest[media_database_public_reference_count]}" &&
+       "$restored_quarantine_reference_count" == "${manifest[media_database_quarantine_reference_count]}" &&
+       "$restored_unfinished_multipart_count" == "${manifest[media_unfinished_multipart_count]}" ]] ||
+      { fail "Media database-reference counts do not match the creator-signed manifest."; exit 1; }
+  fi
 fi
 
 [[ "${manifest[postgres_helper_image]}" == "$postgres_image" ]] ||
@@ -808,6 +915,80 @@ restored_media_inventory="$(
             quarantine_inventory_sha="$EMPTY_SHA256"
             quarantine_metadata_sha="$EMPTY_SHA256"
             references_sha="$EMPTY_SHA256"
+            ;;
+          s3-single-store-with-metadata-v1)
+            [ -d /restore/store ] &&
+              [ ! -L /restore/store ] &&
+              [ -d /restore/store/objects ] &&
+              [ ! -L /restore/store/objects ] &&
+              [ -f /restore/store/s3-object-metadata.json ] &&
+              [ ! -L /restore/store/s3-object-metadata.json ] || {
+                echo "Single-store S3 media archive layout is incomplete." >&2
+                exit 1
+              }
+            [ "$(
+              find /restore \
+                -mindepth 1 \
+                -maxdepth 1 |
+                wc -l |
+                tr -d "[:space:]"
+            )" = 1 ] || {
+              echo "Single-store S3 media archive must contain only store/." >&2
+              exit 1
+            }
+            unexpected_store_entry="$(
+              find /restore/store \
+                -mindepth 1 \
+                -maxdepth 1 \
+                ! -name objects \
+                ! -name s3-object-metadata.json \
+                -print -quit
+            )"
+            [ -z "$unexpected_store_entry" ] || {
+              echo "Single S3 store has an unexpected entry." >&2
+              exit 1
+            }
+            [ "$(
+              find /restore/store \
+                -mindepth 1 \
+                -maxdepth 1 |
+                wc -l |
+                tr -d "[:space:]"
+            )" = 2 ] || {
+              echo "Single S3 store does not have the exact required layout." >&2
+              exit 1
+            }
+
+            public_metadata_sha="$(
+              sha256sum /restore/store/s3-object-metadata.json |
+                awk "{print \$1}"
+            )"
+            [ "$public_metadata_sha" = "$EXPECTED_PUBLIC_METADATA_SHA256" ] &&
+              [ "$public_metadata_sha" = "$EXPECTED_METADATA_SHA256" ] || {
+                echo "Extracted S3 metadata sidecar hash differs from the manifest." >&2
+                exit 1
+              }
+            metadata_sha="$public_metadata_sha"
+            quarantine_count=0
+            quarantine_inventory_sha="$EMPTY_SHA256"
+            quarantine_metadata_sha="$EMPTY_SHA256"
+            references_sha="$EMPTY_SHA256"
+
+            cd /restore/store/objects
+            find . -type f -print | LC_ALL=C sort > /tmp/actual-public-media-paths
+            cmp -s /run/expected-public-media-paths /tmp/actual-public-media-paths || {
+              echo "Extracted S3 object paths differ from the metadata sidecar." >&2
+              exit 1
+            }
+            public_count="$(find . -type f | wc -l | tr -d "[:space:]")"
+            public_inventory_sha="$(
+              find . -type f -exec sha256sum {} \; |
+                LC_ALL=C sort |
+                sha256sum |
+                awk "{print \$1}"
+            )"
+            file_count="$public_count"
+            inventory_sha="$public_inventory_sha"
             ;;
           s3-dual-store-with-metadata-v1)
             [ -d /restore/stores ] &&

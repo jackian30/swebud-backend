@@ -49,24 +49,11 @@ describe('OpenAPI runtime exposure', () => {
   it('covers the complete frontend operation inventory without duplicates, including every upload helper', () => {
     const keys = FRONTEND_OPERATION_CONTRACTS.map((contract) => `${contract.method.toUpperCase()} ${contract.path}`);
     const uploadContracts = FRONTEND_OPERATION_CONTRACTS.filter((contract) => contract.path.startsWith('/uploads/'));
-    const legacyUploadContracts = uploadContracts.filter((contract) => !contract.path.startsWith('/uploads/v2/'));
-    const uploadV2Keys = uploadContracts
-      .filter((contract) => contract.path.startsWith('/uploads/v2/'))
-      .map((contract) => `${contract.method.toUpperCase()} ${contract.path}`);
 
-    expect(FRONTEND_OPERATION_CONTRACTS).toHaveLength(194);
-    expect(new Set(keys)).toHaveProperty('size', 194);
-    expect(uploadContracts).toHaveLength(16);
-    expect(legacyUploadContracts).toHaveLength(10);
-    expect(legacyUploadContracts.every((contract) => contract.request?.mediaType === 'multipart/form-data')).toBe(true);
-    expect(new Set(uploadV2Keys)).toEqual(new Set([
-      'POST /uploads/v2/sessions',
-      'POST /uploads/v2/sessions/{sessionId}/parts',
-      'GET /uploads/v2/sessions/{sessionId}/parts',
-      'POST /uploads/v2/sessions/{sessionId}/complete',
-      'GET /uploads/v2/sessions/{sessionId}',
-      'DELETE /uploads/v2/sessions/{sessionId}',
-    ]));
+    expect(FRONTEND_OPERATION_CONTRACTS).toHaveLength(188);
+    expect(new Set(keys)).toHaveProperty('size', 188);
+    expect(uploadContracts).toHaveLength(10);
+    expect(uploadContracts.every((contract) => contract.request?.mediaType === 'multipart/form-data')).toBe(true);
     expect(() => assertValidOpenApiDocument(artifact())).not.toThrow();
   });
 
@@ -220,32 +207,4 @@ describe('OpenAPI runtime exposure', () => {
     )).toThrow(/one owner; duplicate names: DuplicateResponse/);
   });
 
-  it('publishes exact signed upload headers and a satisfiable flattened progress response', () => {
-    const document = artifact();
-    const partUrl = document.components?.schemas?.UploadV2PartUrlResponse;
-    const progress = document.components?.schemas?.UploadV2ProgressResponse;
-    if (!partUrl || '$ref' in partUrl || !partUrl.properties) throw new Error('Upload part URL schema missing');
-    const headers = partUrl.properties.requiredHeaders;
-    if (!headers || '$ref' in headers) throw new Error('Upload required headers schema missing');
-    expect(headers.required).toEqual([
-      'x-amz-checksum-sha256',
-      'content-length',
-    ]);
-    expect(headers.properties?.['content-length']).toEqual(expect.objectContaining({
-      type: 'string',
-      pattern: '^[1-9][0-9]*$',
-    }));
-
-    expect(progress && !('$ref' in progress) ? progress : null).toEqual(expect.objectContaining({
-      type: 'object',
-      additionalProperties: false,
-      required: expect.arrayContaining(['id', 'status', 'progress']),
-      properties: expect.objectContaining({
-        id: expect.any(Object),
-        status: expect.any(Object),
-        progress: { $ref: '#/components/schemas/UploadV2ProgressDetailResponse' },
-      }),
-    }));
-    expect(progress && !('$ref' in progress) ? progress.allOf : undefined).toBeUndefined();
-  });
 });

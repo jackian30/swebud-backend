@@ -56,72 +56,14 @@ services:
         value: s3
       - key: MEDIA_S3_BUCKET
         sync: false
-      - key: MEDIA_QUARANTINE_S3_BUCKET
-        sync: false
       - key: MEDIA_PUBLIC_BASE_URL
         sync: false
-      - key: MEDIA_UPLOAD_WORKER_ENABLED
-        value: "true"
-      - key: MEDIA_LEGACY_PROXY_UPLOADS_ENABLED
-        value: "false"
       - key: MEDIA_PROCESSING_TEMP_DIR
         value: /app/media-processing-tmp
-      - key: MEDIA_UPLOAD_MAX_ACTIVE_PER_USER
-        value: "3"
-      - key: MEDIA_UPLOAD_ROLLING_QUOTA_BYTES
-        value: "524288000"
-      - key: MEDIA_UPLOAD_ROLLING_QUOTA_HOURS
-        value: "24"
-      - key: MEDIA_UPLOAD_PART_BYTES
-        value: "8388608"
-      - key: MEDIA_UPLOAD_SESSION_TTL_SECONDS
-        value: "1800"
-      - key: MEDIA_UPLOAD_URL_TTL_SECONDS
-        value: "300"
-      - key: MEDIA_UPLOAD_WORKER_CONCURRENCY
-        value: "2"
-      - key: MEDIA_UPLOAD_JOB_MAX_ATTEMPTS
-        value: "5"
-      - key: MEDIA_UPLOAD_JOB_LEASE_SECONDS
-        value: "300"
-      - key: MEDIA_UPLOAD_WORKER_POLL_MS
-        value: "2000"
-      - key: MEDIA_S3_REQUEST_TIMEOUT_MS
-        value: "30000"
-      - key: MEDIA_S3_DOWNLOAD_TIMEOUT_MS
-        value: "180000"
-      - key: MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS
-        value: "120000"
-      - key: MEDIA_UPLOAD_COMPLETION_STALE_SECONDS
-        value: "300"
-      - key: MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS
-        value: "1800"
-      - key: MEDIA_PUBLISH_TIMEOUT_MS
-        value: "120000"
-      - key: MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS
-        value: "1800"
-      - key: MEDIA_PUBLISH_CLEANUP_TOMBSTONE_SECONDS
-        value: "300"
       - key: MEDIA_PROCESSING_CONCURRENCY
         value: "2"
       - key: MEDIA_PROCESSING_MAX_QUEUE
         value: "16"
-      - key: MEDIA_PROCESSING_STALE_TEMP_SECONDS
-        value: "21600"
-      - key: MEDIA_PROCESSING_STALE_CLEANUP_LIMIT
-        value: "100"
-      - key: MEDIA_MALWARE_SCANNER
-        value: clamd-tcp
-      - key: MEDIA_MALWARE_SCAN_TIMEOUT_MS
-        value: "60000"
-      # Provision this as a private-network ClamAV service; never expose 3310
-      # publicly. The current free web-service blueprint cannot host a sidecar.
-      - key: MEDIA_CLAMD_TCP_HOST
-        sync: false
-      - key: MEDIA_CLAMD_TCP_PORT
-        value: "3310"
-      - key: MEDIA_CLAMD_TRUSTED_NETWORK
-        value: "true"
       - key: AWS_REGION
         value: ap-southeast-1
       - key: AWS_S3_ENDPOINT

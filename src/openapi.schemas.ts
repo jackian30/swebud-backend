@@ -55,35 +55,6 @@ const reportRequestProperties: Record<string, ContractSchema> = {
   details: string({ maxLength: 1000 }),
 };
 
-const uploadV2SessionResponseProperties: Record<string, ContractSchema> = {
-  id: uuid(),
-  collection: enumString(['profile-photo', 'cover-photo', 'group-photo', 'chat-photo', 'actsnap-media', 'post-media', 'comment-media', 'generic-image', 'generic-video', 'generic-audio', 'generic-media']),
-  declaredMimeType: string(),
-  declaredSize: integer({ minimum: 1 }),
-  partSize: integer({ minimum: 5242880 }),
-  expectedPartCount: integer({ minimum: 1, maximum: 10000 }),
-  status: enumString(['creating', 'uploading', 'completing', 'queued', 'processing', 'ready', 'rejected', 'failed', 'cancelled', 'expired']),
-  expiresAt: dateTime(),
-  createdAt: dateTime(),
-  updatedAt: dateTime(),
-  error: nullableRef('UploadV2ErrorResponse'),
-  asset: nullableRef('UploadV2AssetResponse'),
-};
-const uploadV2SessionResponseRequired = [
-  'id',
-  'collection',
-  'declaredMimeType',
-  'declaredSize',
-  'partSize',
-  'expectedPartCount',
-  'status',
-  'expiresAt',
-  'createdAt',
-  'updatedAt',
-  'error',
-  'asset',
-];
-
 /**
  * Schemas that Nest cannot infer from erased TypeScript return types.  They are
  * intentionally shared by operations instead of being duplicated as hundreds
@@ -1070,90 +1041,6 @@ export const AUTHORITATIVE_CONTRACT_SCHEMAS: Record<string, SchemaObject> = {
     height: integer({ minimum: 0 }),
   }, ['key', 'url', 'collection', 'filename', 'originalName', 'mimeType', 'size', 'type']),
   UploadBatchResponse: object({ files: array(ref('UploadResponse')) }, ['files']),
-
-  CreateUploadSessionDto: request({
-    collection: enumString(['profile-photo', 'cover-photo', 'group-photo', 'chat-photo', 'actsnap-media', 'post-media', 'comment-media', 'generic-image', 'generic-video', 'generic-audio', 'generic-media']),
-    mimeType: string({ maxLength: 127 }),
-    size: integer({ minimum: 1, maximum: 104857600 }),
-    sha256: string({ pattern: '^[A-Za-z0-9+/]{43}=$' }),
-    idempotencyKey: string({ minLength: 8, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$' }),
-  }, ['collection', 'mimeType', 'size']),
-  UploadPartIntentDto: request({
-    partNumber: integer({ minimum: 1, maximum: 10000 }),
-    checksumSha256: string({ pattern: '^[A-Za-z0-9+/]{43}=$' }),
-  }, ['partNumber', 'checksumSha256']),
-  MintUploadPartsDto: request({
-    parts: array(ref('UploadPartIntentDto'), { minItems: 1, maxItems: 20 }),
-  }, ['parts']),
-  CompletedUploadPartDto: request({
-    partNumber: integer({ minimum: 1, maximum: 10000 }),
-    checksumSha256: string({ pattern: '^[A-Za-z0-9+/]{43}=$' }),
-    etag: string({ minLength: 1, maxLength: 256 }),
-  }, ['partNumber', 'checksumSha256', 'etag']),
-  CompleteUploadDto: request({
-    parts: array(ref('CompletedUploadPartDto'), { minItems: 1, maxItems: 10000 }),
-  }, ['parts']),
-  UploadV2ErrorResponse: object({
-    code: string(),
-    message: string(),
-    retryable: boolean(),
-  }, ['code', 'message', 'retryable'], { additionalProperties: false }),
-  UploadV2AssetResponse: object({
-    id: uuid(),
-    status: enumString(['quarantined', 'processing', 'ready', 'rejected']),
-    url: string({ nullable: true }),
-    mimeType: string(),
-    size: integer({ minimum: 0 }),
-    width: integer({ nullable: true, minimum: 1 }),
-    height: integer({ nullable: true, minimum: 1 }),
-    durationSeconds: number({ nullable: true, minimum: 0 }),
-    error: nullableRef('UploadV2ErrorResponse'),
-  }, ['id', 'status', 'url', 'mimeType', 'size', 'width', 'height', 'durationSeconds', 'error'], { additionalProperties: false }),
-  UploadV2SessionResponse: object(
-    uploadV2SessionResponseProperties,
-    uploadV2SessionResponseRequired,
-    { additionalProperties: false },
-  ),
-  UploadV2PartUrlResponse: object({
-    partNumber: integer({ minimum: 1, maximum: 10000 }),
-    url: string({ format: 'uri', writeOnly: true }),
-    method: enumString(['PUT']),
-    requiredHeaders: object({
-      'x-amz-checksum-sha256': string({ pattern: '^[A-Za-z0-9+/]{43}=$' }),
-      'content-length': string({
-        pattern: '^[1-9][0-9]*$',
-        description: 'Exact signed byte length. Browsers add Content-Length automatically; JavaScript must not set this forbidden header manually.',
-      }),
-    }, ['x-amz-checksum-sha256', 'content-length'], { additionalProperties: false }),
-  }, ['partNumber', 'url', 'method', 'requiredHeaders'], { additionalProperties: false }),
-  UploadV2PartUrlsResponse: object({
-    sessionId: uuid(),
-    status: enumString(['uploading']),
-    expiresAt: dateTime(),
-    urlsExpireAt: dateTime(),
-    parts: array(ref('UploadV2PartUrlResponse'), { minItems: 1, maxItems: 20 }),
-  }, ['sessionId', 'status', 'expiresAt', 'urlsExpireAt', 'parts'], { additionalProperties: false }),
-  UploadV2StoredPartResponse: object({
-    partNumber: integer({ minimum: 1, maximum: 10000 }),
-    etag: string(),
-    checksumSha256: string({ pattern: '^[A-Za-z0-9+/]{43}=$' }),
-    size: integer({ minimum: 1 }),
-  }, ['partNumber', 'etag', 'checksumSha256', 'size'], { additionalProperties: false }),
-  UploadV2ProgressDetailResponse: object({
-    uploadedBytes: integer({ minimum: 0 }),
-    uploadedParts: integer({ minimum: 0, maximum: 10000 }),
-    totalParts: integer({ minimum: 1, maximum: 10000 }),
-    missingPartNumbers: array(integer({ minimum: 1, maximum: 10000 })),
-    parts: array(ref('UploadV2StoredPartResponse')),
-  }, ['uploadedBytes', 'uploadedParts', 'totalParts', 'missingPartNumbers', 'parts'], { additionalProperties: false }),
-  UploadV2ProgressResponse: object(
-    {
-      ...uploadV2SessionResponseProperties,
-      progress: ref('UploadV2ProgressDetailResponse'),
-    },
-    [...uploadV2SessionResponseRequired, 'progress'],
-    { additionalProperties: false },
-  ),
 
   StoryAuthorResponse: object({ id: uuid(), displayName: nullableString(), username: nullableString(), profileImageUrl: nullableString() }, ['id', 'displayName', 'username', 'profileImageUrl']),
   StoryReactionResponse: object({ storyId: uuid(), userId: uuid(), emoji: enumString(['🔥', '💪', '👏', '😍', '😂', '😮']), createdAt: dateTime(), updatedAt: dateTime(), user: ref('StoryAuthorResponse') }, ['storyId', 'userId', 'emoji', 'createdAt', 'updatedAt', 'user']),

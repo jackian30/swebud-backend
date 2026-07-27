@@ -14,7 +14,8 @@ RUN npm run build
 
 FROM node:22-alpine AS runtime
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    MEDIA_PROCESSING_TEMP_DIR=/app/media-processing-tmp
 
 RUN apk add --no-cache ffmpeg
 

@@ -4,8 +4,7 @@ These workflows target a Linux Docker host. `deploy.sh`, `backup.sh`,
 `restore-drill.sh`, `rollback-image.sh`, and `audit.sh` require Bash; the
 database-role container intentionally uses POSIX `/bin/sh`. GNU/Linux tools
 (`stat`, `find`, `sha256sum`, and GNU-compatible Docker/Compose) are assumed.
-Media-reference validation also requires `jq`; S3 export additionally requires
-AWS CLI v2 and `base64`.
+S3 export additionally requires AWS CLI v2, `jq`, and `base64`.
 
 ## Deployment profiles
 
@@ -17,37 +16,26 @@ packages at build time and runs npm/the watcher with the host UID/GID.
 host port, MailHog is absent, and only the API binds to host loopback for a
 same-host reverse proxy. Production jobs and the API use read-only root
 filesystems, dropped capabilities, bounded PID counts, and narrowly scoped
-writable mounts. The ClamAV daemon has no published port and shares only a
-dedicated `internal: true` Docker network with the backend.
-
-Production Compose pins upload-v2 on, disables the legacy byte-proxy routes,
-uses separate public/quarantine buckets, and streams candidate files to clamd
-over that private network. `CLAMD_CONF_StreamMaxLength=128M` matches the
-application's maximum accepted upload. The reviewed ClamAV image digest
-contains a signature database; because the scanner network intentionally has
-no egress, FreshClam is disabled. Treat updating and rescanning the immutable
-ClamAV image digest as a frequent security patch operation and alert on clamd
-health/signature age. Do not publish TCP 3310: clamd TCP has no transport
-authentication or encryption.
+writable mounts. Media uploads use the authenticated synchronous proxy path,
+temporary owner-only disk files, bounded validation/transcoding, and the
+existing public S3-compatible bucket.
 
 The backend also mounts `swebud_media_processing_temp` at
 `/app/media-processing-tmp`. This is a dedicated disk-backed transient volume
-for async upload inputs and transcoded outputs. It is deliberately separate
+for incoming upload files and transcoded outputs. It is deliberately separate
 from the memory-backed `/tmp` filesystem and from the public `swebud_uploads`
 volume, so it is neither constrained by the 128 MiB scratch tmpfs nor included
 in public-media backups. The image creates and owns the mountpoint as the
 non-root runtime user.
 
 Provision at least 256 MiB of free space per
-`MEDIA_UPLOAD_WORKER_CONCURRENCY` slot (512 MiB at the default of two), plus
+`MEDIA_PROCESSING_CONCURRENCY` slot (512 MiB at the default of two), plus
 filesystem metadata headroom. Apply a host/storage quota where available and
 alert before free bytes or inodes fall below one full concurrency window.
-Bounded startup cleanup removes only validated stale worker paths according to
-`MEDIA_PROCESSING_STALE_TEMP_SECONDS` and
-`MEDIA_PROCESSING_STALE_CLEANUP_LIMIT`; it is not a substitute for disk
-monitoring.
+Bounded startup cleanup removes only storage-owned incoming files older than
+six hours; it is not a substitute for disk monitoring.
 
-The checked-in PostgreSQL, Alpine helper, and ClamAV defaults use immutable
+The checked-in PostgreSQL and Alpine helper defaults use immutable
 digests verified from their registries/local image metadata. Do not replace
 them with tags in production. Re-resolve and review a new digest deliberately
 when patching an image. The application image is uniquely tagged for each
@@ -75,9 +63,9 @@ SWEBUD_MODE=prod ./deployment/deploy.sh
 
 The production sequence is fail-closed:
 
-1. Validate origins, mail TLS, all distinct secrets/roles/URLs, both media
-   buckets, upload timeout invariants, pinned helper/scanner images, backup
-   policy, and the alert hook before Docker changes.
+1. Validate origins, mail TLS, all distinct secrets/roles/URLs, the public
+   media store, processing limits, pinned helper images, backup policy, and the
+   alert hook before Docker changes.
 2. Reconcile database roles transactionally.
 3. Create a complete encrypted pre-migration database-and-media checkpoint.
 4. Build one uniquely tagged backend image and record its immutable image ID.
@@ -164,10 +152,8 @@ cleaned on failure, then atomically renamed. The script:
 - captures exact migration/user/post/group counts and database identity;
 - archives either the local uploads volume or an actual S3 media export;
 - records the exact media file count and content/path inventory hash;
-- for S3, independently exports the public and private quarantine buckets and
-  records one canonical inventory/metadata sidecar for each;
-- snapshots quiesced upload-v2 database references and proves every durable
-  quarantine/public key is present in the matching exported inventory;
+- for S3, exports `MEDIA_S3_BUCKET`/`MEDIA_S3_PREFIX` and records one canonical
+  inventory/metadata sidecar;
 - age-encrypts the database, media, and manifest;
 - binds ciphertext hashes, identity, counts, inventory, helper images, RPO,
   RTO, purpose, and retention in that encrypted manifest;
@@ -188,56 +174,39 @@ before setting it. The script enforces local retention but cannot create a
 provider-independent immutable bucket policy.
 
 For `MEDIA_STORAGE_DRIVER=s3`, credentials must permit list, get, head, and
-get-object-tagging operations for both `MEDIA_S3_BUCKET`/`MEDIA_S3_PREFIX` and
-the entire dedicated `MEDIA_QUARANTINE_S3_BUCKET`. The two buckets must differ.
-A nonempty public prefix must end in `/`; this makes prefix boundaries
-unambiguous. Application publishing prepends this exact prefix and persists the
-resulting full key, so backup, cleanup, and delivery cannot silently disagree.
-A text notice is never accepted as media backup. Current object bytes and
-replayable metadata from both stores are exported into the encrypted backup
-set, so restore does not depend on either live media bucket.
+get-object-tagging operations for `MEDIA_S3_BUCKET`/`MEDIA_S3_PREFIX`.
+`MEDIA_QUARANTINE_S3_BUCKET` is not read or required. A nonempty prefix must
+end in `/`; this makes prefix boundaries unambiguous. A text notice is never
+accepted as media backup. Current object bytes and replayable metadata are
+exported into the encrypted backup set, so restore does not depend on the live
+media bucket.
 
-The S3 archive uses this fixed layout:
+New backups use the signed `swebudd-backup-v3` manifest and this fixed
+single-store layout:
 
 ```text
-media-database-references.json
-stores/public/objects/
-stores/public/s3-object-metadata.json
-stores/quarantine/objects/
-stores/quarantine/s3-object-metadata.json
+store/objects/
+store/s3-object-metadata.json
 ```
 
-Each sidecar preserves its bucket/prefix, every key and directory marker,
+The sidecar preserves its bucket/prefix, every key and directory marker,
 `Content-Type`, `Cache-Control`, `Content-Disposition`, `Content-Encoding`,
 `Content-Language`, `Expires`, website redirect location, user metadata, and
-tags. Public and quarantine counts, byte/path inventory hashes, sidecar hashes,
-and the database-reference snapshot hash are separately authenticated in the
-manifest. A production rebuild must iterate each sidecar's already sorted
-`objects` array, upload the matching `objects/<relativePath>` bytes (or an empty
-body for a directory marker) with those exact headers and user metadata, then
-apply the exact tag set. Verify both source locations, both inventories,
-sidecars, object counts, and database references before the first destination
-write. Destination-controlled values such as `VersionId`, `LastModified`, ETag,
-storage class, checksums, and server-side encryption are regenerated by the
-destination bucket policy and are deliberately not claimed to be portable
+tags. Its source, object count, byte/path inventory hash, and sidecar hash are
+authenticated in the v3 manifest. A production rebuild must iterate the
+sidecar's already sorted `objects` array, upload the matching
+`objects/<relativePath>` bytes (or an empty body for a directory marker) with
+those exact headers and user metadata, then apply the exact tag set. Verify
+the source, inventory, sidecar, and object count before the first destination
+write. Destination-controlled values such as `VersionId`, `LastModified`,
+ETag, storage class, checksums, and server-side encryption are regenerated by
+the destination bucket policy and are deliberately not claimed to be portable
 metadata.
 
-Upload-v2 persists the bucket and key used by every session, asset, and publish
-attempt. While the backend is quiesced, backup fails closed if a durable
-database reference is absent from the exported objects, if a public key falls
-outside the configured `MEDIA_S3_PREFIX`, or if any referenced bucket differs
-from the configured public/quarantine bucket. Drain or explicitly migrate all
-affected sessions, assets, and publish attempts before rotating a bucket or
-prefix; never change only the environment variables.
-
-Creating/uploading multipart parts are not visible to S3 `ListObjectsV2` and
-are intentionally not copied into the backup archive. Their database rows and
-counts are authenticated, and their persisted quarantine bucket must still
-match the current configuration. Treat them as retry/cancel/cleanup state after
-recovery and re-initiate uploads whose provider-side multipart state is no
-longer available. In contrast, completing, queued, and processing source
-objects—and ready/staged public objects—must be list-visible and present in the
-authenticated inventories or backup fails.
+The restore drill also accepts existing signed `swebudd-backup-v2` archives
+with the retired `stores/public`, `stores/quarantine`, and
+`media-database-references.json` layout. That compatibility is restore-only:
+new backups never read a quarantine bucket or emit the old dual-store layout.
 
 Schedule `backup.sh` with a service manager or cron at a frequency stricter
 than `BACKUP_RPO_HOURS`. The scheduler must treat a nonzero exit as failure.
@@ -270,9 +239,10 @@ drill accepts exactly five files: `COMPLETE`, `COMPLETE.sig`, `manifest.age`,
 the detached signature with the pinned Ed25519 public key. It then verifies the
 marker and encrypted-manifest hash, exact manifest key allowlist, artifact
 hashes, expected project/database identity, RPO, RTO, helper-image digests,
-database counts, media inventory, and—for S3—both metadata sidecars' hashes,
-counts, strict schemas, source locations, exact content paths, and all
-authenticated database bucket/key references.
+database counts, media inventory, and—for current S3 backups—the metadata
+sidecar hash, count, strict schema, source location, and exact content paths.
+For retained v2 backups, it additionally validates both legacy sidecars and
+their authenticated database bucket/key references.
 
 The age recipient is public and therefore does not authenticate the backup
 creator. Keep the signing private key only on the backup host and distribute
@@ -353,17 +323,11 @@ an operator must:
 - configure offsite credentials, encryption, lifecycle/object lock, and test a
   remote download;
 - grant S3 media-export access when S3 media is enabled;
-- configure public-bucket CORS for the exact multipart client origins, block
-  all public access to the quarantine bucket, and abort incomplete multipart
-  uploads with a reviewed lifecycle policy;
-- monitor free bytes/inodes on the processing volume and clamd health/signature
-  age, and deliberately refresh the pinned ClamAV digest;
+- keep anonymous writes disabled on the public media bucket and monitor
+  backend-to-storage traffic;
+- monitor free bytes/inodes on the processing volume;
 - install and test the external alert-delivery hook end to end;
 - schedule backups and restore drills and capture RPO/RTO evidence;
 - retain immutable backend images for the rollback window; and
-- on Render, provision a separately managed private-network ClamAV service
-  with `StreamMaxLength` at least 128 MiB and enough memory, then set
-  `MEDIA_CLAMD_TCP_HOST`; the free web-service blueprint has no sidecar and is
-  not production-ready without that service; and
 - configure equivalent dashboard-managed secrets on Render (no live Render
   changes are made by these scripts).

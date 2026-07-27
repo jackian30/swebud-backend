@@ -261,14 +261,6 @@ export const FRONTEND_OPERATION_CONTRACTS: readonly FrontendOperationContract[] 
     responseSchema: 'UploadResponse',
     request: { schema: 'MultipartFileDto', mediaType: 'multipart/form-data' as const },
   })),
-  ...operations('UploadV2SessionResponse', [
-    'POST /uploads/v2/sessions',
-    'POST /uploads/v2/sessions/{sessionId}/complete',
-    'GET /uploads/v2/sessions/{sessionId}',
-    'DELETE /uploads/v2/sessions/{sessionId}',
-  ]),
-  ...operations('UploadV2PartUrlsResponse', ['POST /uploads/v2/sessions/{sessionId}/parts']),
-  ...operations('UploadV2ProgressResponse', ['GET /uploads/v2/sessions/{sessionId}/parts']),
 
   ...operations('MeResponse', [
     'GET /users/me',
@@ -319,18 +311,8 @@ export const FRONTEND_OPERATION_CONTRACTS: readonly FrontendOperationContract[] 
     'PUT /theme',
   ]),
 ].map((contract) => {
-  const key = `${contract.method.toUpperCase()} ${contract.path}`;
   if (contract.path === '/feed/viewed' && contract.method === 'post') {
     return { ...contract, request: { schema: 'FeedViewedDto' } };
-  }
-  if (key === 'POST /uploads/v2/sessions') {
-    return { ...contract, request: { schema: 'CreateUploadSessionDto' } };
-  }
-  if (key === 'POST /uploads/v2/sessions/{sessionId}/parts') {
-    return { ...contract, request: { schema: 'MintUploadPartsDto' } };
-  }
-  if (key === 'POST /uploads/v2/sessions/{sessionId}/complete') {
-    return { ...contract, request: { schema: 'CompleteUploadDto' } };
   }
   return contract;
 });

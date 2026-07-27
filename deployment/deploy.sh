@@ -315,27 +315,19 @@ require_integer_range() {
 }
 
 validate_production_media() {
-  local public_bucket quarantine_bucket public_prefix public_base s3_endpoint
+  local public_bucket public_prefix public_base s3_endpoint
   [[ "$(resolved_value MEDIA_STORAGE_DRIVER)" == "s3" ]] || {
     echo "Production MEDIA_STORAGE_DRIVER must be s3." >&2
     exit 1
   }
   for key in \
-    MEDIA_S3_BUCKET MEDIA_QUARANTINE_S3_BUCKET MEDIA_PUBLIC_BASE_URL AWS_REGION
+    MEDIA_S3_BUCKET MEDIA_PUBLIC_BASE_URL AWS_REGION
   do
     require_value "$key"
   done
   public_bucket="$(resolved_value MEDIA_S3_BUCKET)"
-  quarantine_bucket="$(resolved_value MEDIA_QUARANTINE_S3_BUCKET)"
-  for bucket_key in MEDIA_S3_BUCKET MEDIA_QUARANTINE_S3_BUCKET; do
-    bucket_value="$(resolved_value "$bucket_key")"
-    [[ "$bucket_value" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || {
-      echo "$bucket_key must be a valid lowercase S3 bucket name." >&2
-      exit 1
-    }
-  done
-  [[ "$public_bucket" != "$quarantine_bucket" ]] || {
-    echo "MEDIA_QUARANTINE_S3_BUCKET must be separate from MEDIA_S3_BUCKET." >&2
+  [[ "$public_bucket" =~ ^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$ ]] || {
+    echo "MEDIA_S3_BUCKET must be a valid lowercase S3 bucket name." >&2
     exit 1
   }
   public_prefix="$(resolved_value MEDIA_S3_PREFIX)"
@@ -370,53 +362,8 @@ validate_production_media() {
     require_value AWS_SECRET_ACCESS_KEY
   fi
 
-  require_integer_range MEDIA_UPLOAD_MAX_ACTIVE_PER_USER 1 20
-  require_integer_range MEDIA_UPLOAD_ROLLING_QUOTA_BYTES 1 2147483647
-  require_integer_range MEDIA_UPLOAD_ROLLING_QUOTA_HOURS 1 168
-  require_integer_range MEDIA_UPLOAD_PART_BYTES 5242880 104857600
-  require_integer_range MEDIA_UPLOAD_SESSION_TTL_SECONDS 300 86400
-  require_integer_range MEDIA_UPLOAD_URL_TTL_SECONDS 60 900
-  require_integer_range MEDIA_UPLOAD_WORKER_CONCURRENCY 1 8
-  require_integer_range MEDIA_UPLOAD_JOB_MAX_ATTEMPTS 1 10
-  require_integer_range MEDIA_UPLOAD_JOB_LEASE_SECONDS 30 1800
-  require_integer_range MEDIA_UPLOAD_WORKER_POLL_MS 250 60000
-  require_integer_range MEDIA_S3_REQUEST_TIMEOUT_MS 1000 120000
-  require_integer_range MEDIA_S3_DOWNLOAD_TIMEOUT_MS 10000 900000
-  require_integer_range MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS 10000 900000
-  require_integer_range MEDIA_UPLOAD_COMPLETION_STALE_SECONDS 60 3600
-  require_integer_range MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS 300 86400
-  require_integer_range MEDIA_PUBLISH_TIMEOUT_MS 10000 900000
-  require_integer_range MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS 300 86400
-  require_integer_range MEDIA_PUBLISH_CLEANUP_TOMBSTONE_SECONDS 60 3600
   require_integer_range MEDIA_PROCESSING_CONCURRENCY 1 8
   require_integer_range MEDIA_PROCESSING_MAX_QUEUE 0 100
-  require_integer_range MEDIA_PROCESSING_STALE_TEMP_SECONDS 3600 604800
-  require_integer_range MEDIA_PROCESSING_STALE_CLEANUP_LIMIT 1 500
-  require_integer_range MEDIA_MALWARE_SCAN_TIMEOUT_MS 1000 300000
-
-  (( $(resolved_value MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS) >
-     $(resolved_value MEDIA_UPLOAD_JOB_LEASE_SECONDS) &&
-     $(resolved_value MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS) * 1000 >
-     $(resolved_value MEDIA_PUBLISH_TIMEOUT_MS) )) || {
-    echo "MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS must exceed both the worker lease and public publish timeout." >&2
-    exit 1
-  }
-  (( $(resolved_value MEDIA_UPLOAD_COMPLETION_STALE_SECONDS) * 1000 >
-     $(resolved_value MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS) )) || {
-    echo "MEDIA_UPLOAD_COMPLETION_STALE_SECONDS must exceed MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS." >&2
-    exit 1
-  }
-  (( $(resolved_value MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS) >
-     $(resolved_value MEDIA_UPLOAD_URL_TTL_SECONDS) &&
-     $(resolved_value MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS) >
-     $(resolved_value MEDIA_UPLOAD_COMPLETION_STALE_SECONDS) &&
-     $(resolved_value MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS) * 1000 >
-     $(resolved_value MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS) &&
-     $(resolved_value MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS) * 1000 >
-     $(resolved_value MEDIA_S3_REQUEST_TIMEOUT_MS) )) || {
-    echo "MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS must exceed upload URL, completion, multipart, and S3 request timeouts." >&2
-    exit 1
-  }
 }
 
 for key in \
@@ -595,7 +542,7 @@ case "$MODE" in
     validate_failure_hook
     validate_production_media
     for image_key in \
-      POSTGRES_IMAGE POSTGRES_HELPER_IMAGE MEDIA_HELPER_IMAGE CLAMAV_IMAGE
+      POSTGRES_IMAGE POSTGRES_HELPER_IMAGE MEDIA_HELPER_IMAGE
     do
       require_digest_image "$image_key"
     done

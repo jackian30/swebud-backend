@@ -5,8 +5,7 @@ import { JwtAuthGuard } from '../auth/jwt.guard';
 import { kindForMime } from './media-library/collections';
 import { MediaService } from './media.service';
 import { VerifiedAccountGuard } from '../auth/verified-account.guard';
-import { legacyQuarantineStorage } from './legacy-quarantine.storage';
-import { LegacyProxyUploadGuard } from './legacy-proxy-upload.guard';
+import { temporaryUploadStorage } from './temporary-upload.storage';
 
 const maxImageBytes = 15 * 1024 * 1024;
 const maxVideoBytes = 100 * 1024 * 1024;
@@ -36,7 +35,7 @@ export function uploadFileFilter(allowed: AllowedUploadKind) {
 
 function singleUploadOptions(allowed: AllowedUploadKind, fileSize: number) {
   return {
-    storage: legacyQuarantineStorage,
+    storage: temporaryUploadStorage,
     fileFilter: uploadFileFilter(allowed),
     limits: {
       fileSize,
@@ -50,7 +49,7 @@ function singleUploadOptions(allowed: AllowedUploadKind, fileSize: number) {
 }
 
 const batchUploadOptions = {
-  storage: legacyQuarantineStorage,
+  storage: temporaryUploadStorage,
   fileFilter: uploadFileFilter('media'),
   limits: {
     fileSize: maxBatchFileBytes,
@@ -62,7 +61,7 @@ const batchUploadOptions = {
   },
 };
 
-@UseGuards(JwtAuthGuard, VerifiedAccountGuard, LegacyProxyUploadGuard)
+@UseGuards(JwtAuthGuard, VerifiedAccountGuard)
 @Controller('uploads')
 export class UploadsController {
   constructor(private readonly media: MediaService) {}

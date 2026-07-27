@@ -115,7 +115,6 @@ audit_environment=(
   MEDIA_S3_BUCKET=audit-public-media
   MEDIA_S3_PREFIX=
   MEDIA_PUBLIC_BASE_URL=https://media.swebudd.example/
-  MEDIA_QUARANTINE_S3_BUCKET=audit-private-quarantine
   AWS_REGION=ap-southeast-1
   BACKUP_OUTPUT_DIR="$BACKUP_OUTPUT"
   BACKUP_AGE_RECIPIENT=age1auditrecipientnotusedbytheconfigurationaudit
@@ -169,22 +168,10 @@ grep -q "^USER \${LOCAL_UID}:\${LOCAL_GID}$" "$SCRIPT_DIR/Dockerfile.dev"
 grep -q '/app/media-processing-tmp' "$SCRIPT_DIR/../Dockerfile"
 grep -q '/app/media-processing-tmp' "$SCRIPT_DIR/Dockerfile.dev"
 
-clamav_section="$(service_section "$PROD_CONFIG" clamav)"
-if grep -q 'published:' <<< "$clamav_section"; then
-  echo "Production ClamAV unexpectedly publishes a host port." >&2
-  exit 1
-fi
-grep -q 'clamav/clamav@sha256:7f5389cc' <<< "$clamav_section"
-grep -q 'CLAMD_CONF_StreamMaxLength: 128M' <<< "$clamav_section"
-grep -q 'CLAMAV_NO_FRESHCLAMD: "true"' <<< "$clamav_section"
-grep -q 'clamdcheck.sh' <<< "$clamav_section"
-grep -q '^  malware:$' "$PROD_CONFIG"
-grep -A3 '^  malware:$' "$PROD_CONFIG" | grep -q 'internal: true'
-
 for rendered_config in "$PROD_CONFIG" "$DEV_CONFIG"; do
   backend_section="$(service_section "$rendered_config" backend)"
   grep -q 'MEDIA_PROCESSING_TEMP_DIR: /app/media-processing-tmp' <<< "$backend_section"
-  grep -q 'MEDIA_LEGACY_QUARANTINE_DIR: /app/media-processing-tmp/legacy-quarantine' <<< "$backend_section"
+  grep -q 'MEDIA_UPLOAD_TEMP_DIR: /app/media-processing-tmp/incoming' <<< "$backend_section"
   grep -q 'source: swebud_media_processing_temp' <<< "$backend_section"
   grep -q 'target: /app/media-processing-tmp' <<< "$backend_section"
   if grep -Eq 'MEDIA_PROCESSING_TEMP_DIR: /tmp|target: /tmp' <<< "$backend_section"; then
@@ -195,12 +182,10 @@ done
 prod_backend_section="$(service_section "$PROD_CONFIG" backend)"
 grep -q 'MEDIA_STORAGE_DRIVER: s3' <<< "$prod_backend_section"
 grep -q 'MEDIA_S3_BUCKET: audit-public-media' <<< "$prod_backend_section"
-grep -q 'MEDIA_QUARANTINE_S3_BUCKET: audit-private-quarantine' <<< "$prod_backend_section"
-grep -q 'MEDIA_UPLOAD_WORKER_ENABLED: "true"' <<< "$prod_backend_section"
-grep -q 'MEDIA_LEGACY_PROXY_UPLOADS_ENABLED: "false"' <<< "$prod_backend_section"
-grep -q 'MEDIA_MALWARE_SCANNER: clamd-tcp' <<< "$prod_backend_section"
-grep -q 'MEDIA_CLAMD_TCP_HOST: clamav' <<< "$prod_backend_section"
-grep -q 'MEDIA_CLAMD_TRUSTED_NETWORK: "true"' <<< "$prod_backend_section"
+if grep -Eq 'MEDIA_QUARANTINE|MEDIA_MALWARE|MEDIA_CLAMD|MEDIA_UPLOAD_WORKER' <<< "$prod_backend_section"; then
+  echo "Production backend still contains removed quarantine upload configuration." >&2
+  exit 1
+fi
 grep -q 'condition: service_healthy' <<< "$prod_backend_section"
 if [[ "$(grep -c 'GARMIN_CONSUMER_KEY:' "$SCRIPT_DIR/docker-compose.yml")" -ne 1 ||
       "$(grep -c 'GARMIN_CONSUMER_KEY:' "$SCRIPT_DIR/docker-compose-dev.yml")" -ne 1 ]]; then
@@ -314,14 +299,17 @@ grep -q 'BACKUP_RETENTION_DAYS' "$backup_script"
 grep -q 's3 sync' "$backup_script"
 grep -q 's3api head-object' "$backup_script"
 grep -q 's3api get-object-tagging' "$backup_script"
-grep -q 'MEDIA_QUARANTINE_S3_BUCKET' "$backup_script"
+if grep -Eq 'MEDIA_QUARANTINE_S3_BUCKET|backup-media-references.sql|verify-media-backup-references.sh' \
+  "$backup_script"; then
+  echo "New backups still depend on the retired quarantine/upload-v2 stores." >&2
+  exit 1
+fi
 grep -q "nonempty MEDIA_S3_PREFIX must end in '/'" "$backup_script"
 grep -q 'swebudd-s3-object-metadata-v2' "$backup_script"
-grep -q 's3-dual-store-with-metadata-v1' "$backup_script"
-grep -q 'export_s3_store public' "$backup_script"
-grep -q 'export_s3_store quarantine' "$backup_script"
-grep -q 'verify-media-backup-references.sh' "$backup_script"
-grep -q 'backup-media-references.sql' "$backup_script"
+grep -q 'swebudd-backup-v3' "$backup_script"
+grep -q 's3-single-store-with-metadata-v1' "$backup_script"
+grep -q 'export_s3_store store' "$backup_script"
+grep -q 'store/s3-object-metadata.json' "$backup_script"
 grep -q 'stop --timeout 60 backend' "$backup_script"
 grep -q 'restart_backend' "$backup_script"
 grep -q 'FAILURE_ALERT_HOOK' "$backup_script"
@@ -337,6 +325,10 @@ grep -q 'BACKUP_SIGNING_PUBLIC_KEY_FILE' "$restore_script"
 grep -q 'verify-backup-signature.sh' "$restore_script"
 grep -q 'verify-s3-backup-sidecar.sh' "$restore_script"
 grep -q 'verify-media-backup-references.sh' "$restore_script"
+grep -q 'swebudd-backup-v3' "$restore_script"
+grep -q 's3-single-store-with-metadata-v1' "$restore_script"
+grep -q 'store/s3-object-metadata.json' "$restore_script"
+# Retained only so old, signed v2 dual-store archives remain drillable.
 grep -q 's3-dual-store-with-metadata-v1' "$restore_script"
 grep -q 'stores/public/s3-object-metadata.json' "$restore_script"
 grep -q 'stores/quarantine/s3-object-metadata.json' "$restore_script"
@@ -367,8 +359,8 @@ deploy_script="$SCRIPT_DIR/deploy.sh"
 grep -q 'require_value BACKUP_SIGNING_PRIVATE_KEY_FILE' "$deploy_script"
 grep -q 'validate_backup_signing_private_key' "$deploy_script"
 grep -q 'validate_production_media' "$deploy_script"
-grep -q 'MEDIA_QUARANTINE_S3_BUCKET must be separate' "$deploy_script"
-grep -q 'CLAMAV_IMAGE' "$deploy_script"
+grep -q 'MEDIA_PROCESSING_CONCURRENCY 1 8' "$deploy_script"
+grep -q 'MEDIA_PROCESSING_MAX_QUEUE 0 100' "$deploy_script"
 
 signature_verify_line="$(
   grep -n 'verify-backup-signature.sh' "$restore_script" |
@@ -418,8 +410,9 @@ if "$SCRIPT_DIR/verify-backup-signature.sh" \
   exit 1
 fi
 
-# Exercise both independent S3 inventories. Each store must reject a modified
-# sidecar, an authenticated count mismatch, and an unsafe archive path.
+# Exercise the current single-store sidecar and both legacy store identities.
+# Each must reject a modified sidecar, an authenticated count mismatch, and an
+# unsafe archive path.
 write_s3_sidecar_fixture() {
   local store="$1"
   local bucket="$2"
@@ -466,8 +459,12 @@ write_s3_sidecar_fixture() {
     ' > "$destination"
 }
 
-for store in public quarantine; do
-  if [[ "$store" == "public" ]]; then
+for store in store public quarantine; do
+  if [[ "$store" == "store" ]]; then
+    fixture_bucket="audit-media-bucket"
+    fixture_prefix="uploads/"
+    fixture_relative_path="asset-current.bin"
+  elif [[ "$store" == "public" ]]; then
     fixture_bucket="audit-public-bucket"
     fixture_prefix="uploads/"
     fixture_relative_path="asset-a.bin"
@@ -666,21 +663,10 @@ for key in \
   DATABASE_ADMIN_READONLY_USER DATABASE_ADMIN_READONLY_PASSWORD DATABASE_ADMIN_READONLY_URL \
   DATABASE_BACKUP_USER DATABASE_BACKUP_PASSWORD DATABASE_BACKUP_URL \
   ADMIN_JWT_SECRET ADMIN_JWT_ISSUER ADMIN_JWT_AUDIENCE \
-  POSTGRES_IMAGE POSTGRES_HELPER_IMAGE MEDIA_HELPER_IMAGE CLAMAV_IMAGE \
+  POSTGRES_IMAGE POSTGRES_HELPER_IMAGE MEDIA_HELPER_IMAGE \
   MEDIA_S3_BUCKET MEDIA_S3_PREFIX MEDIA_PUBLIC_BASE_URL \
-  MEDIA_QUARANTINE_S3_BUCKET AWS_REGION AWS_S3_ENDPOINT AWS_S3_FORCE_PATH_STYLE \
-  MEDIA_UPLOAD_MAX_ACTIVE_PER_USER MEDIA_UPLOAD_ROLLING_QUOTA_BYTES \
-  MEDIA_UPLOAD_ROLLING_QUOTA_HOURS MEDIA_UPLOAD_PART_BYTES \
-  MEDIA_UPLOAD_SESSION_TTL_SECONDS MEDIA_UPLOAD_URL_TTL_SECONDS \
-  MEDIA_UPLOAD_WORKER_CONCURRENCY MEDIA_UPLOAD_JOB_MAX_ATTEMPTS \
-  MEDIA_UPLOAD_JOB_LEASE_SECONDS MEDIA_UPLOAD_WORKER_POLL_MS \
-  MEDIA_S3_REQUEST_TIMEOUT_MS MEDIA_S3_DOWNLOAD_TIMEOUT_MS \
-  MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS MEDIA_UPLOAD_COMPLETION_STALE_SECONDS \
-  MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS MEDIA_PUBLISH_TIMEOUT_MS \
-  MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS MEDIA_PUBLISH_CLEANUP_TOMBSTONE_SECONDS \
+  AWS_REGION AWS_S3_ENDPOINT AWS_S3_FORCE_PATH_STYLE \
   MEDIA_PROCESSING_CONCURRENCY MEDIA_PROCESSING_MAX_QUEUE \
-  MEDIA_PROCESSING_STALE_TEMP_SECONDS MEDIA_PROCESSING_STALE_CLEANUP_LIMIT \
-  MEDIA_MALWARE_SCAN_TIMEOUT_MS \
   BACKUP_OUTPUT_DIR BACKUP_AGE_RECIPIENT \
   BACKUP_SIGNING_PRIVATE_KEY_FILE BACKUP_SIGNING_PUBLIC_KEY_FILE BACKUP_S3_URI \
   BACKUP_ALLOW_LOCAL_ONLY BACKUP_OFFSITE_RETENTION_CONFIRMED \
@@ -775,24 +761,15 @@ expect_deploy_failure 'BACKUP_S3_URI is required' \
   BACKUP_S3_URI=
 expect_deploy_failure 'POSTGRES_HELPER_IMAGE must use an immutable' \
   POSTGRES_HELPER_IMAGE=postgres:16-alpine
-expect_deploy_failure 'must be separate from MEDIA_S3_BUCKET' \
-  MEDIA_QUARANTINE_S3_BUCKET=audit-public-media
 expect_deploy_failure "nonempty MEDIA_S3_PREFIX must end in '/'" \
   MEDIA_S3_PREFIX=production
-expect_deploy_failure 'must exceed MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS' \
-  MEDIA_UPLOAD_COMPLETION_STALE_SECONDS=60 \
-  MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS=120000
-expect_deploy_failure 'CLAMAV_IMAGE must use an immutable' \
-  CLAMAV_IMAGE=clamav/clamav:stable
 
 # Render must keep dashboard-managed secrets out of source configuration.
 for key in \
   ADMIN_JWT_SECRET \
   CLOUDFLARE_TURNSTILE_SECRET_KEY \
   MEDIA_S3_BUCKET \
-  MEDIA_QUARANTINE_S3_BUCKET \
   MEDIA_PUBLIC_BASE_URL \
-  MEDIA_CLAMD_TCP_HOST \
   AWS_S3_ENDPOINT \
   AWS_ACCESS_KEY_ID \
   AWS_SECRET_ACCESS_KEY \
@@ -803,14 +780,6 @@ for key in \
 do
   grep -A1 -- "- key: $key" "$SCRIPT_DIR/../render.yaml" | grep -q 'sync: false'
 done
-grep -A1 -- '- key: MEDIA_UPLOAD_WORKER_ENABLED' "$SCRIPT_DIR/../render.yaml" |
-  grep -q 'value: "true"'
-grep -A1 -- '- key: MEDIA_LEGACY_PROXY_UPLOADS_ENABLED' "$SCRIPT_DIR/../render.yaml" |
-  grep -q 'value: "false"'
-grep -A1 -- '- key: MEDIA_MALWARE_SCANNER' "$SCRIPT_DIR/../render.yaml" |
-  grep -q 'value: clamd-tcp'
-grep -A1 -- '- key: MEDIA_CLAMD_TRUSTED_NETWORK' "$SCRIPT_DIR/../render.yaml" |
-  grep -q 'value: "true"'
 grep -A1 -- '- key: ADMIN_JWT_ISSUER' "$SCRIPT_DIR/../render.yaml" |
   grep -q 'value: swebudd-admin'
 grep -A1 -- '- key: ADMIN_JWT_AUDIENCE' "$SCRIPT_DIR/../render.yaml" |

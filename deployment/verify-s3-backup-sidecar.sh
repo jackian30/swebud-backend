@@ -7,7 +7,7 @@ fail() {
 }
 
 if (( $# != 5 )); then
-  echo "Usage: $0 public|quarantine /absolute/sidecar.json expected-sha256 expected-count s3://bucket/prefix/" >&2
+  echo "Usage: $0 store|public|quarantine /absolute/sidecar.json expected-sha256 expected-count s3://bucket/prefix/" >&2
   exit 1
 fi
 
@@ -17,8 +17,8 @@ expected_sha256="$3"
 expected_count="$4"
 expected_source="$5"
 
-[[ "$store" == "public" || "$store" == "quarantine" ]] ||
-  { fail "S3 backup store must be public or quarantine."; exit 1; }
+[[ "$store" == "store" || "$store" == "public" || "$store" == "quarantine" ]] ||
+  { fail "S3 backup store must be store, public, or quarantine."; exit 1; }
 [[ "$sidecar" == /* && -f "$sidecar" && ! -L "$sidecar" ]] ||
   { fail "S3 metadata sidecar must be an absolute, non-symlink regular file."; exit 1; }
 [[ "$expected_sha256" =~ ^[a-f0-9]{64}$ ]] ||

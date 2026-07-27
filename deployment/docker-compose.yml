@@ -85,37 +85,6 @@ services:
     networks:
       - swebud
 
-  clamav:
-    image: ${CLAMAV_IMAGE:-clamav/clamav@sha256:7f5389ccaa2368c383fa80e167ccfe44348d71e685f926fce4755eed1757673a}
-    restart: unless-stopped
-    environment:
-      # Upload policy accepts files up to 128 MiB, so clamd's INSTREAM ceiling
-      # must not be lower. The official entrypoint applies CLAMD_CONF_*.
-      CLAMD_CONF_StreamMaxLength: 128M
-      # This service has no egress. Refresh signatures by deliberately updating
-      # the reviewed immutable image digest during the patch cycle.
-      CLAMAV_NO_FRESHCLAMD: "true"
-      CLAMD_STARTUP_TIMEOUT: 300
-    cap_drop:
-      - ALL
-    cap_add:
-      - CHOWN
-      - DAC_OVERRIDE
-      - FOWNER
-      - SETGID
-      - SETUID
-    security_opt:
-      - no-new-privileges:true
-    pids_limit: 256
-    healthcheck:
-      test: ["CMD-SHELL", "clamdcheck.sh"]
-      interval: 15s
-      timeout: 5s
-      retries: 20
-      start_period: 60s
-    networks:
-      - malware
-
   backend:
     image: ${BACKEND_IMAGE:-swebud-backend:local}
     build:
@@ -126,8 +95,6 @@ services:
       migrate:
         condition: service_completed_successfully
       postgres:
-        condition: service_healthy
-      clamav:
         condition: service_healthy
     environment:
       NODE_ENV: production
@@ -175,40 +142,12 @@ services:
       MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?Set the public media bucket}
       MEDIA_S3_PREFIX: ${MEDIA_S3_PREFIX:-}
       MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:?Set the public media base URL}
-      MEDIA_QUARANTINE_S3_BUCKET: ${MEDIA_QUARANTINE_S3_BUCKET:?Set a separate private quarantine bucket}
-      MEDIA_UPLOAD_WORKER_ENABLED: "true"
-      MEDIA_LEGACY_PROXY_UPLOADS_ENABLED: "false"
-      # Large worker inputs and transcoded outputs belong on this dedicated
+      # Incoming files and transcoded outputs belong on this dedicated
       # disk-backed volume, never the memory-backed /tmp or public uploads.
       MEDIA_PROCESSING_TEMP_DIR: /app/media-processing-tmp
-      MEDIA_LEGACY_QUARANTINE_DIR: /app/media-processing-tmp/legacy-quarantine
-      MEDIA_UPLOAD_MAX_ACTIVE_PER_USER: ${MEDIA_UPLOAD_MAX_ACTIVE_PER_USER:-3}
-      MEDIA_UPLOAD_ROLLING_QUOTA_BYTES: ${MEDIA_UPLOAD_ROLLING_QUOTA_BYTES:-524288000}
-      MEDIA_UPLOAD_ROLLING_QUOTA_HOURS: ${MEDIA_UPLOAD_ROLLING_QUOTA_HOURS:-24}
-      MEDIA_UPLOAD_PART_BYTES: ${MEDIA_UPLOAD_PART_BYTES:-8388608}
-      MEDIA_UPLOAD_SESSION_TTL_SECONDS: ${MEDIA_UPLOAD_SESSION_TTL_SECONDS:-1800}
-      MEDIA_UPLOAD_URL_TTL_SECONDS: ${MEDIA_UPLOAD_URL_TTL_SECONDS:-300}
-      MEDIA_UPLOAD_WORKER_CONCURRENCY: ${MEDIA_UPLOAD_WORKER_CONCURRENCY:-2}
-      MEDIA_UPLOAD_JOB_MAX_ATTEMPTS: ${MEDIA_UPLOAD_JOB_MAX_ATTEMPTS:-5}
-      MEDIA_UPLOAD_JOB_LEASE_SECONDS: ${MEDIA_UPLOAD_JOB_LEASE_SECONDS:-300}
-      MEDIA_UPLOAD_WORKER_POLL_MS: ${MEDIA_UPLOAD_WORKER_POLL_MS:-2000}
-      MEDIA_S3_REQUEST_TIMEOUT_MS: ${MEDIA_S3_REQUEST_TIMEOUT_MS:-30000}
-      MEDIA_S3_DOWNLOAD_TIMEOUT_MS: ${MEDIA_S3_DOWNLOAD_TIMEOUT_MS:-180000}
-      MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS: ${MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS:-120000}
-      MEDIA_UPLOAD_COMPLETION_STALE_SECONDS: ${MEDIA_UPLOAD_COMPLETION_STALE_SECONDS:-300}
-      MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS: ${MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS:-1800}
-      MEDIA_PUBLISH_TIMEOUT_MS: ${MEDIA_PUBLISH_TIMEOUT_MS:-120000}
-      MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS: ${MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS:-1800}
-      MEDIA_PUBLISH_CLEANUP_TOMBSTONE_SECONDS: ${MEDIA_PUBLISH_CLEANUP_TOMBSTONE_SECONDS:-300}
+      MEDIA_UPLOAD_TEMP_DIR: /app/media-processing-tmp/incoming
       MEDIA_PROCESSING_CONCURRENCY: ${MEDIA_PROCESSING_CONCURRENCY:-2}
       MEDIA_PROCESSING_MAX_QUEUE: ${MEDIA_PROCESSING_MAX_QUEUE:-16}
-      MEDIA_PROCESSING_STALE_TEMP_SECONDS: ${MEDIA_PROCESSING_STALE_TEMP_SECONDS:-21600}
-      MEDIA_PROCESSING_STALE_CLEANUP_LIMIT: ${MEDIA_PROCESSING_STALE_CLEANUP_LIMIT:-100}
-      MEDIA_MALWARE_SCANNER: clamd-tcp
-      MEDIA_MALWARE_SCAN_TIMEOUT_MS: ${MEDIA_MALWARE_SCAN_TIMEOUT_MS:-60000}
-      MEDIA_CLAMD_TCP_HOST: clamav
-      MEDIA_CLAMD_TCP_PORT: 3310
-      MEDIA_CLAMD_TRUSTED_NETWORK: "true"
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
@@ -243,14 +182,11 @@ services:
       start_period: 20s
     networks:
       - swebud
-      - malware
 
 networks:
   swebud:
     name: ${SWEBUD_NETWORK:-swebud}
     external: true
-  malware:
-    internal: true
 
 volumes:
   swebud_postgres_data:
