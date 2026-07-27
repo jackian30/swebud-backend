@@ -5,7 +5,10 @@ import { UploadV2ExceptionFilter } from './upload-v2-exception.filter';
 describe('UploadV2ExceptionFilter', () => {
   it('never reflects unknown server error details', () => {
     const { host, json } = responseHarness();
-    const secret = 'postgresql://admin:super-secret@database.internal/swebudd';
+    const secretUrl = new URL('postgresql://database.internal/swebudd');
+    secretUrl.username = 'admin';
+    secretUrl.password = 'super-secret';
+    const secret = secretUrl.toString();
 
     new UploadV2ExceptionFilter().catch(
       new Error(`Prisma failed while connecting to ${secret}`),

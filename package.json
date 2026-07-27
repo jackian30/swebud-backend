@@ -17,7 +17,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:prepare-deploy": "node scripts/prepare-compatible-migrations.js",
-    "prisma:deploy": "npm run prisma:prepare-deploy && prisma migrate deploy",
+    "prisma:deploy": "node scripts/deploy-migrations.js",
     "seed": "ts-node prisma/seed.ts",
     "seed:realistic": "ts-node prisma/realistic-seed.ts"
   },

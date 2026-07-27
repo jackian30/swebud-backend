@@ -210,7 +210,7 @@ Backend code is baked into the Docker image. After backend code or dependency ch
 docker compose --env-file deployment/.env -f deployment/docker-compose.yml up -d --build backend
 ```
 
-The `migrate` compose service is a one-shot Prisma runner. It waits for product Postgres, runs `npm run prisma:deploy` against `DIRECT_URL`, exits, and only then lets the backend container start. That command first prepares the immutable migration history for backward-compatible rollout, then runs `prisma migrate deploy`. Keep it in the backend repo because the backend owns `prisma/schema.prisma` and all product DB migrations.
+The `migrate` compose service is a one-shot Prisma runner. It waits for product Postgres, runs the npm-independent `node scripts/deploy-migrations.js` entry point against `DIRECT_URL`, exits, and only then lets the backend container start. That entry point first prepares the immutable migration history for backward-compatible rollout, then runs the project-local Prisma CLI. Keep it in the backend repo because the backend owns `prisma/schema.prisma` and all product DB migrations.
 
 Database schema changes still need Prisma migrations (`npm run prisma:migrate` locally, `npm run prisma:deploy` for deploy flows).
 
@@ -251,6 +251,24 @@ NODE_ENV=production
 MEDIA_STORAGE_DRIVER=s3
 ```
 
+For `v0.4.0`, every new production security/storage dependency must be
+provisioned before redeploying an existing dashboard-managed service. In
+particular:
+
+- set `ADMIN_JWT_SECRET` to a cryptographically random value of at least 32
+  characters, different from both consumer JWT secrets, and configure the
+  trusted Laravel admin issuer with that exact same value;
+- configure distinct public and private-quarantine buckets plus the required
+  S3 credentials/policies; never make `MEDIA_QUARANTINE_S3_BUCKET` public;
+- provision a private-network ClamAV service and set `MEDIA_CLAMD_TCP_HOST`;
+  TCP 3310 must not be exposed publicly; and
+- fill the remaining `sync: false` entries in `render.yaml`, including
+  database, Turnstile, SMTP/sender, and media provider values.
+
+Do not bypass the production startup guard or reuse either consumer JWT secret
+to make a deployment start. Until these dependencies exist, suppress Render
+auto-deploy for CI-only repair commits and leave the last healthy release live.
+
 `FRONTEND_ORIGIN` is the public Cloudflare Pages browser origin. There is no deployed admin. During this compatibility window only, keep the raw Render dashboard value `ADMIN_ORIGIN=https://localhost`: current startup clears that exact historical alias before config validation, while a deliberately redeployed v0.2.43 target can use it to allow the Capacitor WebView origin. A historical Render rollback target keeps the environment captured by that old deploy, so do not assume the existing v0.2.43 target receives these corrected values. After the new release is healthy, use it as the rollback baseline. Remove the alias, `LEGACY_NATIVE_AUTH_COMPAT_UNTIL`, and `LEGACY_WEB_AUTH_COMPAT_UNTIL` after the legacy-client window closes. Other browser-origin localhost values remain invalid in production.
 
 Get the Supabase values step by step:
@@ -279,7 +297,7 @@ On Supabase free projects, direct DB is usually IPv6-only. If Render cannot reac
 DIRECT_URL=postgresql://postgres.<project-ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres?sslmode=require&connection_limit=1
 ```
 
-Prisma uses `DATABASE_URL` for the running app and `DIRECT_URL` for `npm run prisma:deploy`, which performs compatibility preparation before `prisma migrate deploy`. Do not run migrations through Supabase's transaction pooler.
+Prisma uses `DATABASE_URL` for the running app and `DIRECT_URL` for the compatibility-aware migration runner (`npm run prisma:deploy` outside the production image, or `node scripts/deploy-migrations.js` inside it). Do not run migrations through Supabase's transaction pooler.
 
 For **Supabase Storage**, create a public bucket for app media and set:
 

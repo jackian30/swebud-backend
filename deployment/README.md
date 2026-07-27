@@ -137,7 +137,7 @@ The ignored `.env` must remain mode 0600. Never commit `.env`, `.secrets/`,
 Required production configuration includes:
 
 ```dotenv
-DATABASE_BACKUP_URL=postgresql://swebud_backup:...@postgres:5432/swebud?schema=public
+DATABASE_BACKUP_URL=<PostgreSQL URL for the dedicated backup role>
 BACKUP_OUTPUT_DIR=/var/backups/swebudd
 BACKUP_AGE_RECIPIENT=age1...
 BACKUP_SIGNING_PRIVATE_KEY_FILE=/absolute/private/path/backup-signing-private.pem

@@ -1,4 +1,5 @@
 const { spawn } = require('node:child_process');
+const prismaCli = require.resolve('prisma/build/index.js');
 const { PrismaClient } = require('@prisma/client');
 
 const COMPATIBILITY_MIGRATIONS = [
@@ -15,8 +16,8 @@ function resolutionActions(row) {
 function runResolve(action, migration, env = process.env) {
   return new Promise((resolve) => {
     const child = spawn(
-      'npx',
-      ['prisma', 'migrate', 'resolve', `--${action}`, migration],
+      process.execPath,
+      [prismaCli, 'migrate', 'resolve', `--${action}`, migration],
       { stdio: 'inherit', env },
     );
     child.on('close', (code) => resolve(code ?? 1));

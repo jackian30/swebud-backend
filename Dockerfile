@@ -25,7 +25,9 @@ COPY --chown=node:node prisma ./prisma
 RUN npx prisma generate
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node --from=build /app/dist ./dist
-RUN mkdir -p uploads/images uploads/videos uploads/audio /app/media-processing-tmp \
+RUN rm -rf /usr/local/lib/node_modules/npm \
+    && rm -f /usr/local/bin/npm /usr/local/bin/npx \
+    && mkdir -p uploads/images uploads/videos uploads/audio /app/media-processing-tmp \
     && chown -R node:node uploads /app/media-processing-tmp
 USER node
 

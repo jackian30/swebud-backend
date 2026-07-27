@@ -35,13 +35,28 @@ exit 0
 HOOK
 chmod 0700 "$FAILURE_HOOK"
 
-printf '%s' 'postgresql://audit_owner:audit-owner-secret@postgres:5432/audit?schema=public' \
+audit_owner_password='audit-owner-secret'
+audit_runtime_password='audit-runtime-password-000000000000000001'
+audit_readonly_password='audit-readonly-password-000000000000000002'
+audit_backup_password='audit-backup-password-000000000000000003'
+audit_owner_url="$(printf 'postgresql://%s:%s@postgres:5432/audit?schema=public' \
+  audit_owner "$audit_owner_password")"
+audit_runtime_url="$(printf 'postgresql://%s:%s@postgres:5432/audit?schema=public' \
+  audit_runtime "$audit_runtime_password")"
+audit_readonly_url="$(printf 'postgresql://%s:%s@postgres:5432/audit?schema=public' \
+  audit_readonly "$audit_readonly_password")"
+audit_backup_url="$(printf 'postgresql://%s:%s@postgres:5432/audit?schema=public' \
+  audit_backup "$audit_backup_password")"
+audit_wrong_role_url="$(printf 'postgresql://%s:%s@postgres:5432/audit' \
+  wrong_role "$audit_backup_password")"
+
+printf '%s' "$audit_owner_url" \
   > "$SECRET_DIR/direct-url"
-printf '%s' 'audit-runtime-password-000000000000000001' \
+printf '%s' "$audit_runtime_password" \
   > "$SECRET_DIR/runtime-password"
-printf '%s' 'audit-readonly-password-000000000000000002' \
+printf '%s' "$audit_readonly_password" \
   > "$SECRET_DIR/readonly-password"
-printf '%s' 'audit-backup-password-000000000000000003' \
+printf '%s' "$audit_backup_password" \
   > "$SECRET_DIR/backup-password"
 chmod 0600 "$SECRET_DIR"/*
 openssl genpkey \
@@ -68,15 +83,15 @@ audit_environment=(
   POSTGRES_USER=audit_owner
   POSTGRES_PASSWORD=audit-owner-password-00000000000000000004
   DATABASE_RUNTIME_USER=audit_runtime
-  DATABASE_RUNTIME_PASSWORD=audit-runtime-password-000000000000000001
-  DATABASE_URL=postgresql://audit_runtime:audit-runtime-password-000000000000000001@postgres:5432/audit?schema=public
+  "DATABASE_RUNTIME_PASSWORD=$audit_runtime_password"
+  "DATABASE_URL=$audit_runtime_url"
   DATABASE_ADMIN_READONLY_USER=audit_readonly
-  DATABASE_ADMIN_READONLY_PASSWORD=audit-readonly-password-000000000000000002
-  DATABASE_ADMIN_READONLY_URL=postgresql://audit_readonly:audit-readonly-password-000000000000000002@postgres:5432/audit?schema=public
+  "DATABASE_ADMIN_READONLY_PASSWORD=$audit_readonly_password"
+  "DATABASE_ADMIN_READONLY_URL=$audit_readonly_url"
   DATABASE_BACKUP_USER=audit_backup
-  DATABASE_BACKUP_PASSWORD=audit-backup-password-000000000000000003
-  DATABASE_BACKUP_URL=postgresql://audit_backup:audit-backup-password-000000000000000003@postgres:5432/audit?schema=public
-  DIRECT_URL=postgresql://audit_owner:audit-owner-secret@postgres:5432/audit?schema=public
+  "DATABASE_BACKUP_PASSWORD=$audit_backup_password"
+  "DATABASE_BACKUP_URL=$audit_backup_url"
+  "DIRECT_URL=$audit_owner_url"
   DATABASE_OWNER_URL_SECRET_FILE="$SECRET_DIR/direct-url"
   DATABASE_RUNTIME_PASSWORD_SECRET_FILE="$SECRET_DIR/runtime-password"
   DATABASE_ADMIN_READONLY_PASSWORD_SECRET_FILE="$SECRET_DIR/readonly-password"
@@ -683,18 +698,21 @@ const packageJson = require(process.argv[2]);
 if (packageJson.scripts['prisma:prepare-deploy'] !== 'node scripts/prepare-compatible-migrations.js') {
   throw new Error('prisma:prepare-deploy does not run the compatibility preparation script');
 }
-if (packageJson.scripts['prisma:deploy'] !== 'npm run prisma:prepare-deploy && prisma migrate deploy') {
-  throw new Error('prisma:deploy must prepare compatibility before deploying migrations');
+if (packageJson.scripts['prisma:deploy'] !== 'node scripts/deploy-migrations.js') {
+  throw new Error('prisma:deploy must use the compatibility-aware migration runner');
 }
 NODE
-for compose_file in docker-compose.yml docker-compose-dev.yml; do
-  grep -q 'npm run prisma:deploy' "$SCRIPT_DIR/$compose_file"
-  if grep -q 'npx prisma migrate deploy' "$SCRIPT_DIR/$compose_file"; then
-    echo "$compose_file bypasses the compatibility-aware Prisma deploy script." >&2
-    exit 1
-  fi
-done
-grep -q 'scripts/prepare-compatible-migrations.js' "$SCRIPT_DIR/../scripts/render-start.js"
+grep -q 'node scripts/deploy-migrations.js' "$SCRIPT_DIR/docker-compose.yml"
+grep -q 'npm run prisma:deploy' "$SCRIPT_DIR/docker-compose-dev.yml"
+if grep -q 'npx prisma migrate deploy' \
+  "$SCRIPT_DIR/docker-compose.yml" \
+  "$SCRIPT_DIR/docker-compose-dev.yml"
+then
+  echo "A Compose service bypasses the compatibility-aware Prisma deploy script." >&2
+  exit 1
+fi
+grep -q "require('./render-start')" "$SCRIPT_DIR/../scripts/deploy-migrations.js"
+grep -q 'prepare-compatible-migrations.js' "$SCRIPT_DIR/../scripts/render-start.js"
 grep -q "require('./render-start')" "$SCRIPT_DIR/../scripts/docker-entrypoint.js"
 grep -q '^ENTRYPOINT \["node", "scripts/docker-entrypoint.js"\]$' "$SCRIPT_DIR/../Dockerfile"
 git -C "$SCRIPT_DIR/.." diff --exit-code HEAD -- \
@@ -749,9 +767,9 @@ expect_deploy_failure 'verify TLS certificates' \
 expect_deploy_failure 'JWT_SECRET, JWT_REFRESH_SECRET, and ADMIN_JWT_SECRET must all differ' \
   ADMIN_JWT_SECRET=audit-access-secret-with-more-than-32-characters
 expect_deploy_failure 'database passwords must all differ' \
-  DATABASE_BACKUP_PASSWORD=audit-runtime-password-000000000000000001
+  "DATABASE_BACKUP_PASSWORD=$audit_runtime_password"
 expect_deploy_failure 'DATABASE_BACKUP_URL must authenticate as' \
-  DATABASE_BACKUP_URL=postgresql://wrong_role:audit-backup-password-000000000000000003@postgres:5432/audit
+  "DATABASE_BACKUP_URL=$audit_wrong_role_url"
 expect_deploy_failure 'BACKUP_S3_URI is required' \
   BACKUP_ALLOW_LOCAL_ONLY=false \
   BACKUP_S3_URI=
