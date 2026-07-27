@@ -430,6 +430,12 @@ describe('security boundaries (e2e)', () => {
       refreshToken: response.body.refreshToken,
     };
     userIds.push(testUser.id);
+    // These fixtures exercise post-verification mutation boundaries. Verification
+    // token issuance/consumption has dedicated service and route coverage.
+    await prisma.user.update({
+      where: { id: testUser.id },
+      data: { emailVerifiedAt: new Date() },
+    });
     return testUser;
   }
 });

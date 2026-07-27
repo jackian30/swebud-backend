@@ -28,6 +28,7 @@ describe('ChatGateway', () => {
             dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
             legalConsentAt: new Date('2026-01-01T00:00:00.000Z'),
             dataConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+            emailVerifiedAt: new Date('2026-01-02T00:00:00.000Z'),
           },
         }),
       },
@@ -55,6 +56,79 @@ describe('ChatGateway', () => {
     expect(chat.assertDirectMessagingAllowed).toHaveBeenCalledWith('sender-1', 'recipient-1');
     expect(gateway.server.to).toHaveBeenCalledWith('user:recipient-1');
     expect(room.emit).toHaveBeenCalledWith('chat:typing', { senderId: 'sender-1' });
+  });
+
+  it('rejects websocket message sends when the live account email is unverified', async () => {
+    prisma.refreshToken.findFirst.mockResolvedValueOnce({
+      id: 'session-1',
+      user: {
+        moderationStatus: 'active',
+        bannedAt: null,
+        bannedUntil: null,
+        usernameFinalized: true,
+        dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+        legalConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        dataConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        emailVerifiedAt: null,
+      },
+    });
+    const client = { id: 'socket-1', data: { userId: 'sender-1' }, handshake: { auth: { token: 'valid-token' }, headers: {} }, disconnect: jest.fn() } as any;
+
+    await expect(gateway.send(client, { recipientId: 'recipient-1', body: 'hello' }))
+      .rejects.toThrow('Verify your email');
+
+    expect(chat.send).not.toHaveBeenCalled();
+  });
+
+  it('rejects websocket typing signals when the live account email is unverified', async () => {
+    prisma.refreshToken.findFirst.mockResolvedValueOnce({
+      id: 'session-1',
+      user: {
+        moderationStatus: 'active',
+        bannedAt: null,
+        bannedUntil: null,
+        usernameFinalized: true,
+        dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+        legalConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        dataConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        emailVerifiedAt: null,
+      },
+    });
+    const client = { id: 'socket-1', data: { userId: 'sender-1' }, handshake: { auth: { token: 'valid-token' }, headers: {} }, disconnect: jest.fn() } as any;
+
+    await expect(gateway.typing(client, { recipientId: 'recipient-1' }))
+      .rejects.toThrow('Verify your email');
+
+    expect(chat.assertDirectMessagingAllowed).not.toHaveBeenCalled();
+    expect(room.emit).not.toHaveBeenCalled();
+  });
+
+  it('allows websocket message sends after the live account email is verified', async () => {
+    prisma.refreshToken.findFirst.mockResolvedValueOnce({
+      id: 'session-1',
+      user: {
+        moderationStatus: 'active',
+        bannedAt: null,
+        bannedUntil: null,
+        usernameFinalized: true,
+        dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+        legalConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        dataConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        emailVerifiedAt: new Date('2026-01-02T00:00:00.000Z'),
+      },
+    });
+    chat.send.mockResolvedValue({
+      id: 'message-1',
+      senderId: 'sender-1',
+      recipientId: 'recipient-1',
+      body: 'hello',
+    });
+    const client = { id: 'socket-1', data: { userId: 'sender-1' }, handshake: { auth: { token: 'valid-token' }, headers: {} }, disconnect: jest.fn() } as any;
+
+    await expect(gateway.send(client, { recipientId: 'recipient-1', body: 'hello' }))
+      .resolves.toEqual(expect.objectContaining({ id: 'message-1' }));
+
+    expect(chat.send).toHaveBeenCalledWith('sender-1', expect.objectContaining({ recipientId: 'recipient-1' }));
   });
 
   it('does not disclose typing activity to a recipient the sender cannot message', async () => {
@@ -120,6 +194,43 @@ describe('ChatGateway', () => {
     );
     const client = {
       id: 'socket-1',
+      data: {},
+      handshake: { auth: { token: 'valid-token' }, headers: {} },
+      disconnect: jest.fn(),
+      join: jest.fn(),
+    } as any;
+
+    await gateway.handleConnection(client);
+
+    expect(client.disconnect).toHaveBeenCalledWith(true);
+    expect(client.join).not.toHaveBeenCalled();
+    expect(presence.trackConnection).not.toHaveBeenCalled();
+  });
+
+  it('disconnects a legacy underage account during websocket authentication', async () => {
+    const presence = { trackConnection: jest.fn(), trackDisconnection: jest.fn() };
+    prisma.refreshToken.findFirst.mockResolvedValueOnce({
+      id: 'session-1',
+      user: {
+        moderationStatus: 'active',
+        bannedAt: null,
+        bannedUntil: null,
+        usernameFinalized: true,
+        dateOfBirth: new Date(),
+        legalConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        dataConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        emailVerifiedAt: new Date('2026-01-02T00:00:00.000Z'),
+      },
+    });
+    gateway = new ChatGateway(
+      jwt as any,
+      { get: jest.fn() } as any,
+      chat as any,
+      prisma as any,
+      presence as any,
+    );
+    const client = {
+      id: 'socket-underage',
       data: {},
       handshake: { auth: { token: 'valid-token' }, headers: {} },
       disconnect: jest.fn(),

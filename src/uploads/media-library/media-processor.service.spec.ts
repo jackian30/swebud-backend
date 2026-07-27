@@ -1,12 +1,25 @@
 import { BadRequestException } from '@nestjs/common';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'fs';
+import { writeFile } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { mediaCollections } from './collections';
-import { MediaProcessor } from './media-processor.service';
+import { MediaProcessor, processingTempDirectory } from './media-processor.service';
 
 describe('MediaProcessor', () => {
   let processor: MediaProcessor;
+  let directory: string;
 
   beforeEach(() => {
+    directory = mkdtempSync(join(tmpdir(), 'swebudd-processor-test-'));
+    process.env.MEDIA_PROCESSING_TEMP_DIR = directory;
     processor = new MediaProcessor();
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    delete process.env.MEDIA_PROCESSING_TEMP_DIR;
+    rmSync(directory, { recursive: true, force: true });
   });
 
   it('rejects missing multipart files', async () => {
@@ -14,97 +27,145 @@ describe('MediaProcessor', () => {
   });
 
   it('rejects unsupported MIME types before storage', async () => {
-    await expect(processor.process(file({ mimetype: 'application/pdf', buffer: Buffer.from('%PDF') }), mediaCollections['generic-media'])).rejects.toThrow('Unsupported media type: application/pdf');
+    await expect(processor.process(file(Buffer.from('%PDF'), 'application/pdf'), mediaCollections['generic-media']))
+      .rejects.toThrow('Unsupported media type: application/pdf');
   });
 
   it('rejects media that the selected collection does not accept', async () => {
-    await expect(processor.process(file({ mimetype: 'video/mp4', buffer: mp4Buffer() }), mediaCollections['generic-image'])).rejects.toThrow('Unsupported image upload type: video/mp4');
+    await expect(processor.process(file(mp4Buffer(), 'video/mp4'), mediaCollections['generic-image']))
+      .rejects.toThrow('Unsupported image upload type: video/mp4');
   });
 
   it('rejects files larger than the collection limit', async () => {
     const collection = { ...mediaCollections['generic-image'], maxBytes: 3 };
 
-    await expect(processor.process(file({ mimetype: 'image/gif', buffer: gifBuffer(), size: 4 }), collection)).rejects.toThrow('Image is too large.');
+    await expect(processor.process(file(gifBuffer(), 'image/gif'), collection)).rejects.toThrow('Image is too large.');
   });
 
   it('rejects content whose magic bytes do not match the declared MIME type', async () => {
-    await expect(processor.process(file({ mimetype: 'image/png', buffer: Buffer.from('not-a-png') }), mediaCollections['generic-image'])).rejects.toThrow('Uploaded file content does not match its media type.');
+    await expect(processor.process(file(Buffer.from('not-a-png'), 'image/png'), mediaCollections['generic-image']))
+      .rejects.toThrow('Uploaded file content does not match its media type.');
   });
 
-  it('optimizes valid videos to MP4 when transcoding makes them smaller', async () => {
-    jest.spyOn(processor as never, 'transcode').mockResolvedValue(Buffer.from('mp4') as never);
-
-    const result = await processor.process(file({ mimetype: 'video/mp4', buffer: mp4Buffer(), size: mp4Buffer().length }), mediaCollections['generic-video']);
+  it('streams a valid image from disk into a safe WebP output path', async () => {
+    const result = await processor.process(file(pngBuffer(), 'image/png'), mediaCollections['generic-image']);
 
     expect(result).toMatchObject({
-      buffer: Buffer.from('mp4'),
-      mimeType: 'video/mp4',
-      size: 3,
-      type: 'video',
-    });
-    expect(result.filename).toMatch(/\.mp4$/);
-  });
-
-  it('keeps original video when transcoding is not smaller', async () => {
-    const buffer = mp4Buffer();
-    jest.spyOn(processor as never, 'transcode').mockResolvedValue(Buffer.concat([buffer, Buffer.from('larger')]) as never);
-
-    const result = await processor.process(file({ mimetype: 'video/mp4', buffer, size: buffer.length }), mediaCollections['generic-video']);
-
-    expect(result).toMatchObject({
-      buffer,
-      mimeType: 'video/mp4',
-      size: buffer.length,
-      type: 'video',
-    });
-    expect(result.filename).toMatch(/\.mp4$/);
-  });
-
-  it('optimizes valid audio to AAC m4a when transcoding makes it smaller', async () => {
-    jest.spyOn(processor as never, 'transcode').mockResolvedValue(Buffer.from('aac') as never);
-
-    const result = await processor.process(file({ mimetype: 'audio/mpeg', buffer: mp3Buffer(), size: mp3Buffer().length }), mediaCollections['generic-audio']);
-
-    expect(result).toMatchObject({
-      buffer: Buffer.from('aac'),
-      mimeType: 'audio/mp4',
-      size: 3,
-      type: 'audio',
-    });
-    expect(result.filename).toMatch(/\.m4a$/);
-  });
-
-  it('keeps GIF images unconverted', async () => {
-    const buffer = gifBuffer();
-
-    const result = await processor.process(file({ mimetype: 'image/gif', buffer, size: buffer.length }), mediaCollections['generic-image']);
-
-    expect(result).toMatchObject({
-      buffer,
-      mimeType: 'image/gif',
-      size: buffer.length,
+      mimeType: 'image/webp',
       type: 'image',
+      temporary: true,
+      width: 1,
+      height: 1,
     });
-    expect(result.filename).toMatch(/\.gif$/);
+    expect(result).not.toHaveProperty('buffer');
+    expect(result.filename).toMatch(/^[a-f0-9]{48}\.webp$/);
   });
-});
 
-function file(overrides: Partial<Express.Multer.File>): Express.Multer.File {
-  const buffer = overrides.buffer ?? Buffer.alloc(0);
-  return {
-    fieldname: 'file',
-    originalname: 'upload.bin',
-    encoding: '7bit',
-    mimetype: 'application/octet-stream',
-    size: buffer.length,
-    buffer,
-    stream: undefined as never,
-    destination: '',
-    filename: '',
-    path: '',
-    ...overrides,
-  };
-}
+  it('rejects video data, attachment, and excess audio streams', async () => {
+    jest.spyOn(processor as never, 'probe').mockResolvedValue({
+      format: { duration: '1' },
+      streams: [
+        { codec_type: 'video', width: 100, height: 100, avg_frame_rate: '30/1' },
+        { codec_type: 'audio' },
+        { codec_type: 'data' },
+      ],
+    } as never);
+
+    await expect(processor.process(file(mp4Buffer(), 'video/mp4'), mediaCollections['generic-video']))
+      .rejects.toThrow('no unsupported streams');
+  });
+
+  it('rejects an audio upload containing a video cover stream', async () => {
+    jest.spyOn(processor as never, 'probe').mockResolvedValue({
+      format: { duration: '1' },
+      streams: [
+        { codec_type: 'audio', sample_rate: '48000', channels: 2 },
+        { codec_type: 'video', width: 100, height: 100 },
+      ],
+    } as never);
+
+    await expect(processor.process(file(mp3Buffer(), 'audio/mpeg'), mediaCollections['generic-audio']))
+      .rejects.toThrow('exactly one supported audio stream');
+  });
+
+  it('rejects missing video frame-rate and audio sample metadata', async () => {
+    jest.spyOn(processor as any, 'probe').mockResolvedValueOnce({
+      format: { duration: '1' },
+      streams: [{ codec_type: 'video', width: 100, height: 100 }],
+    });
+    await expect(processor.process(file(mp4Buffer(), 'video/mp4'), mediaCollections['generic-video']))
+      .rejects.toThrow('frame rate exceed safe limits');
+
+    jest.restoreAllMocks();
+    jest.spyOn(processor as any, 'probe').mockResolvedValueOnce({
+      format: { duration: '1' },
+      streams: [{ codec_type: 'audio', channels: 2 }],
+    });
+    await expect(processor.process(file(mp3Buffer(), 'audio/mpeg'), mediaCollections['generic-audio']))
+      .rejects.toThrow('sample rate or channel count');
+  });
+
+  it('always transcodes video to a controlled MP4 rather than returning the original', async () => {
+    jest.spyOn(processor as never, 'probe').mockResolvedValue({
+      format: { duration: '1' },
+      streams: [{ codec_type: 'video', width: 100, height: 100, avg_frame_rate: '30/1' }],
+    } as never);
+    jest.spyOn(processor as any, 'transcode').mockImplementation(async (...args: unknown[]) => {
+      const output = args[1] as string;
+      await writeFile(output, 'safe-mp4', { mode: 0o600 });
+    });
+
+    const result = await processor.process(file(mp4Buffer(), 'video/mp4'), mediaCollections['generic-video']);
+
+    expect(result.path).not.toContain('input');
+    expect(result).toMatchObject({ mimeType: 'video/mp4', type: 'video', temporary: true });
+    expect(result).not.toHaveProperty('buffer');
+  });
+
+  it('deletes and rejects a transcoded output that exceeds the collection limit', async () => {
+    jest.spyOn(processor as never, 'probe').mockResolvedValue({
+      format: { duration: '1' },
+      streams: [{ codec_type: 'video', width: 100, height: 100, avg_frame_rate: '30/1' }],
+    } as never);
+    let outputPath = '';
+    jest.spyOn(processor as any, 'transcode').mockImplementation(async (...args: unknown[]) => {
+      outputPath = args[1] as string;
+      await writeFile(outputPath, Buffer.alloc(32), { mode: 0o600 });
+    });
+    const collection = { ...mediaCollections['generic-video'], maxBytes: mp4Buffer().length };
+
+    await expect(processor.process(file(mp4Buffer(), 'video/mp4'), collection))
+      .rejects.toThrow('Video output exceeds the collection size limit.');
+    expect(() => writeFileSync(outputPath, 'recreated', { flag: 'wx' })).not.toThrow();
+  });
+
+  it('rejects a processing base directory which traverses a symlink', () => {
+    const target = join(directory, 'target');
+    const link = join(directory, 'link');
+    mkdirSync(target);
+    symlinkSync(target, link);
+    process.env.MEDIA_PROCESSING_TEMP_DIR = link;
+
+    expect(() => processingTempDirectory()).toThrow('may not traverse symlinks');
+  });
+
+  function file(bytes: Buffer, mimetype: string): Express.Multer.File {
+    const path = join(directory, `input-${Math.random()}`);
+    writeFileSync(path, bytes, { mode: 0o600 });
+    return {
+      fieldname: 'file',
+      originalname: 'ignored-client-name.exe',
+      encoding: '7bit',
+      mimetype,
+      size: bytes.length,
+      buffer: undefined as never,
+      stream: undefined as never,
+      destination: directory,
+      filename: 'input',
+      path,
+    };
+  }
+});
 
 function gifBuffer() {
   return Buffer.from('GIF89a-image-data');
@@ -116,4 +177,11 @@ function mp4Buffer() {
 
 function mp3Buffer() {
   return Buffer.from('ID3-audio-data');
+}
+
+function pngBuffer() {
+  return Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+    'base64',
+  );
 }

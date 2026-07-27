@@ -6,6 +6,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { requiredSecret } from '../common/security';
 import { isAccountBanned, isOnboardingComplete, moderationStateSelect, onboardingStateSelect } from './account-status';
 import { refreshTokenTtlSeconds } from '../common/config';
+import { assertExistingAccountMeetsAgePolicy } from '../common/account-age';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -25,12 +26,14 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
             ...moderationStateSelect,
             ...onboardingStateSelect,
             banReason: true,
+            emailVerifiedAt: true,
           },
         },
       },
     });
     if (!session) throw new UnauthorizedException('Session expired');
     if (isAccountBanned(session.user)) throw new UnauthorizedException(session.user.banReason ? `Account banned: ${session.user.banReason}` : 'Account banned');
+    assertExistingAccountMeetsAgePolicy(session.user.dateOfBirth, this.config);
     const expiresAt = new Date(Date.now() + refreshTokenTtlSeconds(this.config) * 1000);
     await this.prisma.$transaction([
       this.prisma.refreshToken.update({ where: { id: session.id }, data: { expiresAt } }),
@@ -43,6 +46,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       sessionId: payload.sid,
       loginSessionId: session.loginSessionId,
       onboarded: isOnboardingComplete(session.user),
+      emailVerified: Boolean(session.user.emailVerifiedAt),
     };
   }
 }

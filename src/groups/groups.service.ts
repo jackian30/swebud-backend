@@ -53,8 +53,8 @@ export class GroupsService {
     const take = this.listTake(options.take);
     const cursor = this.listCursor(options.cursor);
     const where: Prisma.GroupWhereInput = options.discoverOnly && userId
-      ? { visibility: 'public', members: { none: { userId } } }
-      : { OR: [{ visibility: 'public' }, ...(userId ? [{ members: { some: { userId } } }] : [])] };
+      ? { moderationStatus: 'active', visibility: 'public', members: { none: { userId } } }
+      : { moderationStatus: 'active', OR: [{ visibility: 'public' }, ...(userId ? [{ members: { some: { userId } } }] : [])] };
     const groups = await this.prisma.group.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -84,7 +84,7 @@ export class GroupsService {
     const cursor = this.listCursor(options.cursor);
     const [groups, unreadByGroup, mutedGroupIds, pinnedGroupIds] = await Promise.all([
       this.prisma.group.findMany({
-      where: { members: { some: { userId } } },
+      where: { moderationStatus: 'active', members: { some: { userId } } },
       orderBy: { createdAt: 'desc' },
       ...(take ? { take } : {}),
       ...(cursor ? { skip: cursor } : {}),
@@ -112,7 +112,7 @@ export class GroupsService {
 
   async get(userId: string, slug: string, options: GroupGetOptions = {}) {
     if (options.summaryOnly) return this.getSummary(userId, slug);
-    const group = await this.prisma.group.findUniqueOrThrow({ where: { slug }, include: this.include(true, userId) });
+    const group = await this.prisma.group.findFirstOrThrow({ where: { slug, moderationStatus: 'active' }, include: this.include(true, userId) });
     const isMember = group.members.some((member) => member.userId === userId);
     if (group.visibility === 'private' && !isMember) throw new ForbiddenException('Join this private group by invite first');
     const [muted, pinned] = isMember ? await Promise.all([this.isGroupMuted(userId, group.id), this.isGroupPinned(userId, group.id)]) : [false, false];
@@ -120,8 +120,8 @@ export class GroupsService {
   }
 
   private async getSummary(userId: string, slug: string) {
-    const group = await this.prisma.group.findUniqueOrThrow({
-      where: { slug },
+    const group = await this.prisma.group.findFirstOrThrow({
+      where: { slug, moderationStatus: 'active' },
       select: {
         id: true,
         name: true,
@@ -137,7 +137,7 @@ export class GroupsService {
           select: {
             members: true,
             messages: { where: this.accessibleMessageWhere(userId) },
-            posts: true,
+            posts: { where: { moderationStatus: 'active' } },
             chatChannels: { where: this.accessibleChannelWhere(userId) },
           },
         },
@@ -158,8 +158,8 @@ export class GroupsService {
   }
 
   async join(userId: string, groupId: string) {
-    const group = await this.prisma.group.findUniqueOrThrow({
-      where: { id: groupId },
+    const group = await this.prisma.group.findFirstOrThrow({
+      where: { id: groupId, moderationStatus: 'active' },
       select: { slug: true, visibility: true, members: { where: { userId }, take: 1, select: { userId: true } } },
     });
     if (group.visibility === 'private' && group.members.length === 0) {
@@ -172,14 +172,14 @@ export class GroupsService {
   }
 
   async joinByInvite(userId: string, inviteCode: string) {
-    const group = await this.prisma.group.findUniqueOrThrow({ where: { inviteCode }, select: { id: true, slug: true } });
+    const group = await this.prisma.group.findFirstOrThrow({ where: { inviteCode, moderationStatus: 'active' }, select: { id: true, slug: true } });
     await this.prisma.groupMember.upsert({ where: { groupId_userId: { groupId: group.id, userId } }, create: { groupId: group.id, userId }, update: {} });
     return this.get(userId, group.slug);
   }
 
   async invitations(userId: string) {
     return this.prisma.groupInvite.findMany({
-      where: { inviteeId: userId, status: 'pending' },
+      where: { inviteeId: userId, status: 'pending', group: { moderationStatus: 'active' } },
       orderBy: { createdAt: 'desc' },
       include: {
         inviter: { select: this.publicUserSelect() },
@@ -210,8 +210,8 @@ export class GroupsService {
   }
 
   async inviteUsers(userId: string, groupId: string, dto: InviteGroupUsersDto) {
-    const group = await this.prisma.group.findUniqueOrThrow({
-      where: { id: groupId },
+    const group = await this.prisma.group.findFirstOrThrow({
+      where: { id: groupId, moderationStatus: 'active' },
       select: { id: true, name: true, members: { where: { userId }, take: 1, select: { userId: true } } },
     });
     if (!group.members.length) throw new ForbiddenException('Join the group first');
@@ -220,7 +220,7 @@ export class GroupsService {
 
   async acceptInvite(userId: string, inviteId: string) {
     const invite = await this.prisma.groupInvite.findFirst({
-      where: { id: inviteId, inviteeId: userId, status: 'pending' },
+      where: { id: inviteId, inviteeId: userId, status: 'pending', group: { moderationStatus: 'active' } },
       include: { group: { select: { id: true, name: true, slug: true } } },
     });
     if (!invite) throw new BadRequestException('This group invite is no longer available.');
@@ -247,7 +247,7 @@ export class GroupsService {
 
   async declineInvite(userId: string, inviteId: string) {
     const result = await this.prisma.groupInvite.updateMany({
-      where: { id: inviteId, inviteeId: userId, status: 'pending' },
+      where: { id: inviteId, inviteeId: userId, status: 'pending', group: { moderationStatus: 'active' } },
       data: { status: 'declined', respondedAt: new Date() },
     });
     if (!result.count) throw new BadRequestException('This group invite is no longer available.');
@@ -262,7 +262,7 @@ export class GroupsService {
     const name = dto.name?.trim();
     if (dto.name !== undefined && !name) throw new BadRequestException('Group name cannot be empty');
     const group = await this.prisma.group.update({
-      where: { id: groupId },
+      where: { id: groupId, moderationStatus: 'active' },
       data: {
         ...(name !== undefined ? { name } : {}),
         ...(dto.description !== undefined ? { description: dto.description.trim() } : {}),
@@ -314,6 +314,7 @@ export class GroupsService {
     const cursor = Math.max(Math.trunc(filters.cursor ?? 0), 0);
     const where = {
       groupId,
+      moderationStatus: 'active' as const,
       ...(filters.mine ? { authorId: userId } : {}),
       ...(hashtags.length ? { AND: hashtags.map((name) => ({ hashtags: { some: { hashtag: { name } } } })) } : {}),
       ...(q ? { text: { contains: q, mode: 'insensitive' as const } } : {}),
@@ -368,11 +369,17 @@ export class GroupsService {
   }
 
   async removePost(userId: string, groupId: string, postId: string) {
-    const post = await this.prisma.post.findUniqueOrThrow({ where: { id: postId }, select: { authorId: true, groupId: true } });
+    const post = await this.prisma.post.findUniqueOrThrow({
+      where: { id: postId },
+      select: { authorId: true, groupId: true, moderationStatus: true },
+    });
+    if (post.moderationStatus === 'quarantined') {
+      throw new ForbiddenException('Quarantined content can only be changed after an admin restores it');
+    }
     if (post.groupId !== groupId) throw new ForbiddenException();
     const role = await this.memberRole(userId, groupId);
     if (post.authorId !== userId && !this.canModerate(role)) throw new ForbiddenException('Only the author or group moderators can delete this group post');
-    await this.prisma.post.delete({ where: { id: postId } });
+    await this.prisma.post.delete({ where: { id: postId, moderationStatus: 'active' } });
   }
 
   async channels(userId: string, groupId: string) {
@@ -476,7 +483,16 @@ export class GroupsService {
     await this.ensureMember(userId, groupId);
     const channel = channelId ? await this.ensureChannelAccess(userId, groupId, channelId) : await this.defaultChannel(groupId, userId);
     const [messages, readStates] = await Promise.all([
-      this.prisma.message.findMany({ where: { groupId, channelId: channel.id, hiddenBy: { none: { userId } } }, orderBy: { createdAt: 'asc' }, include: this.messageInclude() }),
+      this.prisma.message.findMany({
+        where: {
+          groupId,
+          channelId: channel.id,
+          moderationStatus: 'active',
+          hiddenBy: { none: { userId } },
+        },
+        orderBy: { createdAt: 'asc' },
+        include: this.messageInclude(),
+      }),
       this.channelReadStates(channel.id),
     ]);
     const pinned = await this.withPinnedMessageFlags(userId, messages);
@@ -496,8 +512,23 @@ export class GroupsService {
     }
     const body = dto.body.trim();
     if (!body) throw new BadRequestException('Message cannot be empty');
-    const referenceData = await this.messageReferenceData(groupId, channel.id, dto);
-    const message = await this.prisma.message.create({ data: { senderId: userId, groupId, channelId: channel.id, body, ...referenceData }, include: this.messageInclude() });
+    const create = async (client: PrismaService | Prisma.TransactionClient) => {
+      if (
+        dto.referenceType === 'message'
+        && dto.referenceId
+        && !(await this.lockActiveMessage(client, dto.referenceId))
+      ) {
+        throw new BadRequestException('Reply target is no longer available.');
+      }
+      const referenceData = await this.messageReferenceData(groupId, channel.id, dto, client);
+      return client.message.create({
+        data: { senderId: userId, groupId, channelId: channel.id, body, ...referenceData },
+        include: this.messageInclude(),
+      });
+    };
+    const message = dto.referenceType === 'message' && dto.referenceId
+      ? await this.prisma.$transaction(create)
+      : await create(this.prisma);
     return this.withReadBy(message, []);
   }
 
@@ -572,7 +603,10 @@ export class GroupsService {
   }
 
   private async memberRole(userId: string, groupId: string) {
-    return (await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } }, select: { role: true } }))?.role;
+    return (await this.prisma.groupMember.findFirst({
+      where: { groupId, userId, group: { moderationStatus: 'active' } },
+      select: { role: true },
+    }))?.role;
   }
 
   private canManage(role?: string) { return role === 'owner' || role === 'admin'; }
@@ -640,6 +674,7 @@ export class GroupsService {
         ON channel_mute."user_id" = ${userId}
         AND channel_mute."channel_id" = message."channel_id"
       WHERE message."group_id" IS NOT NULL
+        AND message."moderation_status" = 'active'::content_moderation_status
         AND (group_mute."user_id" IS NULL OR group_mute."muted_until" <= NOW())
         AND (channel_mute."user_id" IS NULL OR channel_mute."muted_until" <= NOW())
         AND message."sender_id" <> ${userId}
@@ -683,6 +718,7 @@ export class GroupsService {
         AND channel_mute."channel_id" = message."channel_id"
       WHERE message."group_id" = ${groupId}
         AND message."channel_id" IS NOT NULL
+        AND message."moderation_status" = 'active'::content_moderation_status
         AND (group_mute."user_id" IS NULL OR group_mute."muted_until" <= NOW())
         AND (channel_mute."user_id" IS NULL OR channel_mute."muted_until" <= NOW())
         AND message."sender_id" <> ${userId}
@@ -727,7 +763,7 @@ export class GroupsService {
   }
 
   private async ensureCanView(userId: string, groupId: string) {
-    const group = await this.prisma.group.findUniqueOrThrow({ where: { id: groupId }, select: { visibility: true, members: { where: { userId }, select: { userId: true } } } });
+    const group = await this.prisma.group.findFirstOrThrow({ where: { id: groupId, moderationStatus: 'active' }, select: { visibility: true, members: { where: { userId }, select: { userId: true } } } });
     if (group.visibility === 'private' && group.members.length === 0) throw new ForbiddenException('Join this private group by invite first');
   }
 
@@ -771,7 +807,9 @@ export class GroupsService {
   }
 
   private async ensureMember(userId: string, groupId: string) {
-    const member = await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
+    const member = await this.prisma.groupMember.findFirst({
+      where: { groupId, userId, group: { moderationStatus: 'active' } },
+    });
     if (!member) throw new ForbiddenException('Join the group first');
   }
 
@@ -866,8 +904,13 @@ export class GroupsService {
   }
 
   private presentGroupMessage(message: any) {
+    const presented = { ...message };
+    delete presented.moderationStatus;
+    delete presented.quarantinedAt;
+    delete presented.quarantinedById;
+    delete presented.quarantineReason;
     return {
-      ...message,
+      ...presented,
       reactions: (message.reactions ?? []).map((reaction: any) => ({
         emoji: reaction.emoji,
         userId: reaction.userId,
@@ -875,10 +918,15 @@ export class GroupsService {
     };
   }
 
-  private async messageReferenceData(groupId: string, channelId: string, dto: GroupMessageDto) {
+  private async messageReferenceData(
+    groupId: string,
+    channelId: string,
+    dto: GroupMessageDto,
+    client: Pick<Prisma.TransactionClient, 'message'> = this.prisma,
+  ) {
     if (dto.referenceType !== 'message' || !dto.referenceId) return {};
-    const target = await this.prisma.message.findUniqueOrThrow({
-      where: { id: dto.referenceId },
+    const target = await client.message.findUniqueOrThrow({
+      where: { id: dto.referenceId, moderationStatus: 'active' },
       select: {
         id: true,
         groupId: true,
@@ -889,7 +937,9 @@ export class GroupsService {
       },
     });
     if (target.groupId !== groupId || target.channelId !== channelId) throw new BadRequestException('Reply target is not in this channel.');
-    if (target.deletedAt) throw new BadRequestException('Reply target is no longer available.');
+    if (target.deletedAt) {
+      throw new BadRequestException('Reply target is no longer available.');
+    }
     return {
       referenceType: 'message',
       referenceId: target.id,
@@ -898,8 +948,26 @@ export class GroupsService {
     };
   }
 
+  private async lockActiveMessage(
+    client: Pick<Prisma.TransactionClient, '$queryRaw'>,
+    messageId: string,
+  ) {
+    const rows = await client.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id"
+      FROM "messages"
+      WHERE "id" = ${messageId}
+        AND "moderation_status" = 'active'::content_moderation_status
+      FOR UPDATE
+    `);
+    return rows.length > 0;
+  }
+
   private channelInclude() {
-    return { creator: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, allowedUsers: { select: { userId: true } }, _count: { select: { messages: true } } } as const;
+    return {
+      creator: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
+      allowedUsers: { select: { userId: true } },
+      _count: { select: { messages: { where: { moderationStatus: 'active' as const } } } },
+    } as const;
   }
 
   private accessibleChannelWhere(userId: string): Prisma.GroupChatChannelWhereInput {
@@ -914,6 +982,7 @@ export class GroupsService {
 
   private accessibleMessageWhere(userId: string): Prisma.MessageWhereInput {
     return {
+      moderationStatus: 'active',
       OR: [
         { channelId: null },
         { channel: { visibility: 'public' } },
@@ -1007,14 +1076,21 @@ export class GroupsService {
       _count: {
         select: {
           members: true,
-          messages: userId ? { where: this.accessibleMessageWhere(userId) } : true,
-          posts: true,
+          messages: userId
+            ? { where: this.accessibleMessageWhere(userId) }
+            : { where: { moderationStatus: 'active' as const } },
+          posts: { where: { moderationStatus: 'active' } },
           chatChannels: userId ? { where: this.accessibleChannelWhere(userId) } : true,
         },
       },
-      messages: { ...(userId ? { where: this.accessibleMessageWhere(userId) } : {}), take: 1, orderBy: { createdAt: 'desc' as const }, include: this.messageInclude() },
+      messages: {
+        where: userId ? this.accessibleMessageWhere(userId) : { moderationStatus: 'active' as const },
+        take: 1,
+        orderBy: { createdAt: 'desc' as const },
+        include: this.messageInclude(),
+      },
       chatChannels: { ...(userId ? { where: this.accessibleChannelWhere(userId) } : {}), orderBy: { createdAt: 'asc' as const }, include: this.channelInclude() },
-      posts: { take: 3, orderBy: { createdAt: 'desc' as const }, include: this.postInclude(userId) },
+      posts: { where: { moderationStatus: 'active' as const }, take: 3, orderBy: { createdAt: 'desc' as const }, include: this.postInclude(userId) },
       ...(withMembers ? {
         members: {
           select: {

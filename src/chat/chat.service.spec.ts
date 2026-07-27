@@ -81,6 +81,7 @@ describe('ChatService', () => {
       },
       groupMember: {
         findUnique: jest.fn(),
+        findFirst: jest.fn(),
       },
       groupChatChannel: {
         findUniqueOrThrow: jest.fn(),
@@ -351,6 +352,7 @@ describe('ChatService', () => {
 
   it('filters hidden messages and blocked senders from buddy-group summaries', async () => {
     const visibleMessageWhere = {
+      moderationStatus: 'active',
       hiddenBy: { none: { userId } },
       sender: {
         blocksSent: { none: { blockedId: userId } },
@@ -497,6 +499,7 @@ describe('ChatService', () => {
     expect(prisma.message.groupBy).toHaveBeenCalledWith({
       by: ['senderId'],
       where: {
+        moderationStatus: 'active',
         groupId: null,
         senderId: { in: ['peer-1', 'peer-2'] },
         recipientId: userId,
@@ -555,11 +558,17 @@ describe('ChatService', () => {
     await expect(service.markRead(userId, peerId)).resolves.toEqual({ count: 4, readAt: expect.any(Date), readCount: 0 });
 
     expect(prisma.message.updateMany).toHaveBeenCalledWith({
-      where: { senderId: peerId, recipientId: userId, readAt: null },
+      where: {
+        senderId: peerId,
+        recipientId: userId,
+        readAt: null,
+        moderationStatus: 'active',
+      },
       data: { readAt: expect.any(Date) },
     });
     expect(prisma.message.count).toHaveBeenCalledWith({
       where: {
+        moderationStatus: 'active',
         recipientId: userId,
         readAt: null,
         hiddenBy: { none: { userId } },
@@ -664,12 +673,12 @@ describe('ChatService', () => {
         body: 'group hello',
         reactions: [{ userId, emoji: '🔥' }],
       });
-    prisma.groupMember.findUnique.mockResolvedValueOnce({ userId });
+    prisma.groupMember.findFirst.mockResolvedValueOnce({ userId, role: 'member' });
 
     await service.react(userId, 'message-1', { emoji: '🔥' });
 
-    expect(prisma.groupMember.findUnique).toHaveBeenCalledWith({
-      where: { groupId_userId: { groupId: 'group-1', userId } },
+    expect(prisma.groupMember.findFirst).toHaveBeenCalledWith({
+      where: { groupId: 'group-1', userId, group: { moderationStatus: 'active' } },
       select: { role: true },
     });
     expect(notifications.create).toHaveBeenCalledWith({
@@ -710,7 +719,7 @@ describe('ChatService', () => {
     await service.unsendMessage(userId, 'message-1');
 
     expect(prisma.message.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'message-1' },
+      where: { id: 'message-1', moderationStatus: 'active' },
       data: expect.objectContaining({
         body: '',
         referenceType: null,
@@ -746,12 +755,12 @@ describe('ChatService', () => {
       recipientId: null,
       groupId: 'group-1',
     });
-    prisma.groupMember.findUnique.mockResolvedValueOnce({ userId });
+    prisma.groupMember.findFirst.mockResolvedValueOnce({ userId, role: 'member' });
 
     await service.unsendMessage(userId, 'message-1');
 
     expect(prisma.message.update).toHaveBeenCalledWith(expect.objectContaining({
-      where: { id: 'message-1' },
+      where: { id: 'message-1', moderationStatus: 'active' },
       data: expect.objectContaining({ body: '', deletedById: userId }),
     }));
   });
@@ -764,7 +773,7 @@ describe('ChatService', () => {
       groupId: 'group-1',
       channelId: 'private-channel-1',
     });
-    prisma.groupMember.findUnique.mockResolvedValueOnce({ role: 'member' });
+    prisma.groupMember.findFirst.mockResolvedValueOnce({ role: 'member' });
     prisma.groupChatChannel.findUniqueOrThrow.mockResolvedValueOnce({
       groupId: 'group-1',
       visibility: 'private',

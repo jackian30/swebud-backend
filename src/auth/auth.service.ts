@@ -17,9 +17,14 @@ import { normalizeUsername } from '../common/usernames';
 import * as appRelease from '../common/app-version';
 import { accessTokenTtlSeconds, DEFAULT_REFRESH_TOKEN_TTL_SECONDS, refreshTokenTtlSeconds } from '../common/config';
 import { isAccountBanned } from './account-status';
+import { EmailVerificationService } from './email-verification.service';
+import { assertExistingAccountMeetsAgePolicy, assertMeetsMinimumAccountAge } from '../common/account-age';
+import { minimumAccountAge } from '../common/config';
 
 export const SESSION_TTL_MS = DEFAULT_REFRESH_TOKEN_TTL_SECONDS * 1000;
 const RESET_TTL_MS = 1000 * 60 * 30;
+export const PASSWORD_RESET_MIN_RESPONSE_MS = 300;
+export const PASSWORD_RESET_RESPONSE_JITTER_MS = 50;
 
 type SafeUser = {
   id: string;
@@ -31,6 +36,7 @@ type SafeUser = {
   profileImageUrl?: string | null;
   gender?: string | null;
   dateOfBirth?: Date | null;
+  emailVerifiedAt?: Date | null;
   activityPersona?: string | null;
   activityPersonas?: Array<ActivityPersona | { persona: ActivityPersona }>;
   legalConsentAt?: Date | null;
@@ -67,6 +73,18 @@ export type SessionMetadata = {
 type TokenIssueOptions = {
   metadata?: SessionMetadata;
   loginSessionId?: string | null;
+  expectedPasswordHash?: string;
+  expectedEmail?: string;
+  expectedGoogleId?: string;
+  rotateRefreshTokenId?: string;
+  requireExistingLoginSession?: boolean;
+};
+
+type LockedTokenIssueUser = {
+  id: string;
+  passwordHash: string;
+  email: string;
+  googleId: string | null;
 };
 
 @Injectable()
@@ -80,7 +98,12 @@ export class AuthService {
     private mail: MailService,
     private notifications: NotificationsService,
     private turnstile: TurnstileService,
+    private emailVerification: EmailVerificationService = null!,
   ) {}
+
+  policy() {
+    return { minimumAccountAge: minimumAccountAge(this.config) };
+  }
 
   async register(dto: RegisterDto, metadata?: SessionMetadata) {
     await this.turnstile.verify(dto.captchaToken, metadata?.ipAddress ?? undefined, 'signup', metadata?.origin, {
@@ -88,6 +111,7 @@ export class AuthService {
     });
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
     if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
+    assertMeetsMinimumAccountAge(dto.dateOfBirth, this.config);
 
     const email = dto.email.toLowerCase().trim();
     const username = normalizeUsername(dto.username);
@@ -114,7 +138,9 @@ export class AuthService {
       select: this.safeUserSelect(),
     }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
-    void this.mail.sendWelcomeEmail({ to: user.email, displayName: user.displayName });
+    void this.emailVerification?.sendForNewAccount(user.id).catch((error) => {
+      this.logger.warn(`Initial verification email dispatch failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    });
     return this.issueTokens(user, { metadata });
   }
 
@@ -136,7 +162,11 @@ export class AuthService {
     this.assertAccountAllowed(user);
     const activeSessions = await this.prisma.loginSession.count({ where: { userId: user.id, revokedAt: null, expiresAt: { gt: new Date() } } });
     const safeUser = Object.fromEntries(Object.entries(user).filter(([key]) => key !== 'passwordHash')) as unknown as SafeUser;
-    const tokens = await this.issueTokens(safeUser, { metadata });
+    const tokens = await this.issueTokens(safeUser, {
+      metadata,
+      expectedPasswordHash: user.passwordHash,
+      expectedEmail: user.email,
+    });
     if (activeSessions > 0) void this.notifications.create({ userId: user.id, actorId: user.id, type: 'login', message: 'New login detected on another device.' } as any);
     return tokens;
   }
@@ -147,6 +177,7 @@ export class AuthService {
     const googleEmailVerified = profile.email_verified === true || profile.email_verified === 'true';
     if (!googleEmailVerified) throw new UnauthorizedException('Google email is not verified');
     const existing = await this.prisma.user.findUnique({ where: { googleId: profile.sub }, select: this.safeUserSelect() });
+    if (existing) this.assertAccountAllowed(existing);
 
     if (!existing) {
       const emailOwner = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
@@ -156,16 +187,63 @@ export class AuthService {
     }
 
     const user = existing
-      ? await this.prisma.user.update({
-        where: { id: existing.id },
-        data: { googleId: profile.sub, googleEmailVerified, verified: googleEmailVerified || undefined, displayName: existing.displayName ?? profile.name ?? null, profileImageUrl: profile.picture ?? undefined },
-        select: this.safeUserSelect(),
-      })
+      ? await this.prisma.$transaction(async (tx) => {
+          const locked = await tx.$queryRaw<{
+            id: string;
+            email: string;
+            googleId: string | null;
+          }[]>(Prisma.sql`
+            SELECT
+              "id",
+              "email",
+              "google_id" AS "googleId"
+            FROM "users"
+            WHERE "id" = ${existing.id}
+            FOR UPDATE
+          `);
+          const current = locked[0];
+          if (!current || current.googleId !== profile.sub) {
+            throw new UnauthorizedException('Google sign-in is no longer linked to this account');
+          }
+          const currentUser = await tx.user.findUnique({
+            where: { id: current.id },
+            select: this.safeUserSelect(),
+          });
+          if (!currentUser) {
+            throw new UnauthorizedException('Google sign-in is no longer linked to this account');
+          }
+          this.assertAccountAllowed(currentUser);
+          const googleEmailMatchesCurrentEmail = current.email.toLowerCase().trim() === email;
+          if (!googleEmailMatchesCurrentEmail) {
+            const emailOwner = await tx.user.findUnique({
+              where: { email },
+              select: { id: true },
+            });
+            if (emailOwner && emailOwner.id !== current.id) {
+              throw new UnauthorizedException('Google sign-in email conflicts with another account. Use an existing sign-in method.');
+            }
+          }
+          return tx.user.update({
+            where: { id: current.id },
+            data: {
+              googleId: profile.sub,
+              googleEmailVerified: googleEmailMatchesCurrentEmail,
+              emailVerifiedAt: googleEmailMatchesCurrentEmail
+                ? currentUser.emailVerifiedAt ?? new Date()
+                : currentUser.emailVerifiedAt ?? null,
+              verified: googleEmailMatchesCurrentEmail || undefined,
+              displayName: currentUser.displayName ?? profile.name ?? null,
+              profileImageUrl: profile.picture ?? undefined,
+            },
+            select: this.safeUserSelect(),
+          });
+        })
       : await this.prisma.$transaction(async (tx) => tx.user.create({
         data: await this.userCreateData(tx, {
           email,
           googleId: profile.sub,
           googleEmailVerified,
+          emailVerifiedAt: googleEmailVerified ? new Date() : undefined,
           verified: googleEmailVerified,
           passwordHash: await bcrypt.hash(randomBytes(32).toString('hex'), 12),
           displayName: profile.name ?? email.split('@')[0],
@@ -178,7 +256,11 @@ export class AuthService {
       }), { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     this.assertAccountAllowed(user);
-    return this.issueTokens(user, { metadata });
+    return this.issueTokens(user, {
+      metadata,
+      expectedEmail: user.email,
+      expectedGoogleId: profile.sub,
+    });
   }
 
   async completeOnboarding(
@@ -189,6 +271,7 @@ export class AuthService {
     currentSessionId?: string | null,
   ) {
     if (!dto.legalConsent || !dto.dataConsent) throw new BadRequestException('Legal and data consent are required');
+    assertMeetsMinimumAccountAge(dto.dateOfBirth, this.config);
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException('Username is required');
     const existing = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
@@ -197,18 +280,26 @@ export class AuthService {
     const activityPersonas = dto.activityPersonas ?? [];
     if (!currentSessionId) throw new UnauthorizedException('Session expired');
     const user = await this.prisma.$transaction(async (tx) => {
-      const updated = await tx.user.update({
-        where: { id: userId },
-        data: {
-          username,
-          usernameFinalized: true,
-          dateOfBirth: dto.dateOfBirth,
-          legalConsentAt: now,
-          dataConsentAt: now,
-          activityPersonas: replaceActivityPersonaLinks(activityPersonas),
-        },
-        select: this.safeUserSelect(),
-      });
+      let updated: SafeUser;
+      try {
+        updated = await tx.user.update({
+          where: { id: userId, dateOfBirth: null },
+          data: {
+            username,
+            usernameFinalized: true,
+            dateOfBirth: dto.dateOfBirth,
+            legalConsentAt: now,
+            dataConsentAt: now,
+            activityPersonas: replaceActivityPersonaLinks(activityPersonas),
+          },
+          select: this.safeUserSelect(),
+        });
+      } catch (error) {
+        if (this.isNotFoundError(error)) {
+          throw new BadRequestException('Onboarding is already complete; contact support to correct account details');
+        }
+        throw error;
+      }
       const revoked = await tx.refreshToken.updateMany({
         where: { id: currentSessionId, userId, revokedAt: null },
         data: { revokedAt: now },
@@ -216,7 +307,11 @@ export class AuthService {
       if (revoked.count !== 1) throw new UnauthorizedException('Session expired');
       return updated;
     });
-    return this.issueTokens(user, { metadata, loginSessionId });
+    return this.issueTokens(user, {
+      metadata,
+      loginSessionId,
+      requireExistingLoginSession: Boolean(loginSessionId),
+    });
   }
 
   async refresh(refreshToken: string, metadata?: SessionMetadata) {
@@ -231,36 +326,74 @@ export class AuthService {
     const match = await this.findMatchingToken(storedTokens, refreshToken);
     if (!match) throw new UnauthorizedException('Invalid refresh token');
 
-    const rotated = await this.prisma.refreshToken.updateMany({
-      where: { id: match.id, userId: payload.sub, revokedAt: null, expiresAt: { gt: new Date() } },
-      data: { revokedAt: new Date() },
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: payload.sub },
+      select: this.safeUserSelect(),
     });
-    if (rotated.count !== 1) throw new UnauthorizedException('Invalid refresh token');
-    const user = await this.prisma.user.findUniqueOrThrow({ where: { id: payload.sub }, select: this.safeUserSelect() });
     this.assertAccountAllowed(user);
-    return this.issueTokens(user, { metadata, loginSessionId: match.loginSessionId ?? payload.lid ?? null });
+    const loginSessionId = match.loginSessionId ?? payload.lid ?? null;
+    return this.issueTokens(user, {
+      metadata,
+      loginSessionId,
+      rotateRefreshTokenId: match.id,
+      requireExistingLoginSession: Boolean(loginSessionId),
+    });
   }
 
   async forgotPassword(emailInput: string) {
+    const startedAt = Date.now();
+    const responseFloorMs = PASSWORD_RESET_MIN_RESPONSE_MS
+      + randomBytes(2).readUInt16BE(0) % (PASSWORD_RESET_RESPONSE_JITTER_MS + 1);
     const email = emailInput.toLowerCase().trim();
-    const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true, email: true } });
-    if (!user) return { ok: true };
+    try {
+      const user = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
+      if (!user) return { ok: true };
 
-    const selector = randomBytes(16).toString('hex');
-    const secret = randomBytes(32).toString('hex');
-    const token = `${selector}.${secret}`;
-    await this.prisma.passwordResetToken.updateMany({
-      where: { userId: user.id, usedAt: null, expiresAt: { gt: new Date() } },
-      data: { usedAt: new Date() },
-    });
-    await this.prisma.passwordResetToken.create({
-      data: { id: selector, userId: user.id, tokenHash: await bcrypt.hash(secret, 12), expiresAt: new Date(Date.now() + RESET_TTL_MS) },
-    });
+      const selector = randomBytes(16).toString('hex');
+      const secret = randomBytes(32).toString('hex');
+      const tokenHash = await bcrypt.hash(secret, 12);
+      const issuedAt = new Date();
+      const expiresAt = new Date(issuedAt.getTime() + RESET_TTL_MS);
+      const recipient = await this.prisma.$transaction(async (tx) => {
+        const locked = await tx.$queryRaw<{ id: string; email: string }[]>(Prisma.sql`
+          SELECT "id", "email"
+          FROM "users"
+          WHERE "id" = ${user.id}
+          FOR UPDATE
+        `);
+        const current = locked[0];
+        if (!current || current.email !== email) return null;
 
-    const origin = allowedOrigins(this.config)[0] ?? 'http://localhost:9000';
-    void this.mail.sendPasswordResetEmail({ to: user.email, resetUrl: `${origin}/auth?mode=reset&token=${token}` })
-      .catch((error) => this.logger.warn(`Password reset email dispatch failed: ${error instanceof Error ? error.message : 'unknown error'}`));
-    return { ok: true };
+        await tx.passwordResetToken.updateMany({
+          where: { userId: current.id, usedAt: null },
+          data: { usedAt: issuedAt },
+        });
+        await tx.passwordResetToken.create({
+          data: {
+            id: selector,
+            userId: current.id,
+            tokenHash,
+            expiresAt,
+          },
+        });
+        return current;
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+      if (recipient) {
+        const token = `${selector}.${secret}`;
+        const origin = allowedOrigins(this.config)[0] ?? 'http://localhost:9000';
+        void this.mail.sendPasswordResetEmail({
+            to: recipient.email,
+            resetUrl: `${origin}/auth?mode=reset&token=${token}`,
+          })
+          .catch((error) => this.logger.warn(`Password reset email dispatch failed: ${error instanceof Error ? error.message : 'unknown error'}`));
+      }
+      return { ok: true };
+    } finally {
+      const remainingMs = responseFloorMs - (Date.now() - startedAt);
+      if (remainingMs > 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, remainingMs));
+      }
+    }
   }
 
   async resetPassword(token: string, password: string) {
@@ -273,16 +406,43 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(password, 12);
     await this.prisma.$transaction(async (tx) => {
+      const lockedUser = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+        SELECT "id"
+        FROM "users"
+        WHERE "id" = ${match.userId}
+        FOR UPDATE
+      `);
+      if (lockedUser.length !== 1) throw new BadRequestException('Invalid or expired reset token');
+
+      const resetAt = new Date();
       const claimed = await tx.passwordResetToken.updateMany({
-        where: { id: match.id, usedAt: null, expiresAt: { gt: new Date() } },
-        data: { usedAt: new Date() },
+        where: { id: match.id, usedAt: null, expiresAt: { gt: resetAt } },
+        data: { usedAt: resetAt },
       });
       if (claimed.count !== 1) throw new BadRequestException('Invalid or expired reset token');
       await tx.user.update({ where: { id: match.userId }, data: { passwordHash } });
-      await tx.refreshToken.updateMany({ where: { userId: match.userId, revokedAt: null }, data: { revokedAt: new Date() } });
-      await tx.loginSession.updateMany({ where: { userId: match.userId, revokedAt: null }, data: { revokedAt: new Date() } });
+      await tx.passwordResetToken.updateMany({
+        where: { userId: match.userId, id: { not: match.id }, usedAt: null },
+        data: { usedAt: resetAt },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId: match.userId, revokedAt: null },
+        data: { revokedAt: resetAt },
+      });
+      await tx.loginSession.updateMany({
+        where: { userId: match.userId, revokedAt: null },
+        data: { revokedAt: resetAt },
+      });
     });
     return { ok: true };
+  }
+
+  verifyEmail(token: string) {
+    return this.emailVerification.verify(token);
+  }
+
+  resendEmailVerification(email?: string) {
+    return this.emailVerification.resend(email);
   }
 
   async logout(userId: string, refreshToken?: string, currentLoginSessionId?: string | null) {
@@ -291,43 +451,122 @@ export class AuthService {
         await this.revokeLoginSession(userId, currentLoginSessionId);
         return;
       }
-      await this.prisma.$transaction([
-        this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-        this.prisma.loginSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-      ]);
+      await this.prisma.$transaction(async (tx) => {
+        if (!(await this.lockUserForSessionMutation(tx, userId))) return;
+        const revokedAt = new Date();
+        await tx.refreshToken.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt },
+        });
+        await tx.loginSession.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt },
+        });
+      });
       return;
     }
     const storedTokens = await this.prisma.refreshToken.findMany({ where: { userId, revokedAt: null } });
     const match = await this.findMatchingToken(storedTokens, refreshToken);
     if (!match) return;
     if (match.loginSessionId) await this.revokeLoginSession(userId, match.loginSessionId);
-    else await this.prisma.refreshToken.update({ where: { id: match.id }, data: { revokedAt: new Date() } });
+    else await this.revokeRefreshToken(userId, match.id);
   }
 
   private async issueTokens(user: SafeUser, options: TokenIssueOptions = {}) {
-    const onboarding = this.onboardingStatus(user);
-    const sessionId = randomBytes(16).toString('hex');
-    const refreshTtlSeconds = refreshTokenTtlSeconds(this.config);
-    const expiresAt = new Date(Date.now() + refreshTtlSeconds * 1000);
-    const loginSessionId = await this.ensureLoginSession(user.id, expiresAt, options);
-    const tokenPayload = { sub: user.id, sid: sessionId, lid: loginSessionId, onboarded: !onboarding.requiresOnboarding };
-    const accessToken = await this.jwt.signAsync(tokenPayload, { secret: this.accessSecret(), expiresIn: accessTokenTtlSeconds(this.config) });
-    const refreshToken = await this.jwt.signAsync(tokenPayload, { secret: this.refreshSecret(), expiresIn: refreshTtlSeconds });
-    await this.prisma.refreshToken.create({
-      data: {
-        id: sessionId,
-        userId: user.id,
-        loginSessionId,
-        tokenHash: await bcrypt.hash(refreshToken, 12),
+    return this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<LockedTokenIssueUser[]>(Prisma.sql`
+        SELECT
+          "id",
+          "password_hash" AS "passwordHash",
+          "email",
+          "google_id" AS "googleId"
+        FROM "users"
+        WHERE "id" = ${user.id}
+        FOR UPDATE
+      `);
+      const current = locked[0];
+      if (!current) throw new UnauthorizedException('Account is no longer available');
+      if (
+        options.expectedPasswordHash !== undefined
+        && current.passwordHash !== options.expectedPasswordHash
+      ) {
+        throw new UnauthorizedException('Account credentials changed; sign in again');
+      }
+      if (
+        options.expectedEmail !== undefined
+        && current.email !== options.expectedEmail
+      ) {
+        throw new UnauthorizedException('Account identity changed; sign in again');
+      }
+      if (
+        options.expectedGoogleId !== undefined
+        && current.googleId !== options.expectedGoogleId
+      ) {
+        throw new UnauthorizedException('Google sign-in is no longer linked to this account');
+      }
+
+      const currentUser = await tx.user.findUnique({
+        where: { id: user.id },
+        select: this.safeUserSelect(),
+      });
+      if (!currentUser) throw new UnauthorizedException('Account is no longer available');
+      this.assertAccountAllowed(currentUser);
+
+      const now = new Date();
+      if (options.rotateRefreshTokenId) {
+        const rotated = await tx.refreshToken.updateMany({
+          where: {
+            id: options.rotateRefreshTokenId,
+            userId: currentUser.id,
+            revokedAt: null,
+            expiresAt: { gt: now },
+          },
+          data: { revokedAt: now },
+        });
+        if (rotated.count !== 1) throw new UnauthorizedException('Invalid refresh token');
+      }
+
+      const onboarding = this.onboardingStatus(currentUser);
+      const sessionId = randomBytes(16).toString('hex');
+      const refreshTtl = refreshTokenTtlSeconds(this.config);
+      const expiresAt = new Date(now.getTime() + refreshTtl * 1000);
+      const loginSessionId = await this.ensureLoginSession(
+        tx,
+        currentUser.id,
         expiresAt,
-      },
+        options,
+        now,
+      );
+      const tokenPayload = {
+        sub: currentUser.id,
+        sid: sessionId,
+        lid: loginSessionId,
+        onboarded: !onboarding.requiresOnboarding,
+      };
+      const accessToken = await this.jwt.signAsync(tokenPayload, {
+        secret: this.accessSecret(),
+        expiresIn: accessTokenTtlSeconds(this.config),
+      });
+      const refreshToken = await this.jwt.signAsync(tokenPayload, {
+        secret: this.refreshSecret(),
+        expiresIn: refreshTtl,
+      });
+      await tx.refreshToken.create({
+        data: {
+          id: sessionId,
+          userId: currentUser.id,
+          loginSessionId,
+          tokenHash: await bcrypt.hash(refreshToken, 12),
+          expiresAt,
+        },
+      });
+      return {
+        user: this.presentAuthUser(currentUser, onboarding),
+        accessToken,
+        refreshToken,
+        ...onboarding,
+      };
     });
-    return {
-      user: this.presentAuthUser(user, onboarding),
-      accessToken,
-      refreshToken,
-      ...onboarding,
-    };
   }
 
   private presentAuthUser(user: SafeUser, onboarding: ReturnType<AuthService['onboardingStatus']>) {
@@ -342,6 +581,7 @@ export class AuthService {
       profileImageUrl: normalizedUser.profileImageUrl,
       gender: normalizedUser.gender,
       dateOfBirth: normalizedUser.dateOfBirth,
+      emailVerified: Boolean(normalizedUser.emailVerifiedAt),
       activityPersona: normalizedUser.activityPersona,
       activityPersonas: normalizedUser.activityPersonas,
       hideProfileBadges: normalizedUser.hideProfileBadges,
@@ -350,16 +590,30 @@ export class AuthService {
     };
   }
 
-  private async ensureLoginSession(userId: string, expiresAt: Date, options: TokenIssueOptions) {
+  private async ensureLoginSession(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    expiresAt: Date,
+    options: TokenIssueOptions,
+    now: Date,
+  ) {
     if (options.loginSessionId) {
-      const updated = await this.prisma.loginSession.updateMany({
-        where: { id: options.loginSessionId, userId, revokedAt: null },
+      const updated = await tx.loginSession.updateMany({
+        where: {
+          id: options.loginSessionId,
+          userId,
+          revokedAt: null,
+          ...(options.requireExistingLoginSession ? { expiresAt: { gt: now } } : {}),
+        },
         data: { expiresAt, ...sessionMetadataUpdateData(options.metadata) },
       });
       if (updated.count > 0) return options.loginSessionId;
+      if (options.requireExistingLoginSession) {
+        throw new UnauthorizedException('Session expired');
+      }
     }
 
-    const session = await this.prisma.loginSession.create({
+    const session = await tx.loginSession.create({
       data: {
         userId,
         expiresAt,
@@ -371,11 +625,38 @@ export class AuthService {
   }
 
   private async revokeLoginSession(userId: string, loginSessionId: string) {
-    const revokedAt = new Date();
-    await this.prisma.$transaction([
-      this.prisma.loginSession.updateMany({ where: { id: loginSessionId, userId }, data: { revokedAt } }),
-      this.prisma.refreshToken.updateMany({ where: { userId, loginSessionId, revokedAt: null }, data: { revokedAt } }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      if (!(await this.lockUserForSessionMutation(tx, userId))) return;
+      const revokedAt = new Date();
+      await tx.loginSession.updateMany({
+        where: { id: loginSessionId, userId },
+        data: { revokedAt },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId, loginSessionId, revokedAt: null },
+        data: { revokedAt },
+      });
+    });
+  }
+
+  private async revokeRefreshToken(userId: string, refreshTokenId: string) {
+    await this.prisma.$transaction(async (tx) => {
+      if (!(await this.lockUserForSessionMutation(tx, userId))) return;
+      await tx.refreshToken.updateMany({
+        where: { id: refreshTokenId, userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    });
+  }
+
+  private async lockUserForSessionMutation(tx: Prisma.TransactionClient, userId: string) {
+    const locked = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id"
+      FROM "users"
+      WHERE "id" = ${userId}
+      FOR UPDATE
+    `);
+    return locked.length === 1;
   }
 
   private onboardingStatus(user: SafeUser) {
@@ -392,10 +673,16 @@ export class AuthService {
     if (this.isBanned(user)) {
       throw new UnauthorizedException(user.banReason ? `Account banned: ${user.banReason}` : 'Account banned');
     }
+    assertExistingAccountMeetsAgePolicy(user.dateOfBirth, this.config);
   }
 
   private isBanned(user: SafeUser) {
     return isAccountBanned(user);
+  }
+
+  private isNotFoundError(error: unknown) {
+    return typeof error === 'object' && error !== null && 'code' in error
+      && (error as { code?: string }).code === 'P2025';
   }
 
   private async verifyGoogleIdToken(idToken: string): Promise<GoogleTokenInfo> {
@@ -449,7 +736,7 @@ export class AuthService {
       badges: betaUser ? { create: { badge: { connect: { id: 'badge_beta_user' } }, note: 'Auto-assigned during beta release' } } : undefined,
     };
   }
-  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, betaUser: true, hideProfileBadges: true, moderationStatus: true, bannedAt: true, bannedUntil: true, banReason: true, badges: { select: profileBadgeSelect } } as const; }
+  private safeUserSelect() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, gender: true, dateOfBirth: true, emailVerifiedAt: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, betaUser: true, hideProfileBadges: true, moderationStatus: true, bannedAt: true, bannedUntil: true, banReason: true, badges: { select: profileBadgeSelect } } as const; }
 }
 
 export function sessionMetadataFromRequest(req: Request): SessionMetadata {

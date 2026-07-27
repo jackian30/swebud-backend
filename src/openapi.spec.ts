@@ -4,6 +4,7 @@ import { join } from 'path';
 import { assertValidOpenApiDocument, openApiSetupOptions } from './openapi';
 import { assertNoDuplicateContractSchemas, CLIENT_RESPONSE_SCHEMAS } from './openapi.contract';
 import { FRONTEND_OPERATION_CONTRACTS } from './openapi.operations';
+import { ADMIN_MODERATION_OPERATION_SCOPES } from './admin-moderation/admin-openapi-scopes';
 
 function artifact(): OpenAPIObject {
   return JSON.parse(readFileSync(join(process.cwd(), 'openapi/v1/openapi.json'), 'utf8')) as OpenAPIObject;
@@ -48,11 +49,24 @@ describe('OpenAPI runtime exposure', () => {
   it('covers the complete frontend operation inventory without duplicates, including every upload helper', () => {
     const keys = FRONTEND_OPERATION_CONTRACTS.map((contract) => `${contract.method.toUpperCase()} ${contract.path}`);
     const uploadContracts = FRONTEND_OPERATION_CONTRACTS.filter((contract) => contract.path.startsWith('/uploads/'));
+    const legacyUploadContracts = uploadContracts.filter((contract) => !contract.path.startsWith('/uploads/v2/'));
+    const uploadV2Keys = uploadContracts
+      .filter((contract) => contract.path.startsWith('/uploads/v2/'))
+      .map((contract) => `${contract.method.toUpperCase()} ${contract.path}`);
 
-    expect(FRONTEND_OPERATION_CONTRACTS).toHaveLength(185);
-    expect(new Set(keys)).toHaveProperty('size', 185);
-    expect(uploadContracts).toHaveLength(10);
-    expect(uploadContracts.every((contract) => contract.request?.mediaType === 'multipart/form-data')).toBe(true);
+    expect(FRONTEND_OPERATION_CONTRACTS).toHaveLength(194);
+    expect(new Set(keys)).toHaveProperty('size', 194);
+    expect(uploadContracts).toHaveLength(16);
+    expect(legacyUploadContracts).toHaveLength(10);
+    expect(legacyUploadContracts.every((contract) => contract.request?.mediaType === 'multipart/form-data')).toBe(true);
+    expect(new Set(uploadV2Keys)).toEqual(new Set([
+      'POST /uploads/v2/sessions',
+      'POST /uploads/v2/sessions/{sessionId}/parts',
+      'GET /uploads/v2/sessions/{sessionId}/parts',
+      'POST /uploads/v2/sessions/{sessionId}/complete',
+      'GET /uploads/v2/sessions/{sessionId}',
+      'DELETE /uploads/v2/sessions/{sessionId}',
+    ]));
     expect(() => assertValidOpenApiDocument(artifact())).not.toThrow();
   });
 
@@ -131,7 +145,7 @@ describe('OpenAPI runtime exposure', () => {
         if (!operation) continue;
         for (const parameter of operation.parameters ?? []) {
           if ('$ref' in parameter || parameter.in !== 'path') continue;
-          if (['slug', 'provider', 'code'].includes(parameter.name)) continue;
+          if (['slug', 'provider', 'code', 'type'].includes(parameter.name)) continue;
           if (path.startsWith('/users/{id}') && parameter.name === 'id') continue;
           expect(parameter.schema).toEqual(expect.objectContaining({ type: 'string', format: 'uuid' }));
         }
@@ -145,6 +159,11 @@ describe('OpenAPI runtime exposure', () => {
       name: 'provider',
       schema: expect.objectContaining({ enum: ['strava', 'garmin'] }),
     }));
+    expect(document.paths['/admin/moderation/v1/reports/{type}/{id}']?.patch?.parameters)
+      .toContainEqual(expect.objectContaining({
+        name: 'type',
+        schema: expect.objectContaining({ enum: ['post', 'user', 'group', 'message'] }),
+      }));
     for (const operation of [
       document.paths['/users/{id}']?.get,
       document.paths['/users/{id}/followers']?.get,
@@ -158,10 +177,75 @@ describe('OpenAPI runtime exposure', () => {
     }
   });
 
+  it('publishes each moderation operation with its exact scope, admin bearer, and mutation headers', () => {
+    const document = artifact();
+    for (const [key, scope] of Object.entries(ADMIN_MODERATION_OPERATION_SCOPES)) {
+      const [method, path] = key.split(' ', 2);
+      const operation = document.paths[path]?.[method.toLowerCase() as 'get' | 'post' | 'patch'];
+      expect(operation).toEqual(expect.objectContaining({
+        security: [{ adminBearer: [] }],
+        'x-required-scope': scope,
+      }));
+      if (method === 'GET') continue;
+      for (const name of ['X-Request-ID', 'Idempotency-Key']) {
+        expect(operation?.parameters).toContainEqual(expect.objectContaining({
+          in: 'header',
+          name,
+          required: true,
+        }));
+      }
+    }
+    const revokeSessions = document.paths['/admin/moderation/v1/users/{id}/revoke-sessions']?.post;
+    expect(revokeSessions?.operationId).toBe('AdminModerationController_revokeUserSessions');
+    expect(revokeSessions?.requestBody).toEqual(expect.objectContaining({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/RevokeAdminUserSessionsDto' },
+        },
+      },
+    }));
+    expect(revokeSessions?.responses['200']).toEqual(expect.objectContaining({
+      content: {
+        'application/json': {
+          schema: { $ref: '#/components/schemas/AdminUserSessionRevocationResponse' },
+        },
+      },
+    }));
+  });
+
   it('fails fast when two schema registries claim the same component name', () => {
     expect(() => assertNoDuplicateContractSchemas(
       { DuplicateResponse: { type: 'object', properties: { id: { type: 'string' } } } },
       { DuplicateResponse: { type: 'object', properties: { value: { type: 'string' } } } },
     )).toThrow(/one owner; duplicate names: DuplicateResponse/);
+  });
+
+  it('publishes exact signed upload headers and a satisfiable flattened progress response', () => {
+    const document = artifact();
+    const partUrl = document.components?.schemas?.UploadV2PartUrlResponse;
+    const progress = document.components?.schemas?.UploadV2ProgressResponse;
+    if (!partUrl || '$ref' in partUrl || !partUrl.properties) throw new Error('Upload part URL schema missing');
+    const headers = partUrl.properties.requiredHeaders;
+    if (!headers || '$ref' in headers) throw new Error('Upload required headers schema missing');
+    expect(headers.required).toEqual([
+      'x-amz-checksum-sha256',
+      'content-length',
+    ]);
+    expect(headers.properties?.['content-length']).toEqual(expect.objectContaining({
+      type: 'string',
+      pattern: '^[1-9][0-9]*$',
+    }));
+
+    expect(progress && !('$ref' in progress) ? progress : null).toEqual(expect.objectContaining({
+      type: 'object',
+      additionalProperties: false,
+      required: expect.arrayContaining(['id', 'status', 'progress']),
+      properties: expect.objectContaining({
+        id: expect.any(Object),
+        status: expect.any(Object),
+        progress: { $ref: '#/components/schemas/UploadV2ProgressDetailResponse' },
+      }),
+    }));
+    expect(progress && !('$ref' in progress) ? progress.allOf : undefined).toBeUndefined();
   });
 });

@@ -90,4 +90,32 @@ export class MailService {
       this.logger.warn(`Password reset email failed: ${error instanceof Error ? error.message : 'unknown error'}`);
     }
   }
+
+  async sendEmailVerificationEmail(input: { to: string; displayName?: string | null; verificationUrl: string }) {
+    const from = this.config.get<string>('MAIL_FROM') ?? 'SweBudd <no-reply@localhost>';
+    const name = input.displayName?.trim() || input.to.split('@')[0];
+    const safeName = escapeHtml(name);
+    const safeUrl = escapeHtml(input.verificationUrl);
+
+    try {
+      await this.transporter.sendMail({
+        from,
+        to: input.to,
+        subject: 'Verify your SweBudd email',
+        text: `Hey ${name}, verify your SweBudd email: ${input.verificationUrl}`,
+        html: `<p>Hey ${safeName}, verify your SweBudd email to unlock posting, chat, groups, and uploads.</p><p><a href="${safeUrl}">Verify email</a></p>`,
+      });
+    } catch (error) {
+      this.logger.warn(`Email verification failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }

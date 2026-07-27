@@ -67,6 +67,1554 @@
         "security": []
       }
     },
+    "/admin/moderation/v1/reports": {
+      "get": {
+        "operationId": "AdminModerationController_reports",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "open",
+                "reviewing",
+                "resolved",
+                "dismissed"
+              ]
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "spam",
+                "harassment",
+                "hate",
+                "sexual_content",
+                "violence",
+                "self_harm",
+                "scam",
+                "privacy",
+                "impersonation",
+                "illegal_activity",
+                "other"
+              ]
+            }
+          },
+          {
+            "name": "assignedReviewerId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 128
+            }
+          },
+          {
+            "name": "escalated",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "overdue",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "take",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportQueueResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:reports:read"
+      }
+    },
+    "/admin/moderation/v1/reports/{type}/{id}/notes": {
+      "get": {
+        "operationId": "AdminModerationController_internalNotes",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportInternalNoteListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:reports:notes:read"
+      },
+      "post": {
+        "operationId": "AdminModerationController_addInternalNote",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddAdminReportNoteDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportInternalNoteResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:reports:notes"
+      }
+    },
+    "/admin/moderation/v1/reports/{type}/{id}/appeals": {
+      "get": {
+        "operationId": "AdminModerationController_appeals",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportAppealListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:appeals:read"
+      },
+      "post": {
+        "operationId": "AdminModerationController_createAppeal",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdminAppealDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportAppealResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:appeals:write"
+      }
+    },
+    "/admin/moderation/v1/reports/{type}/{id}/evidence": {
+      "get": {
+        "operationId": "AdminModerationController_evidence",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportEvidenceListResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:evidence:read"
+      },
+      "post": {
+        "operationId": "AdminModerationController_createEvidence",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAdminEvidenceDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportEvidenceResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:evidence:write"
+      }
+    },
+    "/admin/moderation/v1/reports/{type}/{id}": {
+      "patch": {
+        "operationId": "AdminModerationController_updateReport",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdminReportDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:reports:resolve"
+      }
+    },
+    "/admin/moderation/v1/reports/{type}/{id}/assignment": {
+      "patch": {
+        "operationId": "AdminModerationController_assignReport",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignAdminReportDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:reports:assign"
+      }
+    },
+    "/admin/moderation/v1/reports/{type}/{id}/escalations": {
+      "post": {
+        "operationId": "AdminModerationController_escalateReport",
+        "parameters": [
+          {
+            "name": "type",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "post",
+                "user",
+                "group",
+                "message"
+              ]
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EscalateAdminReportDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:reports:escalate"
+      }
+    },
+    "/admin/moderation/v1/appeals/{id}": {
+      "patch": {
+        "operationId": "AdminModerationController_reviewAppeal",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewAdminAppealDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportAppealResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:appeals:write"
+      }
+    },
+    "/admin/moderation/v1/evidence/{id}/retention": {
+      "patch": {
+        "operationId": "AdminModerationController_updateEvidenceRetention",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAdminEvidenceRetentionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminReportEvidenceResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:evidence:retention"
+      }
+    },
+    "/admin/moderation/v1/users/{id}/ban": {
+      "post": {
+        "operationId": "AdminModerationController_banUser",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BanAdminUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserModerationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:users:ban"
+      }
+    },
+    "/admin/moderation/v1/users/{id}/unban": {
+      "post": {
+        "operationId": "AdminModerationController_unbanUser",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UnbanAdminUserDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserModerationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:users:ban"
+      }
+    },
+    "/admin/moderation/v1/users/{id}/revoke-sessions": {
+      "post": {
+        "operationId": "AdminModerationController_revokeUserSessions",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeAdminUserSessionsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserSessionRevocationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:users:sessions:revoke"
+      }
+    },
+    "/admin/moderation/v1/posts/{id}/quarantine": {
+      "post": {
+        "operationId": "AdminModerationController_quarantinePost",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuarantineAdminContentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPostModerationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:content:write"
+      }
+    },
+    "/admin/moderation/v1/posts/{id}/restore": {
+      "post": {
+        "operationId": "AdminModerationController_restorePost",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreAdminContentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPostModerationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:content:write"
+      }
+    },
+    "/admin/moderation/v1/groups/{id}/quarantine": {
+      "post": {
+        "operationId": "AdminModerationController_quarantineGroup",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuarantineAdminContentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminGroupModerationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:content:write"
+      }
+    },
+    "/admin/moderation/v1/groups/{id}/restore": {
+      "post": {
+        "operationId": "AdminModerationController_restoreGroup",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreAdminContentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminGroupModerationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:content:write"
+      }
+    },
+    "/admin/moderation/v1/messages/{id}/quarantine": {
+      "post": {
+        "operationId": "AdminModerationController_quarantineMessage",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuarantineAdminContentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMessageModerationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:content:write"
+      }
+    },
+    "/admin/moderation/v1/messages/{id}/restore": {
+      "post": {
+        "operationId": "AdminModerationController_restoreMessage",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "X-Request-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreAdminContentDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminMessageModerationResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "adminBearer": []
+          }
+        ],
+        "tags": [
+          "Admin moderation"
+        ],
+        "x-required-scope": "moderation:content:write"
+      }
+    },
+    "/auth/policy": {
+      "get": {
+        "operationId": "AuthController_policy",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthPolicyResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operation is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request conflicts with current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "security": []
+      }
+    },
     "/auth/register": {
       "post": {
         "operationId": "AuthController_register",
@@ -600,6 +2148,172 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/OkResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operation is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request conflicts with current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "security": []
+      }
+    },
+    "/auth/verify-email": {
+      "post": {
+        "operationId": "AuthController_verifyEmail",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyEmailResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Operation is not permitted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Request conflicts with current state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Auth"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "security": []
+      }
+    },
+    "/auth/resend-verification": {
+      "post": {
+        "operationId": "AuthController_resendVerification",
+        "parameters": [],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendVerificationDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResendVerificationResponse"
                 }
               }
             }
@@ -18955,6 +20669,916 @@
         ]
       }
     },
+    "/uploads/v2/sessions": {
+      "post": {
+        "operationId": "UploadV2Controller_create",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateUploadSessionDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2SessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid declaration, checksum, ETag, or non-consecutive part set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Verified account required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned upload session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or invalid upload state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Pre-completion upload session expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Declared collection byte limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Completed object failed integrity verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Active-upload concurrency or rolling byte quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage or processing capacity temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Uploads v2"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "summary": "Create a quarantined multipart upload session",
+        "description": "Reserves rolling quota and initializes a private S3-compatible multipart upload. The optional idempotency key is scoped to the authenticated owner.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/uploads/v2/sessions/{sessionId}/parts": {
+      "post": {
+        "operationId": "UploadV2Controller_mintParts",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MintUploadPartsDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2PartUrlsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid declaration, checksum, ETag, or non-consecutive part set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Verified account required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned upload session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or invalid upload state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Pre-completion upload session expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Declared collection byte limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Completed object failed integrity verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Active-upload concurrency or rolling byte quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage or processing capacity temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Uploads v2"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "summary": "Mint checksum-bound upload-part URLs",
+        "description": "Returns short-lived PUT URLs for a consecutive part range. Each URL is signed for the supplied SHA-256 checksum header.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "get": {
+        "operationId": "UploadV2Controller_progress",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ProgressResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid declaration, checksum, ETag, or non-consecutive part set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Verified account required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned upload session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or invalid upload state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Pre-completion upload session expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Declared collection byte limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Completed object failed integrity verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Active-upload concurrency or rolling byte quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage or processing capacity temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Uploads v2"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "summary": "List multipart progress for resume",
+        "description": "Returns authoritative uploaded part ETags, checksums, byte counts, and missing consecutive part numbers.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/uploads/v2/sessions/{sessionId}/complete": {
+      "post": {
+        "operationId": "UploadV2Controller_complete",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteUploadDto"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2SessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid declaration, checksum, ETag, or non-consecutive part set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Verified account required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned upload session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or invalid upload state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Pre-completion upload session expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Declared collection byte limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Completed object failed integrity verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Active-upload concurrency or rolling byte quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage or processing capacity temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Uploads v2"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "summary": "Idempotently complete and queue an upload",
+        "description": "Verifies consecutive parts, ETags, checksums, completed object size/MIME/private metadata, then queues malware scanning and media processing.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/uploads/v2/sessions/{sessionId}": {
+      "get": {
+        "operationId": "UploadV2Controller_status",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2SessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid declaration, checksum, ETag, or non-consecutive part set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Verified account required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned upload session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or invalid upload state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Pre-completion upload session expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Declared collection byte limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Completed object failed integrity verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Active-upload concurrency or rolling byte quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage or processing capacity temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Uploads v2"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "summary": "Poll upload and processing status",
+        "description": "Returns deterministic upload, processing, asset, and terminal error state without exposing storage credentials.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "delete": {
+        "operationId": "UploadV2Controller_cancel",
+        "parameters": [
+          {
+            "name": "sessionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2SessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid declaration, checksum, ETag, or non-consecutive part set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Verified account required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Owned upload session not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency conflict or invalid upload state",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "Pre-completion upload session expired",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Declared collection byte limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Completed object failed integrity verification",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Active-upload concurrency or rolling byte quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Storage or processing capacity temporarily unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadV2ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "Uploads v2"
+        ],
+        "x-swebudd-frontend-consumed": true,
+        "summary": "Cancel an owned upload session",
+        "description": "Atomically claims cancellation before aborting multipart state and deleting quarantine/public staging objects. Repeated cancellation is idempotent.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/integrations": {
       "get": {
         "operationId": "IntegrationsController_list",
@@ -20708,7 +23332,7 @@
   "info": {
     "title": "SweBudd API",
     "description": "Authoritative HTTP API contract for SweBudd clients.",
-    "version": "0.2.51-beta",
+    "version": "0.4.0",
     "contact": {}
   },
   "tags": [],
@@ -20719,9 +23343,267 @@
         "scheme": "bearer",
         "bearerFormat": "JWT",
         "type": "http"
+      },
+      "adminBearer": {
+        "scheme": "bearer",
+        "bearerFormat": "Admin JWT (HS256, MFA, scoped, max 5m)",
+        "type": "http",
+        "description": "One-request admin moderation credential with canonical positive-bigint subject format admin:<id> (for example admin:1; no zero or leading zero). Each jti may be used once."
       }
     },
     "schemas": {
+      "UpdateAdminReportDto": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "reviewing",
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "actionTaken": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "resolutionNote": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "additionalProperties": false
+      },
+      "AssignAdminReportDto": {
+        "type": "object",
+        "properties": {
+          "reviewerId": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 128
+          },
+          "slaDueAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "AddAdminReportNoteDto": {
+        "type": "object",
+        "required": [
+          "body"
+        ],
+        "properties": {
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000
+          }
+        },
+        "additionalProperties": false
+      },
+      "EscalateAdminReportDto": {
+        "type": "object",
+        "required": [
+          "level",
+          "reason"
+        ],
+        "properties": {
+          "level": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "slaDueAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAdminAppealDto": {
+        "type": "object",
+        "required": [
+          "statement"
+        ],
+        "properties": {
+          "appellantUserId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "statement": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 5000
+          }
+        },
+        "additionalProperties": false
+      },
+      "ReviewAdminAppealDto": {
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "under_review",
+              "upheld",
+              "overturned",
+              "dismissed",
+              "withdrawn"
+            ]
+          },
+          "reviewerId": {
+            "type": "string",
+            "nullable": true,
+            "maxLength": 128
+          },
+          "resolutionNote": {
+            "type": "string",
+            "maxLength": 2000
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateAdminEvidenceDto": {
+        "type": "object",
+        "required": [
+          "storageKey",
+          "sha256",
+          "mediaType",
+          "byteSize",
+          "metadata",
+          "retentionExpiresAt"
+        ],
+        "properties": {
+          "storageKey": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1024
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-fA-F0-9]{64}$"
+          },
+          "mediaType": {
+            "type": "string",
+            "maxLength": 200
+          },
+          "byteSize": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/JsonObject"
+          },
+          "retentionExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "legalHold": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UpdateAdminEvidenceRetentionDto": {
+        "type": "object",
+        "properties": {
+          "retentionExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "legalHold": {
+            "type": "boolean"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/JsonObject"
+          }
+        },
+        "additionalProperties": false
+      },
+      "BanAdminUserDto": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "bannedUntil": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UnbanAdminUserDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "RevokeAdminUserSessionsDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "QuarantineAdminContentDto": {
+        "type": "object",
+        "required": [
+          "reason"
+        ],
+        "properties": {
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          }
+        },
+        "additionalProperties": false
+      },
+      "RestoreAdminContentDto": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string",
+            "maxLength": 1000
+          }
+        },
+        "additionalProperties": false
+      },
       "RegisterDto": {
         "type": "object",
         "required": [
@@ -20973,6 +23855,31 @@
         },
         "additionalProperties": false
       },
+      "VerifyEmailDto": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string",
+            "maxLength": 256,
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResendVerificationDto": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "format": "email",
+            "maxLength": 254
+          }
+        },
+        "additionalProperties": false
+      },
       "LogoutDto": {
         "type": "object",
         "properties": {
@@ -21020,8 +23927,7 @@
           },
           "dateOfBirth": {
             "type": "string",
-            "format": "date-time",
-            "nullable": true
+            "format": "date-time"
           },
           "activityPersona": {
             "type": "string",
@@ -22458,6 +25364,130 @@
         },
         "additionalProperties": false
       },
+      "CreateUploadSessionDto": {
+        "type": "object",
+        "required": [
+          "collection",
+          "mimeType",
+          "size"
+        ],
+        "properties": {
+          "collection": {
+            "type": "string",
+            "enum": [
+              "profile-photo",
+              "cover-photo",
+              "group-photo",
+              "chat-photo",
+              "actsnap-media",
+              "post-media",
+              "comment-media",
+              "generic-image",
+              "generic-video",
+              "generic-audio",
+              "generic-media"
+            ]
+          },
+          "mimeType": {
+            "type": "string",
+            "maxLength": 127
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 104857600
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]{43}=$"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "minLength": 8,
+            "maxLength": 128,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadPartIntentDto": {
+        "type": "object",
+        "required": [
+          "partNumber",
+          "checksumSha256"
+        ],
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]{43}=$"
+          }
+        },
+        "additionalProperties": false
+      },
+      "MintUploadPartsDto": {
+        "type": "object",
+        "required": [
+          "parts"
+        ],
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadPartIntentDto"
+            },
+            "minItems": 1,
+            "maxItems": 20
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompletedUploadPartDto": {
+        "type": "object",
+        "required": [
+          "partNumber",
+          "checksumSha256",
+          "etag"
+        ],
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]{43}=$"
+          },
+          "etag": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256
+          }
+        },
+        "additionalProperties": false
+      },
+      "CompleteUploadDto": {
+        "type": "object",
+        "required": [
+          "parts"
+        ],
+        "properties": {
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CompletedUploadPartDto"
+            },
+            "minItems": 1,
+            "maxItems": 10000
+          }
+        },
+        "additionalProperties": false
+      },
       "ConnectIntegrationDto": {
         "type": "object",
         "required": [
@@ -22725,6 +25755,61 @@
         },
         "additionalProperties": false
       },
+      "AuthPolicyResponse": {
+        "type": "object",
+        "required": [
+          "minimumAccountAge"
+        ],
+        "properties": {
+          "minimumAccountAge": {
+            "type": "integer",
+            "minimum": 18,
+            "maximum": 120
+          }
+        },
+        "additionalProperties": false
+      },
+      "VerifyEmailResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "emailVerified"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "emailVerified": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
+      "ResendVerificationResponse": {
+        "type": "object",
+        "required": [
+          "ok",
+          "message"
+        ],
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "enum": [
+              true
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "PostImageDto": {
         "type": "object",
         "required": [
@@ -22931,6 +26016,7 @@
           "profileImageUrl",
           "gender",
           "dateOfBirth",
+          "emailVerified",
           "activityPersona",
           "activityPersonas",
           "hideProfileBadges",
@@ -22979,6 +26065,9 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "emailVerified": {
+            "type": "boolean"
           },
           "activityPersona": {
             "type": "string",
@@ -23953,6 +27042,7 @@
           "coverImageUrl",
           "gender",
           "dateOfBirth",
+          "emailVerified",
           "activityPersona",
           "activityPersonas",
           "profileVisibility",
@@ -24013,6 +27103,9 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
+          },
+          "emailVerified": {
+            "type": "boolean"
           },
           "activityPersona": {
             "type": "string",
@@ -24493,6 +27586,896 @@
           "timestamp": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "AdminReportTargetResponse": {
+        "type": "object",
+        "required": [
+          "type",
+          "id"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "post",
+              "user",
+              "group",
+              "message"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string",
+            "nullable": true
+          },
+          "senderId": {
+            "type": "string",
+            "nullable": true
+          },
+          "recipientId": {
+            "type": "string",
+            "nullable": true
+          },
+          "groupId": {
+            "type": "string",
+            "nullable": true
+          },
+          "buddyGroupChatId": {
+            "type": "string",
+            "nullable": true
+          },
+          "channelId": {
+            "type": "string",
+            "nullable": true
+          },
+          "text": {
+            "type": "string",
+            "nullable": true
+          },
+          "body": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string",
+            "nullable": true
+          },
+          "slug": {
+            "type": "string",
+            "nullable": true
+          },
+          "username": {
+            "type": "string",
+            "nullable": true
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "moderationStatus": {
+            "type": "string",
+            "nullable": true
+          },
+          "quarantinedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "quarantinedById": {
+            "type": "string",
+            "nullable": true
+          },
+          "quarantineReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "bannedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "bannedUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "banReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "deletedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "additionalProperties": false
+      },
+      "AdminReportResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "type",
+          "target",
+          "reporter",
+          "reason",
+          "category",
+          "note",
+          "details",
+          "status",
+          "priority",
+          "assignedReviewerId",
+          "assignedAt",
+          "slaDueAt",
+          "escalationLevel",
+          "escalatedAt",
+          "escalatedById",
+          "escalationReason",
+          "reviewedAt",
+          "reviewedById",
+          "actionTaken",
+          "resolutionNote",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "post",
+              "user",
+              "group",
+              "message"
+            ]
+          },
+          "target": {
+            "$ref": "#/components/schemas/AdminReportTargetResponse"
+          },
+          "reporter": {
+            "$ref": "#/components/schemas/PublicUserResponse"
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "spam",
+              "harassment",
+              "hate",
+              "sexual_content",
+              "violence",
+              "self_harm",
+              "scam",
+              "privacy",
+              "impersonation",
+              "illegal_activity",
+              "other"
+            ]
+          },
+          "note": {
+            "type": "string",
+            "nullable": true
+          },
+          "details": {
+            "type": "string",
+            "nullable": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "reviewing",
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "priority": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          },
+          "assignedReviewerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "assignedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "slaDueAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "escalationLevel": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "escalatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "escalatedById": {
+            "type": "string",
+            "nullable": true
+          },
+          "escalationReason": {
+            "type": "string",
+            "nullable": true
+          },
+          "reviewedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "reviewedById": {
+            "type": "string",
+            "nullable": true
+          },
+          "actionTaken": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolutionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminReportAppealSummaryResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "assignedReviewerId",
+          "assignedAt",
+          "reviewedAt",
+          "reviewedById",
+          "resolutionNote",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "under_review",
+              "upheld",
+              "overturned",
+              "dismissed",
+              "withdrawn"
+            ]
+          },
+          "assignedReviewerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "assignedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "reviewedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "reviewedById": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolutionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminReportEvidenceSummaryResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "mediaType",
+          "byteSize",
+          "retentionExpiresAt",
+          "legalHold",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "retentionExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "legalHold": {
+            "type": "boolean"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminReportQueueItemResponse": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AdminReportResponse"
+          },
+          {
+            "type": "object",
+            "required": [
+              "internalNoteCount",
+              "appeals",
+              "evidenceRetention"
+            ],
+            "properties": {
+              "internalNoteCount": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "appeals": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AdminReportAppealSummaryResponse"
+                }
+              },
+              "evidenceRetention": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AdminReportEvidenceSummaryResponse"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "AdminReportQueueResponse": {
+        "type": "object",
+        "required": [
+          "items",
+          "nextCursor",
+          "summary"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AdminReportQueueItemResponse"
+            }
+          },
+          "nextCursor": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 0
+          },
+          "summary": {
+            "type": "object",
+            "required": [
+              "open",
+              "reviewing",
+              "resolved",
+              "dismissed",
+              "total",
+              "overdue",
+              "byCategory"
+            ],
+            "properties": {
+              "open": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reviewing": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "resolved": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "dismissed": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "overdue": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "byCategory": {
+                "type": "object",
+                "required": [
+                  "spam",
+                  "harassment",
+                  "hate",
+                  "sexual_content",
+                  "violence",
+                  "self_harm",
+                  "scam",
+                  "privacy",
+                  "impersonation",
+                  "illegal_activity",
+                  "other"
+                ],
+                "properties": {
+                  "spam": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "harassment": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "hate": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "sexual_content": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "violence": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "self_harm": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "scam": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "privacy": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "impersonation": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "illegal_activity": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "other": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "AdminReportInternalNoteResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "reportType",
+          "reportId",
+          "authorId",
+          "body",
+          "createdAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reportType": {
+            "type": "string",
+            "enum": [
+              "post",
+              "user",
+              "group",
+              "message"
+            ]
+          },
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "authorId": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminReportInternalNoteListResponse": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/AdminReportInternalNoteResponse"
+        }
+      },
+      "AdminReportAppealResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "reportType",
+          "reportId",
+          "appellantUserId",
+          "statement",
+          "status",
+          "assignedReviewerId",
+          "assignedAt",
+          "reviewedAt",
+          "reviewedById",
+          "resolutionNote",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reportType": {
+            "type": "string",
+            "enum": [
+              "post",
+              "user",
+              "group",
+              "message"
+            ]
+          },
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "appellantUserId": {
+            "type": "string",
+            "nullable": true
+          },
+          "statement": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "submitted",
+              "under_review",
+              "upheld",
+              "overturned",
+              "dismissed",
+              "withdrawn"
+            ]
+          },
+          "assignedReviewerId": {
+            "type": "string",
+            "nullable": true
+          },
+          "assignedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "reviewedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "reviewedById": {
+            "type": "string",
+            "nullable": true
+          },
+          "resolutionNote": {
+            "type": "string",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminReportAppealListResponse": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/AdminReportAppealResponse"
+        }
+      },
+      "AdminReportEvidenceResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "reportType",
+          "reportId",
+          "storageKey",
+          "sha256",
+          "mediaType",
+          "byteSize",
+          "metadata",
+          "retentionExpiresAt",
+          "legalHold",
+          "createdById",
+          "createdAt",
+          "updatedAt"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reportType": {
+            "type": "string",
+            "enum": [
+              "post",
+              "user",
+              "group",
+              "message"
+            ]
+          },
+          "reportId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "storageKey": {
+            "type": "string"
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "mediaType": {
+            "type": "string"
+          },
+          "byteSize": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/JsonObject"
+          },
+          "retentionExpiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "legalHold": {
+            "type": "boolean"
+          },
+          "createdById": {
+            "type": "string"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "AdminReportEvidenceListResponse": {
+        "type": "array",
+        "items": {
+          "$ref": "#/components/schemas/AdminReportEvidenceResponse"
+        }
+      },
+      "AdminModeratedUserResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "email",
+          "username",
+          "displayName",
+          "moderationStatus",
+          "bannedAt",
+          "bannedUntil",
+          "banReason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          },
+          "moderationStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "banned"
+            ]
+          },
+          "bannedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "bannedUntil": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "banReason": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "AdminUserModerationResponse": {
+        "type": "object",
+        "required": [
+          "user"
+        ],
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/AdminModeratedUserResponse"
+          },
+          "revokedRefreshTokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "revokedLoginSessions": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "AdminUserSessionRevocationResponse": {
+        "type": "object",
+        "required": [
+          "userId",
+          "revokedRefreshTokens",
+          "revokedLoginSessions"
+        ],
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revokedRefreshTokens": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "revokedLoginSessions": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "AdminContentStateResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "moderationStatus",
+          "quarantinedAt",
+          "quarantinedById",
+          "quarantineReason"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "moderationStatus": {
+            "type": "string",
+            "enum": [
+              "active",
+              "quarantined"
+            ]
+          },
+          "quarantinedAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "quarantinedById": {
+            "type": "string",
+            "nullable": true
+          },
+          "quarantineReason": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "AdminPostModerationResponse": {
+        "type": "object",
+        "required": [
+          "post"
+        ],
+        "properties": {
+          "post": {
+            "$ref": "#/components/schemas/AdminContentStateResponse"
+          }
+        }
+      },
+      "AdminGroupModerationResponse": {
+        "type": "object",
+        "required": [
+          "group"
+        ],
+        "properties": {
+          "group": {
+            "$ref": "#/components/schemas/AdminContentStateResponse"
+          }
+        }
+      },
+      "AdminMessageModerationResponse": {
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "properties": {
+          "message": {
+            "$ref": "#/components/schemas/AdminContentStateResponse"
           }
         }
       },
@@ -27830,6 +31813,447 @@
             }
           }
         }
+      },
+      "UploadV2ErrorResponse": {
+        "type": "object",
+        "required": [
+          "code",
+          "message",
+          "retryable"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadV2AssetResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "url",
+          "mimeType",
+          "size",
+          "width",
+          "height",
+          "durationSeconds",
+          "error"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "quarantined",
+              "processing",
+              "ready",
+              "rejected"
+            ]
+          },
+          "url": {
+            "type": "string",
+            "nullable": true
+          },
+          "mimeType": {
+            "type": "string"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "width": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1
+          },
+          "height": {
+            "type": "integer",
+            "nullable": true,
+            "minimum": 1
+          },
+          "durationSeconds": {
+            "type": "number",
+            "nullable": true,
+            "minimum": 0
+          },
+          "error": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UploadV2ErrorResponse"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadV2SessionResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "collection",
+          "declaredMimeType",
+          "declaredSize",
+          "partSize",
+          "expectedPartCount",
+          "status",
+          "expiresAt",
+          "createdAt",
+          "updatedAt",
+          "error",
+          "asset"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection": {
+            "type": "string",
+            "enum": [
+              "profile-photo",
+              "cover-photo",
+              "group-photo",
+              "chat-photo",
+              "actsnap-media",
+              "post-media",
+              "comment-media",
+              "generic-image",
+              "generic-video",
+              "generic-audio",
+              "generic-media"
+            ]
+          },
+          "declaredMimeType": {
+            "type": "string"
+          },
+          "declaredSize": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "partSize": {
+            "type": "integer",
+            "minimum": 5242880
+          },
+          "expectedPartCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "creating",
+              "uploading",
+              "completing",
+              "queued",
+              "processing",
+              "ready",
+              "rejected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UploadV2ErrorResponse"
+              }
+            ],
+            "nullable": true
+          },
+          "asset": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UploadV2AssetResponse"
+              }
+            ],
+            "nullable": true
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadV2PartUrlResponse": {
+        "type": "object",
+        "required": [
+          "partNumber",
+          "url",
+          "method",
+          "requiredHeaders"
+        ],
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "url": {
+            "type": "string",
+            "format": "uri",
+            "writeOnly": true
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "PUT"
+            ]
+          },
+          "requiredHeaders": {
+            "type": "object",
+            "required": [
+              "x-amz-checksum-sha256",
+              "content-length"
+            ],
+            "properties": {
+              "x-amz-checksum-sha256": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9+/]{43}=$"
+              },
+              "content-length": {
+                "type": "string",
+                "pattern": "^[1-9][0-9]*$",
+                "description": "Exact signed byte length. Browsers add Content-Length automatically; JavaScript must not set this forbidden header manually."
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadV2PartUrlsResponse": {
+        "type": "object",
+        "required": [
+          "sessionId",
+          "status",
+          "expiresAt",
+          "urlsExpireAt",
+          "parts"
+        ],
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "uploading"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "urlsExpireAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadV2PartUrlResponse"
+            },
+            "minItems": 1,
+            "maxItems": 20
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadV2StoredPartResponse": {
+        "type": "object",
+        "required": [
+          "partNumber",
+          "etag",
+          "checksumSha256",
+          "size"
+        ],
+        "properties": {
+          "partNumber": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "etag": {
+            "type": "string"
+          },
+          "checksumSha256": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9+/]{43}=$"
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadV2ProgressDetailResponse": {
+        "type": "object",
+        "required": [
+          "uploadedBytes",
+          "uploadedParts",
+          "totalParts",
+          "missingPartNumbers",
+          "parts"
+        ],
+        "properties": {
+          "uploadedBytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "uploadedParts": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10000
+          },
+          "totalParts": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "missingPartNumbers": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000
+            }
+          },
+          "parts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/UploadV2StoredPartResponse"
+            }
+          }
+        },
+        "additionalProperties": false
+      },
+      "UploadV2ProgressResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "collection",
+          "declaredMimeType",
+          "declaredSize",
+          "partSize",
+          "expectedPartCount",
+          "status",
+          "expiresAt",
+          "createdAt",
+          "updatedAt",
+          "error",
+          "asset",
+          "progress"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "collection": {
+            "type": "string",
+            "enum": [
+              "profile-photo",
+              "cover-photo",
+              "group-photo",
+              "chat-photo",
+              "actsnap-media",
+              "post-media",
+              "comment-media",
+              "generic-image",
+              "generic-video",
+              "generic-audio",
+              "generic-media"
+            ]
+          },
+          "declaredMimeType": {
+            "type": "string"
+          },
+          "declaredSize": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "partSize": {
+            "type": "integer",
+            "minimum": 5242880
+          },
+          "expectedPartCount": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10000
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "creating",
+              "uploading",
+              "completing",
+              "queued",
+              "processing",
+              "ready",
+              "rejected",
+              "failed",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "error": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UploadV2ErrorResponse"
+              }
+            ],
+            "nullable": true
+          },
+          "asset": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/UploadV2AssetResponse"
+              }
+            ],
+            "nullable": true
+          },
+          "progress": {
+            "$ref": "#/components/schemas/UploadV2ProgressDetailResponse"
+          }
+        },
+        "additionalProperties": false
       },
       "StoryAuthorResponse": {
         "type": "object",

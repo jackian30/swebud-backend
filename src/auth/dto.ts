@@ -38,3 +38,9 @@ export class ResetPasswordDto {
   @IsString() @MaxLength(256) token!: string;
   @IsString() @MinLength(8) @MaxLength(128) password!: string;
 }
+export class VerifyEmailDto {
+  @IsString() @MaxLength(256) token!: string;
+}
+export class ResendVerificationDto {
+  @IsOptionalNonNull() @IsEmail() @MaxLength(254) email?: string;
+}

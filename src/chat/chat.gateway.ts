@@ -1,14 +1,13 @@
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { ConnectedSocket, MessageBody, OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import { ConnectedSocket, MessageBody, OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, WebSocketGateway, WebSocketServer, WsException } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { ChatService } from './chat.service';
 import { PrismaService } from '../prisma/prisma.service';
-import { isAllowedOrigin, requiredSecret } from '../common/security';
+import { isAllowedOrigin } from '../common/security';
 import { RealtimePresenceService } from '../realtime/realtime-presence.service';
-import { isAccountBanned, moderationStateSelect } from '../auth/account-status';
-import { isOnboardingComplete, onboardingStateSelect } from '../auth/account-status';
 import { SocketAuthMonitor } from '../common/socket-auth-monitor';
+import { authenticateSocketAccount } from '../common/socket-account-policy';
 import { SendDirectMessageDto, TypingDto } from './dto';
 
 @WebSocketGateway({ namespace: '/chat' })
@@ -42,7 +41,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('chat:send')
   async send(@ConnectedSocket() client: Socket, @MessageBody() body: SendDirectMessageDto) {
-    const senderId = await this.activeUserId(client);
+    const senderId = await this.activeVerifiedUserId(client);
     if (!senderId) return null;
     if (!this.allowEvent(client, 'chat:send', 30)) return null;
     const message = await this.chat.send(senderId, body);
@@ -53,7 +52,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   @SubscribeMessage('chat:typing')
   async typing(@ConnectedSocket() client: Socket, @MessageBody() body: TypingDto) {
-    const senderId = await this.activeUserId(client);
+    const senderId = await this.activeVerifiedUserId(client);
     if (!senderId || !body.recipientId) return null;
     if (!this.allowEvent(client, 'chat:typing', 90)) return null;
     await this.chat.assertDirectMessagingAllowed(senderId, body.recipientId);
@@ -67,28 +66,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private async authenticatedSession(client: Socket) {
-    const token = client.handshake.auth?.token || String(client.handshake.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
-    if (!token) return null;
-    const payload = await this.jwt.verifyAsync<{ sub: string; sid?: string; exp?: number }>(token, { secret: requiredSecret(this.config, 'JWT_SECRET', 'dev-secret') }).catch(() => null);
-    if (!payload?.sub || !payload.sid || !Number.isFinite(payload.exp)) return null;
-    const session = await this.prisma.refreshToken.findFirst({
-      where: { id: payload.sid, userId: payload.sub, revokedAt: null, expiresAt: { gt: new Date() } },
-      select: {
-        id: true,
-        user: { select: { ...moderationStateSelect, ...onboardingStateSelect } },
-      },
-    }).catch(() => null);
-    if (!session || isAccountBanned(session.user) || !isOnboardingComplete(session.user)) return null;
-    return { userId: payload.sub, accessTokenExpiresAtMs: payload.exp! * 1000 };
+    return authenticateSocketAccount(client, this.jwt, this.config, this.prisma);
   }
 
-  private async activeUserId(client: Socket) {
+  private async activeVerifiedUserId(client: Socket) {
     const connectedUserId = client.data.userId as string | undefined;
     if (!connectedUserId) return null;
     const authenticated = await this.authenticatedSession(client);
     if (authenticated?.userId !== connectedUserId) {
       this.authMonitor.disconnect(client);
       return null;
+    }
+    if (!authenticated.emailVerified) {
+      throw new WsException('Verify your email before sending messages');
     }
     return authenticated.userId;
   }

@@ -1,5 +1,6 @@
 import type { OpenAPIObject } from '@nestjs/swagger';
 import type { OperationObject, ParameterObject, SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
+import { ADMIN_MODERATION_OPERATION_SCOPES } from './admin-moderation/admin-openapi-scopes';
 import { BACKEND_ONLY_OPERATION_CONTRACTS, FRONTEND_OPERATION_CONTRACTS } from './openapi.operations';
 import { AUTHORITATIVE_CONTRACT_SCHEMAS } from './openapi.schemas';
 
@@ -107,6 +108,47 @@ export const CLIENT_RESPONSE_SCHEMAS: Record<string, SchemaObject> = {
     },
     additionalProperties: false,
   },
+  VerifyEmailDto: {
+    type: 'object',
+    required: ['token'],
+    properties: {
+      token: { type: 'string', maxLength: 256, writeOnly: true },
+    },
+    additionalProperties: false,
+  },
+  ResendVerificationDto: {
+    type: 'object',
+    properties: {
+      email: { type: 'string', format: 'email', maxLength: 254 },
+    },
+    additionalProperties: false,
+  },
+  AuthPolicyResponse: {
+    type: 'object',
+    required: ['minimumAccountAge'],
+    properties: {
+      minimumAccountAge: { type: 'integer', minimum: 18, maximum: 120 },
+    },
+    additionalProperties: false,
+  },
+  VerifyEmailResponse: {
+    type: 'object',
+    required: ['ok', 'emailVerified'],
+    properties: {
+      ok: { type: 'boolean', enum: [true] },
+      emailVerified: { type: 'boolean', enum: [true] },
+    },
+    additionalProperties: false,
+  },
+  ResendVerificationResponse: {
+    type: 'object',
+    required: ['ok', 'message'],
+    properties: {
+      ok: { type: 'boolean', enum: [true] },
+      message: { type: 'string' },
+    },
+    additionalProperties: false,
+  },
   AcceptGroupInviteCodeDto: {
     type: 'object',
     required: ['code'],
@@ -197,7 +239,7 @@ export const CLIENT_RESPONSE_SCHEMAS: Record<string, SchemaObject> = {
   },
   AuthUserResponse: {
     type: 'object',
-    required: ['id', 'email', 'displayName', 'username', 'usernameFinalized', 'bio', 'profileImageUrl', 'gender', 'dateOfBirth', 'activityPersona', 'activityPersonas', 'hideProfileBadges', 'badges', 'onboardingComplete'],
+    required: ['id', 'email', 'displayName', 'username', 'usernameFinalized', 'bio', 'profileImageUrl', 'gender', 'dateOfBirth', 'emailVerified', 'activityPersona', 'activityPersonas', 'hideProfileBadges', 'badges', 'onboardingComplete'],
     properties: {
       id: { type: 'string', format: 'uuid' },
       email: { type: 'string', format: 'email' },
@@ -208,6 +250,7 @@ export const CLIENT_RESPONSE_SCHEMAS: Record<string, SchemaObject> = {
       profileImageUrl: nullableString,
       gender: { type: 'string', enum: ['female', 'male', 'non_binary', 'prefer_not_to_say', 'other'], nullable: true },
       dateOfBirth: nullableDateTime,
+      emailVerified: { type: 'boolean' },
       activityPersona: nullableActivityPersona,
       activityPersonas: { type: 'array', items: activityPersona },
       hideProfileBadges: { type: 'boolean' },
@@ -470,7 +513,7 @@ export const CLIENT_RESPONSE_SCHEMAS: Record<string, SchemaObject> = {
   FeedResponse: { type: 'array', items: feedPostRef },
   MeResponse: {
     type: 'object',
-    required: ['id', 'email', 'displayName', 'username', 'usernameFinalized', 'bio', 'profileImageUrl', 'coverImageUrl', 'gender', 'dateOfBirth', 'activityPersona', 'activityPersonas', 'profileVisibility', 'defaultPostVisibility', 'hideProfileBadges', 'hiddenProfileBadgeCodes', 'badges', 'verified', 'chatPublicKey', 'createdAt', 'availableProfileBadges', 'onboardingComplete', '_count'],
+    required: ['id', 'email', 'displayName', 'username', 'usernameFinalized', 'bio', 'profileImageUrl', 'coverImageUrl', 'gender', 'dateOfBirth', 'emailVerified', 'activityPersona', 'activityPersonas', 'profileVisibility', 'defaultPostVisibility', 'hideProfileBadges', 'hiddenProfileBadgeCodes', 'badges', 'verified', 'chatPublicKey', 'createdAt', 'availableProfileBadges', 'onboardingComplete', '_count'],
     properties: {
       id: { type: 'string', format: 'uuid' },
       email: { type: 'string', format: 'email' },
@@ -482,6 +525,7 @@ export const CLIENT_RESPONSE_SCHEMAS: Record<string, SchemaObject> = {
       coverImageUrl: nullableString,
       gender: { type: 'string', enum: ['female', 'male', 'non_binary', 'prefer_not_to_say', 'other'], nullable: true },
       dateOfBirth: nullableDateTime,
+      emailVerified: { type: 'boolean' },
       activityPersona: nullableActivityPersona,
       activityPersonas: { type: 'array', items: activityPersona },
       profileVisibility: { type: 'string', enum: ['public', 'followers', 'mutuals', 'close_buddies', 'private'] },
@@ -584,6 +628,9 @@ export const FRONTEND_JSON_CONTRACTS: readonly JsonContract[] = [
   { path: '/auth/refresh', method: 'post', status: '200', schema: 'AuthTokensResponse' },
   { path: '/auth/forgot-password', method: 'post', status: '200', schema: 'OkResponse' },
   { path: '/auth/reset-password', method: 'post', status: '200', schema: 'OkResponse' },
+  { path: '/auth/policy', method: 'get', status: '200', schema: 'AuthPolicyResponse' },
+  { path: '/auth/verify-email', method: 'post', status: '200', schema: 'VerifyEmailResponse' },
+  { path: '/auth/resend-verification', method: 'post', status: '200', schema: 'ResendVerificationResponse' },
   { path: '/posts', method: 'post', status: '201', schema: 'FeedPostResponse' },
   { path: '/posts', method: 'get', status: '200', schema: 'FeedResponse' },
   { path: '/posts/{id}', method: 'get', status: '200', schema: 'FeedPostResponse' },
@@ -610,6 +657,8 @@ export const FRONTEND_REQUEST_CONTRACTS: readonly RequestContract[] = [
   { path: '/auth/logout', method: 'post', schema: 'LogoutDto', required: false },
   { path: '/auth/forgot-password', method: 'post', schema: 'ForgotPasswordDto', required: true },
   { path: '/auth/reset-password', method: 'post', schema: 'ResetPasswordDto', required: true },
+  { path: '/auth/verify-email', method: 'post', schema: 'VerifyEmailDto', required: true },
+  { path: '/auth/resend-verification', method: 'post', schema: 'ResendVerificationDto', required: false },
   { path: '/posts', method: 'post', schema: 'CreatePostDto', required: true },
   { path: '/theme', method: 'put', schema: 'UpdateThemeDto', required: true },
   { path: '/groups/invite/accept', method: 'post', schema: 'AcceptGroupInviteCodeDto', required: true },
@@ -619,12 +668,15 @@ const PUBLIC_OPERATIONS = new Set([
   'GET /health',
   'GET /health/live',
   'GET /health/ready',
+  'GET /auth/policy',
   'POST /auth/register',
   'POST /auth/login',
   'POST /auth/google',
   'POST /auth/refresh',
   'POST /auth/forgot-password',
   'POST /auth/reset-password',
+  'POST /auth/verify-email',
+  'POST /auth/resend-verification',
 ]);
 
 export function applyClientContract(document: OpenAPIObject) {
@@ -727,6 +779,75 @@ export function applyClientContract(document: OpenAPIObject) {
     }
   }
 
+  const uploadV2Operations = [
+    {
+      path: '/uploads/v2/sessions',
+      method: 'post' as const,
+      summary: 'Create a quarantined multipart upload session',
+      description: 'Reserves rolling quota and initializes a private S3-compatible multipart upload. The optional idempotency key is scoped to the authenticated owner.',
+    },
+    {
+      path: '/uploads/v2/sessions/{sessionId}/parts',
+      method: 'post' as const,
+      summary: 'Mint checksum-bound upload-part URLs',
+      description: 'Returns short-lived PUT URLs for a consecutive part range. Each URL is signed for the supplied SHA-256 checksum header.',
+    },
+    {
+      path: '/uploads/v2/sessions/{sessionId}/parts',
+      method: 'get' as const,
+      summary: 'List multipart progress for resume',
+      description: 'Returns authoritative uploaded part ETags, checksums, byte counts, and missing consecutive part numbers.',
+    },
+    {
+      path: '/uploads/v2/sessions/{sessionId}/complete',
+      method: 'post' as const,
+      summary: 'Idempotently complete and queue an upload',
+      description: 'Verifies consecutive parts, ETags, checksums, completed object size/MIME/private metadata, then queues malware scanning and media processing.',
+    },
+    {
+      path: '/uploads/v2/sessions/{sessionId}',
+      method: 'get' as const,
+      summary: 'Poll upload and processing status',
+      description: 'Returns deterministic upload, processing, asset, and terminal error state without exposing storage credentials.',
+    },
+    {
+      path: '/uploads/v2/sessions/{sessionId}',
+      method: 'delete' as const,
+      summary: 'Cancel an owned upload session',
+      description: 'Atomically claims cancellation before aborting multipart state and deleting quarantine/public staging objects. Repeated cancellation is idempotent.',
+    },
+  ];
+  const uploadErrorDescriptions: Record<string, string> = {
+    '400': 'Invalid declaration, checksum, ETag, or non-consecutive part set',
+    '401': 'Authentication required',
+    '403': 'Verified account required',
+    '404': 'Owned upload session not found',
+    '409': 'Idempotency conflict or invalid upload state',
+    '410': 'Pre-completion upload session expired',
+    '413': 'Declared collection byte limit exceeded',
+    '422': 'Completed object failed integrity verification',
+    '429': 'Active-upload concurrency or rolling byte quota exceeded',
+    '503': 'Storage or processing capacity temporarily unavailable',
+  };
+  for (const definition of uploadV2Operations) {
+    const operation = operationAt(document, definition.path, definition.method);
+    if (!operation) continue;
+    operation.summary = definition.summary;
+    operation.description = definition.description;
+    operation.tags = ['Uploads v2'];
+    operation.security = [{ bearer: [] }];
+    for (const [status, description] of Object.entries(uploadErrorDescriptions)) {
+      operation.responses[status] = {
+        description,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/UploadV2ErrorResponse' },
+          },
+        },
+      };
+    }
+  }
+
   const logout = operationAt(document, '/auth/logout', 'post');
   if (logout) {
     logout.responses['204'] = { description: 'Session revoked' };
@@ -764,6 +885,16 @@ export function applyClientContract(document: OpenAPIObject) {
     setOperationParameter(document, '/feed', 'get', parameter);
   }
   const queryContracts: Array<readonly [string, HttpMethod, ParameterObject[]]> = [
+    ['/admin/moderation/v1/reports', 'get', [
+      { name: 'type', in: 'query', required: false, schema: { type: 'string', enum: ['post', 'user', 'group', 'message'] } },
+      { name: 'status', in: 'query', required: false, schema: { type: 'string', enum: ['open', 'reviewing', 'resolved', 'dismissed'] } },
+      { name: 'category', in: 'query', required: false, schema: { type: 'string', enum: ['spam', 'harassment', 'hate', 'sexual_content', 'violence', 'self_harm', 'scam', 'privacy', 'impersonation', 'illegal_activity', 'other'] } },
+      { name: 'assignedReviewerId', in: 'query', required: false, schema: { type: 'string', maxLength: 128 } },
+      { name: 'escalated', in: 'query', required: false, schema: { type: 'boolean' } },
+      { name: 'overdue', in: 'query', required: false, schema: { type: 'boolean' } },
+      { name: 'take', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100 } },
+      { name: 'cursor', in: 'query', required: false, schema: { type: 'integer', minimum: 0, maximum: 1000 } },
+    ]],
     ['/feed/hashtags', 'get', [
       { name: 'q', in: 'query', required: false, schema: { type: 'string', maxLength: 120 } },
     ]],
@@ -879,14 +1010,19 @@ export function applyClientContract(document: OpenAPIObject) {
     });
   }
 
-  const nonUuidPathParameterNames = new Set(['slug', 'provider', 'code']);
+  const nonUuidPathParameterNames = new Set(['slug', 'provider', 'code', 'type']);
   for (const [path, item] of Object.entries(document.paths)) {
     if (!item) continue;
     for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
       const operation = item[method];
       if (!operation) continue;
       for (const parameter of operation.parameters ?? []) {
-        if ('$ref' in parameter || parameter.in !== 'path' || nonUuidPathParameterNames.has(parameter.name)) continue;
+        if ('$ref' in parameter || parameter.in !== 'path') continue;
+        if (parameter.name === 'type' && path.startsWith('/admin/moderation/v1/reports/{type}/')) {
+          parameter.schema = { type: 'string', enum: ['post', 'user', 'group', 'message'] };
+          continue;
+        }
+        if (nonUuidPathParameterNames.has(parameter.name)) continue;
         if (path.startsWith('/users/{id}') && parameter.name === 'id') {
           parameter.description = 'User UUID or username';
           parameter.schema = { type: 'string' };
@@ -903,7 +1039,18 @@ export function applyClientContract(document: OpenAPIObject) {
       const operation = item[method];
       if (!operation) continue;
       const key = `${method.toUpperCase()} ${path}`;
-      operation.security = PUBLIC_OPERATIONS.has(key) ? [] : [{ bearer: [] }];
+      const adminScope = ADMIN_MODERATION_OPERATION_SCOPES[
+        key as keyof typeof ADMIN_MODERATION_OPERATION_SCOPES
+      ];
+      operation.security = PUBLIC_OPERATIONS.has(key)
+        ? []
+        : path.startsWith('/admin/moderation/v1/')
+          ? [{ adminBearer: [] }]
+          : [{ bearer: [] }];
+      if (path.startsWith('/admin/moderation/v1/')) {
+        if (!adminScope) throw new Error(`Admin moderation operation ${key} has no required-scope contract.`);
+        Object.assign(operation, { 'x-required-scope': adminScope });
+      }
       if (FRONTEND_OPERATION_CONTRACTS.some((contract) => contract.path === path && contract.method === method)) {
         const errorResponse = (description: string) => ({
           description,

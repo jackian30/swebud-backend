@@ -1,5 +1,5 @@
 import { ForbiddenException } from '@nestjs/common';
-import { PostVisibility, Prisma, ProfileVisibility } from '@prisma/client';
+import { ContentModerationStatus, PostVisibility, Prisma, ProfileVisibility } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
 export function visibleAuthorWhere(viewerId: string): Prisma.UserWhereInput {
@@ -34,11 +34,12 @@ export function visibleAuthorWhere(viewerId: string): Prisma.UserWhereInput {
 export function visiblePostWhere(viewerId: string): Prisma.PostWhereInput {
   return {
     AND: [
+      { moderationStatus: ContentModerationStatus.active },
       {
         OR: [
           { groupId: null },
-          { group: { visibility: 'public' } },
-          { group: { visibility: 'private', members: { some: { userId: viewerId } } } },
+          { group: { moderationStatus: ContentModerationStatus.active, visibility: 'public' } },
+          { group: { moderationStatus: ContentModerationStatus.active, visibility: 'private', members: { some: { userId: viewerId } } } },
         ],
       },
       { author: visibleAuthorWhere(viewerId) },

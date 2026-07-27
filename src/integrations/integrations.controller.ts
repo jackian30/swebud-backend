@@ -1,11 +1,12 @@
 import { Body, Controller, Delete, Get, Param, ParseEnumPipe, Patch, Post, UseGuards } from '@nestjs/common';
 import { IntegrationProvider } from '@prisma/client';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { VerifiedAccountGuard } from '../auth/verified-account.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { ConnectIntegrationDto, UpdateIntegrationDto } from './dto';
 import { IntegrationsService } from './integrations.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, VerifiedAccountGuard)
 @Controller('integrations')
 export class IntegrationsController {
   constructor(private integrations: IntegrationsService) {}

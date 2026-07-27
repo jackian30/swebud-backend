@@ -25,7 +25,8 @@ COPY --chown=node:node prisma ./prisma
 RUN npx prisma generate
 COPY --chown=node:node scripts ./scripts
 COPY --chown=node:node --from=build /app/dist ./dist
-RUN mkdir -p uploads/images uploads/videos uploads/audio && chown -R node:node uploads
+RUN mkdir -p uploads/images uploads/videos uploads/audio /app/media-processing-tmp \
+    && chown -R node:node uploads /app/media-processing-tmp
 USER node
 
 EXPOSE 3000

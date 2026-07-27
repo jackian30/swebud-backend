@@ -1,13 +1,12 @@
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { ConnectedSocket, MessageBody, OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
+import { ConnectedSocket, MessageBody, OnGatewayConnection, OnGatewayDisconnect, SubscribeMessage, WebSocketGateway, WebSocketServer, WsException } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { PrismaService } from '../prisma/prisma.service';
-import { isAllowedOrigin, requiredSecret } from '../common/security';
+import { isAllowedOrigin } from '../common/security';
 import { RealtimePresenceService } from '../realtime/realtime-presence.service';
-import { isAccountBanned, moderationStateSelect } from '../auth/account-status';
-import { isOnboardingComplete, onboardingStateSelect } from '../auth/account-status';
 import { SocketAuthMonitor } from '../common/socket-auth-monitor';
+import { authenticateSocketAccount } from '../common/socket-account-policy';
 import { BuddyRoomTypingDto } from './dto';
 
 @WebSocketGateway({ namespace: '/notifications' })
@@ -41,7 +40,7 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
 
   @SubscribeMessage('buddy:room-typing')
   async buddyRoomTyping(@ConnectedSocket() client: Socket, @MessageBody() body: BuddyRoomTypingDto) {
-    const senderId = await this.activeUserId(client);
+    const senderId = await this.activeVerifiedUserId(client);
     const roomId = body.roomId;
     if (!senderId || !roomId) return null;
     if (!this.allowEvent(client, 'buddy:room-typing', 90)) return null;
@@ -82,28 +81,19 @@ export class NotificationsGateway implements OnGatewayConnection, OnGatewayDisco
   }
 
   private async authenticatedSession(client: Socket) {
-    const token = client.handshake.auth?.token || String(client.handshake.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
-    if (!token) return null;
-    const payload = await this.jwt.verifyAsync<{ sub: string; sid?: string; exp?: number }>(token, { secret: requiredSecret(this.config, 'JWT_SECRET', 'dev-secret') }).catch(() => null);
-    if (!payload?.sub || !payload.sid || !Number.isFinite(payload.exp)) return null;
-    const session = await this.prisma.refreshToken.findFirst({
-      where: { id: payload.sid, userId: payload.sub, revokedAt: null, expiresAt: { gt: new Date() } },
-      select: {
-        id: true,
-        user: { select: { ...moderationStateSelect, ...onboardingStateSelect } },
-      },
-    }).catch(() => null);
-    if (!session || isAccountBanned(session.user) || !isOnboardingComplete(session.user)) return null;
-    return { userId: payload.sub, accessTokenExpiresAtMs: payload.exp! * 1000 };
+    return authenticateSocketAccount(client, this.jwt, this.config, this.prisma);
   }
 
-  private async activeUserId(client: Socket) {
+  private async activeVerifiedUserId(client: Socket) {
     const connectedUserId = client.data.userId as string | undefined;
     if (!connectedUserId) return null;
     const authenticated = await this.authenticatedSession(client);
     if (authenticated?.userId !== connectedUserId) {
       this.authMonitor.disconnect(client);
       return null;
+    }
+    if (!authenticated.emailVerified) {
+      throw new WsException('Verify your email before sending realtime signals');
     }
     return authenticated.userId;
   }

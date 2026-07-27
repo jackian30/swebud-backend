@@ -4,9 +4,13 @@ import { appVersion } from './common/app-version';
 import { applyClientContract, FRONTEND_JSON_CONTRACTS, FRONTEND_REQUEST_CONTRACTS, operationAt } from './openapi.contract';
 import { FRONTEND_OPERATION_CONTRACTS } from './openapi.operations';
 import type { ReferenceObject, SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
+import { ADMIN_MODERATION_OPERATION_SCOPES } from './admin-moderation/admin-openapi-scopes';
 
 const REQUIRED_CLIENT_PATHS = [
   '/auth/register',
+  '/auth/policy',
+  '/auth/verify-email',
+  '/auth/resend-verification',
   '/auth/login',
   '/auth/refresh',
   '/users/me',
@@ -27,6 +31,12 @@ export function buildOpenApiDocument(app: INestApplication) {
     .setDescription('Authoritative HTTP API contract for SweBudd clients.')
     .setVersion(appVersion())
     .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' }, 'bearer')
+    .addBearerAuth({
+      type: 'http',
+      scheme: 'bearer',
+      bearerFormat: 'Admin JWT (HS256, MFA, scoped, max 5m)',
+      description: 'One-request admin moderation credential with canonical positive-bigint subject format admin:<id> (for example admin:1; no zero or leading zero). Each jti may be used once.',
+    }, 'adminBearer')
     .build();
   const document = SwaggerModule.createDocument(app, config, {
     operationIdFactory: (controllerKey, methodKey) => `${controllerKey}_${methodKey}`,
@@ -60,6 +70,7 @@ export function assertValidOpenApiDocument(document: OpenAPIObject) {
   const missing = REQUIRED_CLIENT_PATHS.filter((path) => !document.paths[path]);
   if (missing.length) throw new Error(`OpenAPI is missing required client paths: ${missing.join(', ')}`);
   assertRequiredPropertiesDeclared(document);
+  assertAdminModerationOperations(document);
 
   for (const [path, item] of Object.entries(document.paths)) {
     if (!item) throw new Error(`OpenAPI path ${path} has no path item.`);
@@ -161,6 +172,44 @@ export function assertValidOpenApiDocument(document: OpenAPIObject) {
   assertSecurity(document, '/health', 'get', false);
   assertSecurity(document, '/users/me', 'get', true);
   assertSecurity(document, '/groups', 'get', true);
+}
+
+function assertAdminModerationOperations(document: OpenAPIObject) {
+  const expected = new Set(Object.keys(ADMIN_MODERATION_OPERATION_SCOPES));
+  const actual = new Set<string>();
+  for (const [path, item] of Object.entries(document.paths)) {
+    if (!path.startsWith('/admin/moderation/v1/') || !item) continue;
+    for (const method of ['get', 'post', 'put', 'patch', 'delete'] as const) {
+      const operation = item[method];
+      if (!operation) continue;
+      const key = `${method.toUpperCase()} ${path}`;
+      actual.add(key);
+      const requiredScope = ADMIN_MODERATION_OPERATION_SCOPES[
+        key as keyof typeof ADMIN_MODERATION_OPERATION_SCOPES
+      ];
+      if (!requiredScope) throw new Error(`OpenAPI admin moderation operation ${key} has no scope inventory entry.`);
+      if ((operation as typeof operation & { 'x-required-scope'?: unknown })['x-required-scope'] !== requiredScope) {
+        throw new Error(`OpenAPI admin moderation operation ${key} must require scope ${requiredScope}.`);
+      }
+      if (JSON.stringify(operation.security) !== JSON.stringify([{ adminBearer: [] }])) {
+        throw new Error(`OpenAPI admin moderation operation ${key} must use adminBearer security.`);
+      }
+      if (method !== 'get') {
+        for (const name of ['X-Request-ID', 'Idempotency-Key']) {
+          const header = (operation.parameters ?? []).find((parameter) => (
+            !('$ref' in parameter)
+            && parameter.in === 'header'
+            && parameter.name.toLowerCase() === name.toLowerCase()
+          ));
+          if (!header || '$ref' in header || header.required !== true) {
+            throw new Error(`OpenAPI admin moderation mutation ${key} must require ${name}.`);
+          }
+        }
+      }
+    }
+  }
+  const missing = [...expected].filter((key) => !actual.has(key));
+  if (missing.length) throw new Error(`OpenAPI is missing admin moderation operations: ${missing.join(', ')}`);
 }
 
 function schemaIsConcrete(

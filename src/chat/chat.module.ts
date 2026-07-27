@@ -6,6 +6,7 @@ import { NotificationsModule } from '../notifications/notifications.module';
 import { ChatController } from './chat.controller';
 import { ChatGateway } from './chat.gateway';
 import { ChatService } from './chat.service';
+import { AuthModule } from '../auth/auth.module';
 
-@Module({ imports: [PrismaModule, NotificationsModule, JwtModule.register({}), ConfigModule], controllers: [ChatController], providers: [ChatService, ChatGateway], exports: [ChatGateway, ChatService] })
+@Module({ imports: [PrismaModule, NotificationsModule, JwtModule.register({}), ConfigModule, AuthModule], controllers: [ChatController], providers: [ChatService, ChatGateway], exports: [ChatGateway, ChatService] })
 export class ChatModule {}

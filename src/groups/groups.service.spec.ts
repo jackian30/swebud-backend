@@ -12,6 +12,7 @@ describe('GroupsService', () => {
     prisma = {
       groupMember: {
         findUnique: jest.fn().mockResolvedValue({ userId, groupId, role: 'member' }),
+        findFirst: jest.fn().mockResolvedValue({ userId, groupId, role: 'member' }),
         findUniqueOrThrow: jest.fn(),
         upsert: jest.fn(),
         update: jest.fn(),
@@ -21,6 +22,10 @@ describe('GroupsService', () => {
       group: {
         create: jest.fn(),
         findMany: jest.fn().mockResolvedValue([]),
+        findFirstOrThrow: jest.fn().mockResolvedValue({
+          visibility: 'public',
+          members: [{ userId }],
+        }),
         findUniqueOrThrow: jest.fn().mockResolvedValue({ allowAnonymousPosts: true }),
         update: jest.fn(),
       },
@@ -71,7 +76,7 @@ describe('GroupsService', () => {
     await expect(service.create(userId, { name: '   ', slug: 'valid-group' }))
       .rejects.toBeInstanceOf(BadRequestException);
 
-    prisma.groupMember.findUnique.mockResolvedValueOnce({ role: 'admin' });
+    prisma.groupMember.findFirst.mockResolvedValueOnce({ role: 'admin' });
     await expect(service.updateSettings(userId, groupId, { name: '   ' }))
       .rejects.toBeInstanceOf(BadRequestException);
 
@@ -80,7 +85,7 @@ describe('GroupsService', () => {
   });
 
   it('allows admins to update ordinary member and moderator roles', async () => {
-    prisma.groupMember.findUnique.mockResolvedValueOnce({ role: 'admin' });
+    prisma.groupMember.findFirst.mockResolvedValueOnce({ role: 'admin' });
     prisma.groupMember.findUniqueOrThrow.mockResolvedValueOnce({ role: 'member' });
     prisma.group.findUniqueOrThrow.mockResolvedValueOnce({ id: groupId, members: [] });
 
@@ -93,7 +98,7 @@ describe('GroupsService', () => {
   });
 
   it('reserves assigning and changing owner or admin roles for owners', async () => {
-    prisma.groupMember.findUnique.mockResolvedValueOnce({ role: 'admin' });
+    prisma.groupMember.findFirst.mockResolvedValueOnce({ role: 'admin' });
     prisma.groupMember.findUniqueOrThrow.mockResolvedValueOnce({ role: 'admin' });
 
     await expect(service.updateRole(userId, groupId, 'admin-2', 'member'))
@@ -222,7 +227,7 @@ describe('GroupsService', () => {
   });
 
   it('returns a lean group summary for buddy session pages', async () => {
-    prisma.group.findUniqueOrThrow.mockResolvedValueOnce({
+    prisma.group.findFirstOrThrow.mockResolvedValueOnce({
       id: groupId,
       name: 'Morning Runners',
       slug: 'morning-runners',
@@ -243,7 +248,7 @@ describe('GroupsService', () => {
     expect(group).not.toHaveProperty('members');
     expect(group).not.toHaveProperty('posts');
     expect(group).not.toHaveProperty('chatChannels');
-    expect(prisma.group.findUniqueOrThrow).toHaveBeenCalledWith(expect.objectContaining({
+    expect(prisma.group.findFirstOrThrow).toHaveBeenCalledWith(expect.objectContaining({
       select: expect.objectContaining({
         members: expect.objectContaining({
           where: { userId },
@@ -254,7 +259,7 @@ describe('GroupsService', () => {
   });
 
   it('rejects direct joins to private groups without an explicit invite grant', async () => {
-    prisma.group.findUniqueOrThrow.mockResolvedValueOnce({
+    prisma.group.findFirstOrThrow.mockResolvedValueOnce({
       slug: 'private-club',
       visibility: 'private',
       members: [],
@@ -266,7 +271,7 @@ describe('GroupsService', () => {
   });
 
   it('allows an invite code to grant private-group membership', async () => {
-    prisma.group.findUniqueOrThrow.mockResolvedValueOnce({ id: groupId, slug: 'private-club' });
+    prisma.group.findFirstOrThrow.mockResolvedValueOnce({ id: groupId, slug: 'private-club' });
     jest.spyOn(service, 'get').mockResolvedValue({ id: groupId, slug: 'private-club' } as any);
 
     await service.joinByInvite(userId, 'valid-code');
@@ -287,7 +292,7 @@ describe('GroupsService', () => {
       allowedUsers: [],
       createdAt: new Date(),
     }]);
-    prisma.groupMember.findUnique.mockResolvedValue({ role: 'member' });
+    prisma.groupMember.findFirst.mockResolvedValue({ role: 'member' });
 
     await expect(service.messages(userId, groupId)).rejects.toThrow('No accessible group channel');
   });

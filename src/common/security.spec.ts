@@ -13,6 +13,9 @@ function productionConfig(overrides: Record<string, string | undefined> = {}) {
     FRONTEND_ORIGIN: 'https://app.example.com',
     JWT_SECRET: 'a'.repeat(40),
     JWT_REFRESH_SECRET: 'b'.repeat(40),
+    ADMIN_JWT_SECRET: 'd'.repeat(40),
+    ADMIN_JWT_ISSUER: 'swebudd-admin',
+    ADMIN_JWT_AUDIENCE: 'swebudd-admin-moderation',
     ALLOW_LOCAL_ORIGINS: 'false',
     SMTP_HOST: 'smtp.example.com',
     SMTP_PORT: '587',
@@ -21,6 +24,15 @@ function productionConfig(overrides: Record<string, string | undefined> = {}) {
     SMTP_TLS_REJECT_UNAUTHORIZED: 'true',
     MAIL_FROM: 'SweBudd <no-reply@example.com>',
     CLOUDFLARE_TURNSTILE_SECRET_KEY: 'c'.repeat(40),
+    MEDIA_STORAGE_DRIVER: 's3',
+    AWS_REGION: 'us-east-1',
+    MEDIA_S3_BUCKET: 'swebudd-public-media',
+    MEDIA_PUBLIC_BASE_URL: 'https://media.example.com',
+    MEDIA_QUARANTINE_S3_BUCKET: 'swebudd-private-quarantine',
+    MEDIA_LEGACY_PROXY_UPLOADS_ENABLED: 'false',
+    MEDIA_UPLOAD_WORKER_ENABLED: 'true',
+    MEDIA_MALWARE_SCANNER: 'clamdscan',
+    MEDIA_PROCESSING_TEMP_DIR: '/var/lib/swebudd-media-processing',
     ...overrides,
   });
 }
@@ -90,13 +102,72 @@ describe('security helpers', () => {
     expect(() => assertProductionConfig(cfg)).toThrow('JWT_SECRET and JWT_REFRESH_SECRET must be different');
   });
 
+  it('requires a third, distinct strong secret for admin moderation tokens', () => {
+    process.env.NODE_ENV = 'production';
+
+    expect(() => assertProductionConfig(productionConfig({ ADMIN_JWT_SECRET: undefined })))
+      .toThrow('ADMIN_JWT_SECRET must be set to a strong secret');
+    expect(() => assertProductionConfig(productionConfig({ ADMIN_JWT_SECRET: 'a'.repeat(40) })))
+      .toThrow('ADMIN_JWT_SECRET must be different');
+    expect(() => assertProductionConfig(productionConfig({ ADMIN_JWT_SECRET: 'b'.repeat(40) })))
+      .toThrow('ADMIN_JWT_SECRET must be different');
+  });
+
+  it('fails closed if production is configured to admit minors', () => {
+    process.env.NODE_ENV = 'production';
+
+    expect(() => assertProductionConfig(productionConfig({ MINIMUM_ACCOUNT_AGE: '17' })))
+      .toThrow('must be at least 18 in production');
+    expect(() => assertProductionConfig(productionConfig({ MINIMUM_ACCOUNT_AGE: '18' })))
+      .not.toThrow();
+  });
+
   it('requires S3 media deployment env when S3 storage is selected', () => {
     process.env.NODE_ENV = 'production';
     const cfg = productionConfig({
       MEDIA_STORAGE_DRIVER: 's3',
+      MEDIA_QUARANTINE_S3_BUCKET: undefined,
     });
 
     expect(() => assertProductionConfig(cfg)).toThrow('Missing required S3 media env');
+  });
+
+  it('requires separate public/quarantine buckets and fail-closed malware scanning', () => {
+    process.env.NODE_ENV = 'production';
+
+    expect(() => assertProductionConfig(productionConfig({
+      MEDIA_QUARANTINE_S3_BUCKET: 'swebudd-public-media',
+    }))).toThrow('must be separate');
+    expect(() => assertProductionConfig(productionConfig({
+      MEDIA_MALWARE_SCANNER: 'disabled',
+    }))).toThrow('must be "clamdscan" or "clamd-tcp"');
+    expect(() => assertProductionConfig(productionConfig({
+      MEDIA_MALWARE_SCANNER: 'clamd-tcp',
+      MEDIA_CLAMD_TCP_HOST: 'clamd.internal',
+      MEDIA_CLAMD_TRUSTED_NETWORK: 'false',
+    }))).toThrow('MEDIA_CLAMD_TRUSTED_NETWORK must be true');
+  });
+
+  it('requires the v2 worker and disables legacy proxy uploads in production', () => {
+    process.env.NODE_ENV = 'production';
+
+    expect(() => assertProductionConfig(productionConfig({
+      MEDIA_UPLOAD_WORKER_ENABLED: 'false',
+    }))).toThrow('MEDIA_UPLOAD_WORKER_ENABLED must be true');
+    expect(() => assertProductionConfig(productionConfig({
+      MEDIA_LEGACY_PROXY_UPLOADS_ENABLED: 'true',
+    }))).toThrow('MEDIA_LEGACY_PROXY_UPLOADS_ENABLED must be false');
+  });
+
+  it('requires a dedicated disk-backed media processing directory in production', () => {
+    process.env.NODE_ENV = 'production';
+
+    expect(() => assertProductionConfig(productionConfig({
+      MEDIA_PROCESSING_TEMP_DIR: undefined,
+    }))).toThrow('Missing required production env: MEDIA_PROCESSING_TEMP_DIR');
+    expect(() => assertProductionConfig(productionConfig({
+      MEDIA_PROCESSING_TEMP_DIR: '/tmp/media',
+    }))).toThrow('dedicated disk-backed path');
   });
 
   it('rejects HTTP, local-network, and path-bearing origins in production', () => {

@@ -1,11 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { unlink } from 'fs/promises';
 import { collectionFor, kindForMime } from './collections';
 import { LocalStorageDriver } from './local-storage.driver';
 import { MediaProcessor } from './media-processor.service';
 import { S3StorageDriver } from './s3-storage.driver';
 import { StorageDriver } from './storage-driver';
 import { MediaCollectionName, UploadResponse } from './types';
+import { UploadProcessingGate } from '../processing-gate';
 
 @Injectable()
 export class MediaLibraryService {
@@ -15,6 +17,7 @@ export class MediaLibraryService {
     private readonly config: ConfigService,
     private readonly processor: MediaProcessor,
     localStorage: LocalStorageDriver,
+    private readonly processingGate: UploadProcessingGate,
   ) {
     this.driver = this.storageDriverName() === 's3' ? new S3StorageDriver(this.config) : localStorage;
   }
@@ -33,19 +36,28 @@ export class MediaLibraryService {
 
   async addMedia(file: Express.Multer.File | undefined, collectionName: MediaCollectionName): Promise<UploadResponse> {
     const collection = collectionFor(collectionName);
-    const processed = await this.processor.process(file, collection);
-    const stored = await this.driver.put(collection, processed);
-    return {
-      ...stored,
-      collection: collection.name,
-      filename: processed.filename,
-      originalName: file?.originalname,
-      mimeType: processed.mimeType,
-      size: processed.size,
-      type: processed.type,
-      ...(processed.width ? { width: processed.width } : {}),
-      ...(processed.height ? { height: processed.height } : {}),
-    };
+    let processedPath: string | undefined;
+    try {
+      return await this.processingGate.run(async () => {
+        const processed = await this.processor.process(file, collection);
+        processedPath = processed.temporary ? processed.path : undefined;
+        const stored = await this.driver.put(collection, processed);
+        return {
+          ...stored,
+          collection: collection.name,
+          filename: processed.filename,
+          originalName: file?.originalname,
+          mimeType: processed.mimeType,
+          size: processed.size,
+          type: processed.type,
+          ...(processed.width ? { width: processed.width } : {}),
+          ...(processed.height ? { height: processed.height } : {}),
+        };
+      });
+    } finally {
+      if (processedPath && processedPath !== file?.path) await unlink(processedPath).catch(() => undefined);
+      if (file?.path) await unlink(file.path).catch(() => undefined);
+    }
   }
 
   private storageDriverName() {

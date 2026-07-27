@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { mediaCollections } from './collections';
@@ -22,12 +22,15 @@ describe('LocalStorageDriver', () => {
   it('stores files under uploads with stable key, url, and local path shapes', async () => {
     const { LocalStorageDriver } = await import('./local-storage.driver');
     const driver = new LocalStorageDriver();
+    const sourcePath = join(tempDir, 'source');
+    writeFileSync(sourcePath, 'stored bytes', { mode: 0o600 });
     const media: ProcessedMedia = {
-      buffer: Buffer.from('stored bytes'),
+      path: sourcePath,
       filename: 'avatar.webp',
       mimeType: 'image/webp',
       size: 12,
       type: 'image',
+      temporary: false,
     };
 
     const stored = await driver.put(mediaCollections['profile-photo'], media);

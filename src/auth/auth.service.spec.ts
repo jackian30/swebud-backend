@@ -1,6 +1,45 @@
-import { AuthService, sessionMetadataFromRequest } from './auth.service';
+import {
+  AuthService,
+  PASSWORD_RESET_MIN_RESPONSE_MS,
+  PASSWORD_RESET_RESPONSE_JITTER_MS,
+  sessionMetadataFromRequest,
+} from './auth.service';
 import * as appRelease from '../common/app-version';
 import * as bcrypt from 'bcryptjs';
+
+function lockedTokenIssueUser(
+  user: {
+    id: string;
+    dateOfBirth?: Date | null;
+    moderationStatus?: string | null;
+    bannedAt?: Date | null;
+    bannedUntil?: Date | null;
+    banReason?: string | null;
+    usernameFinalized?: boolean;
+    legalConsentAt?: Date | null;
+    dataConsentAt?: Date | null;
+    emailVerifiedAt?: Date | null;
+    email?: string;
+    googleId?: string | null;
+  },
+  passwordHash = 'password-hash',
+) {
+  return {
+    id: user.id,
+    passwordHash,
+    email: user.email ?? 'user@example.com',
+    googleId: user.googleId ?? null,
+    dateOfBirth: user.dateOfBirth ?? null,
+    moderationStatus: user.moderationStatus ?? 'active',
+    bannedAt: user.bannedAt ?? null,
+    bannedUntil: user.bannedUntil ?? null,
+    banReason: user.banReason ?? null,
+    usernameFinalized: user.usernameFinalized ?? true,
+    legalConsentAt: user.legalConsentAt ?? null,
+    dataConsentAt: user.dataConsentAt ?? null,
+    emailVerifiedAt: user.emailVerifiedAt ?? null,
+  };
+}
 
 describe('sessionMetadataFromRequest', () => {
   it('captures Android app, IP, and proxy location headers', () => {
@@ -49,26 +88,32 @@ describe('AuthService Google login', () => {
       }),
     } as any);
 
+    let createdUser: any;
     let prisma: any;
     prisma = {
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
-        findUnique: jest.fn().mockResolvedValue(null),
+        findUnique: jest.fn().mockImplementation(({ where }) => (
+          where.id === 'user-1' ? Promise.resolve(createdUser) : Promise.resolve(null)
+        )),
         count: jest.fn().mockResolvedValue(0),
-        create: jest.fn().mockImplementation(({ data, select }) => Promise.resolve({
-          id: 'user-1',
-          ...data,
-          bio: null,
-          latitude: null,
-          longitude: null,
-          gender: null,
-          dateOfBirth: null,
-          activityPersona: null,
-          activityPersonas: [],
-          legalConsentAt: null,
-          dataConsentAt: null,
-          ...Object.fromEntries(Object.keys(select).map((key) => [key, (data as any)[key] ?? null])),
-        })),
+        create: jest.fn().mockImplementation(({ data, select }) => {
+          createdUser = {
+            ...data,
+            bio: null,
+            latitude: null,
+            longitude: null,
+            gender: null,
+            dateOfBirth: null,
+            activityPersona: null,
+            activityPersonas: [],
+            legalConsentAt: null,
+            dataConsentAt: null,
+            ...Object.fromEntries(Object.keys(select).map((key) => [key, (data as any)[key] ?? null])),
+            id: 'user-1',
+          };
+          return Promise.resolve(createdUser);
+        }),
       },
       refreshToken: {
         create: jest.fn().mockResolvedValue({}),
@@ -77,6 +122,12 @@ describe('AuthService Google login', () => {
         create: jest.fn().mockResolvedValue({ id: 'login-session-1' }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      $queryRaw: jest.fn().mockResolvedValue([lockedTokenIssueUser({
+        id: 'user-1',
+        email: 'elena.diaz@example.com',
+        googleId: 'google-1',
+        usernameFinalized: false,
+      })]),
       $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
     };
     const jwt = { signAsync: jest.fn().mockResolvedValue('token') };
@@ -113,29 +164,33 @@ describe('AuthService Google login', () => {
       }),
     } as any);
 
+    let createdUser: any;
     let prisma: any;
     prisma = {
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
-        findUnique: jest.fn()
-          .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce(null)
-          .mockResolvedValueOnce({ id: 'existing-user' })
-          .mockResolvedValueOnce(null),
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          if (where.id === 'user-2') return Promise.resolve(createdUser);
+          if (where.username === 'elenadiaz') return Promise.resolve({ id: 'existing-user' });
+          return Promise.resolve(null);
+        }),
         count: jest.fn().mockResolvedValue(0),
-        create: jest.fn().mockImplementation(({ data }) => Promise.resolve({
-          id: 'user-2',
-          ...data,
-          bio: null,
-          latitude: null,
-          longitude: null,
-          gender: null,
-          dateOfBirth: null,
-          activityPersona: null,
-          activityPersonas: [],
-          legalConsentAt: null,
-          dataConsentAt: null,
-        })),
+        create: jest.fn().mockImplementation(({ data }) => {
+          createdUser = {
+            id: 'user-2',
+            ...data,
+            bio: null,
+            latitude: null,
+            longitude: null,
+            gender: null,
+            dateOfBirth: null,
+            activityPersona: null,
+            activityPersonas: [],
+            legalConsentAt: null,
+            dataConsentAt: null,
+          };
+          return Promise.resolve(createdUser);
+        }),
       },
       refreshToken: {
         create: jest.fn().mockResolvedValue({}),
@@ -144,6 +199,12 @@ describe('AuthService Google login', () => {
         create: jest.fn().mockResolvedValue({ id: 'login-session-2' }),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      $queryRaw: jest.fn().mockResolvedValue([lockedTokenIssueUser({
+        id: 'user-2',
+        email: 'elena.alt@example.com',
+        googleId: 'google-2',
+        usernameFinalized: false,
+      })]),
       $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
     };
     const service = new AuthService(
@@ -175,6 +236,7 @@ describe('AuthService Google login', () => {
     } as any);
 
     const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'user-1', email: 'user@example.com' }]),
       user: {
         findUnique: jest.fn()
           .mockResolvedValueOnce(null)
@@ -200,6 +262,188 @@ describe('AuthService Google login', () => {
     expect(prisma.user.update).not.toHaveBeenCalled();
     expect(prisma.user.create).not.toHaveBeenCalled();
     expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not use a changed Google email to verify the different stored account email', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        sub: 'google-linked',
+        email: 'new-google@example.com',
+        email_verified: true,
+      }),
+    } as any);
+    const existing = {
+      id: 'linked-user',
+      email: 'stored@example.com',
+      googleId: 'google-linked',
+      displayName: 'Linked User',
+      username: 'linked-user',
+      usernameFinalized: true,
+      dateOfBirth: null,
+      emailVerifiedAt: null,
+      activityPersonas: [],
+      legalConsentAt: null,
+      dataConsentAt: null,
+      moderationStatus: 'active',
+      bannedAt: null,
+      bannedUntil: null,
+      banReason: null,
+      badges: [],
+    };
+    let currentUser = existing;
+    const prisma: any = {
+      user: {
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          if (where.googleId === 'google-linked' || where.id === existing.id) {
+            return Promise.resolve(currentUser);
+          }
+          if (where.email === 'new-google@example.com') return Promise.resolve(null);
+          return Promise.resolve(null);
+        }),
+        update: jest.fn().mockImplementation(({ data }) => {
+          currentUser = { ...currentUser, ...data };
+          return Promise.resolve(currentUser);
+        }),
+      },
+      refreshToken: { create: jest.fn().mockResolvedValue({}) },
+      loginSession: { create: jest.fn().mockResolvedValue({ id: 'login-session-1' }) },
+      $queryRaw: jest.fn().mockResolvedValue([lockedTokenIssueUser(existing)]),
+    };
+    prisma.$transaction = jest.fn((callback: (tx: any) => unknown) => callback(prisma));
+    const service = new AuthService(
+      prisma,
+      { signAsync: jest.fn().mockResolvedValue('token') } as any,
+      { get: jest.fn().mockReturnValue(undefined) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    const response = await service.googleLogin({ idToken: 'id-token' });
+
+    expect(prisma.user.findUnique).toHaveBeenCalledWith({
+      where: { email: 'new-google@example.com' },
+      select: { id: true },
+    });
+    expect(prisma.user.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: existing.id },
+      data: expect.objectContaining({
+        googleEmailVerified: false,
+        emailVerifiedAt: null,
+      }),
+    }));
+    expect(prisma.user.update.mock.calls[0][0].data).not.toHaveProperty('email');
+    expect(response.user).toEqual(expect.objectContaining({
+      email: 'stored@example.com',
+      emailVerified: false,
+    }));
+  });
+
+  it('rejects a changed Google email that is owned by another local account', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        sub: 'google-linked',
+        email: 'owned@example.com',
+        email_verified: true,
+      }),
+    } as any);
+    const existing = {
+      id: 'linked-user',
+      email: 'stored@example.com',
+      googleId: 'google-linked',
+      displayName: 'Linked User',
+      username: 'linked-user',
+      usernameFinalized: true,
+      dateOfBirth: null,
+      emailVerifiedAt: null,
+      activityPersonas: [],
+      legalConsentAt: null,
+      dataConsentAt: null,
+      moderationStatus: 'active',
+      bannedAt: null,
+      bannedUntil: null,
+      banReason: null,
+      badges: [],
+    };
+    let prisma: any;
+    prisma = {
+      user: {
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          if (where.googleId === 'google-linked' || where.id === existing.id) {
+            return Promise.resolve(existing);
+          }
+          if (where.email === 'owned@example.com') return Promise.resolve({ id: 'email-owner' });
+          return Promise.resolve(null);
+        }),
+        update: jest.fn(),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([lockedTokenIssueUser(existing)]),
+      $transaction: jest.fn((callback: (tx: any) => unknown) => callback(prisma)),
+    };
+    const service = new AuthService(
+      prisma as any,
+      {} as any,
+      { get: jest.fn().mockReturnValue(undefined) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(service.googleLogin({ idToken: 'id-token' }))
+      .rejects.toThrow('conflicts with another account');
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects an underage linked Google account before mutating its profile', async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: jest.fn().mockResolvedValue({
+        sub: 'google-underage',
+        email: 'underage@example.com',
+        email_verified: true,
+        name: 'Changed Name',
+        picture: 'https://example.com/changed.jpg',
+      }),
+    } as any);
+    const existing = {
+      id: 'underage-user',
+      email: 'underage@example.com',
+      displayName: 'Original Name',
+      username: 'underage-user',
+      usernameFinalized: true,
+      dateOfBirth: new Date('2015-01-01T00:00:00.000Z'),
+      emailVerifiedAt: new Date(),
+      activityPersonas: [],
+      legalConsentAt: new Date(),
+      dataConsentAt: new Date(),
+      moderationStatus: 'active',
+      bannedAt: null,
+      bannedUntil: null,
+      banReason: null,
+      badges: [],
+    };
+    const prisma = {
+      user: {
+        findUnique: jest.fn().mockResolvedValue(existing),
+        update: jest.fn(),
+      },
+    };
+    const service = new AuthService(
+      prisma as any,
+      {} as any,
+      { get: jest.fn((key: string) => key === 'MINIMUM_ACCOUNT_AGE' ? '18' : undefined) } as any,
+      {} as any,
+      {} as any,
+      {} as any,
+    );
+
+    await expect(service.googleLogin({ idToken: 'id-token' }))
+      .rejects.toThrow('Account does not meet current account policy');
+
+    expect(prisma.user.update).not.toHaveBeenCalled();
   });
 });
 
@@ -228,8 +472,26 @@ describe('AuthService refresh login sessions', () => {
           activityPersonas: [],
           badges: [],
         }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'user@example.com',
+          username: 'runner',
+          usernameFinalized: true,
+          dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+          legalConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+          dataConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+          activityPersonas: [],
+          badges: [],
+        }),
       },
+      $queryRaw: jest.fn().mockResolvedValue([lockedTokenIssueUser({
+        id: 'user-1',
+        dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+        legalConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+        dataConsentAt: new Date('2026-01-01T00:00:00.000Z'),
+      })]),
     };
+    prisma.$transaction = jest.fn((callback: (tx: any) => unknown) => callback(prisma));
     const jwt = {
       verifyAsync: jest.fn().mockResolvedValue({ sub: 'user-1', sid: 'refresh-1', lid: 'login-session-1' }),
       signAsync: jest.fn()
@@ -262,7 +524,12 @@ describe('AuthService refresh login sessions', () => {
       data: { revokedAt: expect.any(Date) },
     });
     expect(prisma.loginSession.updateMany).toHaveBeenCalledWith({
-      where: { id: 'login-session-1', userId: 'user-1', revokedAt: null },
+      where: {
+        id: 'login-session-1',
+        userId: 'user-1',
+        revokedAt: null,
+        expiresAt: { gt: expect.any(Date) },
+      },
       data: expect.objectContaining({
         deviceLabel: 'Android app',
         locationLabel: 'Makati, PH',
@@ -293,8 +560,37 @@ describe('AuthService refresh login sessions', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         create: jest.fn(),
       },
-      user: { findUniqueOrThrow: jest.fn() },
+      user: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'user@example.com',
+          username: 'user',
+          usernameFinalized: true,
+          dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+          moderationStatus: 'active',
+          bannedAt: null,
+          bannedUntil: null,
+        }),
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'user-1',
+          email: 'user@example.com',
+          username: 'user',
+          usernameFinalized: true,
+          dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+          moderationStatus: 'active',
+          bannedAt: null,
+          bannedUntil: null,
+        }),
+      },
+      loginSession: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([lockedTokenIssueUser({
+        id: 'user-1',
+        dateOfBirth: new Date('1990-01-01T00:00:00.000Z'),
+      })]),
     };
+    prisma.$transaction = jest.fn((callback: (tx: any) => unknown) => callback(prisma));
     const service = new AuthService(
       prisma,
       { verifyAsync: jest.fn().mockResolvedValue({ sub: 'user-1', sid: 'refresh-1' }) } as any,
@@ -306,7 +602,7 @@ describe('AuthService refresh login sessions', () => {
 
     await expect(service.refresh('refresh-token')).rejects.toThrow('Invalid refresh token');
 
-    expect(prisma.user.findUniqueOrThrow).not.toHaveBeenCalled();
+    expect(prisma.user.findUniqueOrThrow).toHaveBeenCalledTimes(1);
     expect(prisma.refreshToken.create).not.toHaveBeenCalled();
   });
 });
@@ -324,16 +620,24 @@ describe('AuthService onboarding session replacement', () => {
       activityPersonas: [],
       badges: [],
     };
-    const tx = {
-      user: { update: jest.fn().mockResolvedValue(completedUser) },
-      refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
+    const prisma: any = {
+      user: {
+        findUnique: jest.fn()
+          .mockResolvedValueOnce(null)
+          .mockResolvedValue(completedUser),
+        update: jest.fn().mockResolvedValue(completedUser),
+      },
+      refreshToken: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        create: jest.fn().mockResolvedValue({}),
+      },
+      loginSession: {
+        updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+        create: jest.fn(),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([lockedTokenIssueUser(completedUser)]),
     };
-    const prisma = {
-      user: { findUnique: jest.fn().mockResolvedValue(null) },
-      refreshToken: { create: jest.fn().mockResolvedValue({}) },
-      loginSession: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
-      $transaction: jest.fn((callback: (client: typeof tx) => unknown) => callback(tx)),
-    };
+    prisma.$transaction = jest.fn((callback: (client: typeof prisma) => unknown) => callback(prisma));
     const jwt = { signAsync: jest.fn().mockResolvedValueOnce('access-token').mockResolvedValueOnce('refresh-token') };
     const service = new AuthService(
       prisma as any,
@@ -355,7 +659,7 @@ describe('AuthService onboarding session replacement', () => {
       refreshToken: 'refresh-token',
     }));
 
-    expect(tx.refreshToken.updateMany).toHaveBeenCalledWith({
+    expect(prisma.refreshToken.updateMany).toHaveBeenCalledWith({
       where: { id: 'pending-sid', userId: 'user-1', revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
@@ -455,7 +759,11 @@ describe('AuthService response privacy', () => {
     const prisma: any = {
       user: {
         findFirst: jest.fn().mockResolvedValue(flow === 'login' ? { ...user, passwordHash: 'password-hash' } : null),
-        findUnique: jest.fn().mockResolvedValue(flow === 'google' ? user : null),
+        findUnique: jest.fn().mockImplementation(({ where }) => {
+          if (where.id === user.id) return Promise.resolve(user);
+          if (flow === 'google' && where.googleId === user.googleId) return Promise.resolve(user);
+          return Promise.resolve(null);
+        }),
         findUniqueOrThrow: jest.fn().mockResolvedValue(user),
         create: jest.fn().mockResolvedValue(user),
         update: jest.fn().mockResolvedValue(user),
@@ -471,6 +779,7 @@ describe('AuthService response privacy', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
     };
+    prisma.$queryRaw = jest.fn().mockResolvedValue([lockedTokenIssueUser(user)]);
     prisma.$transaction = jest.fn((callback: (client: typeof prisma) => unknown) => callback(prisma));
     const jwt = {
       verifyAsync: jest.fn().mockResolvedValue({ sub: user.id, sid: 'refresh-1', lid: 'login-1' }),
@@ -543,6 +852,7 @@ describe('AuthService response privacy', () => {
 describe('AuthService password reset URLs', () => {
   it('uses the first allowed frontend origin when multiple CORS origins are configured', async () => {
     const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'user-1', email: 'user@example.com' }]),
       user: {
         findUnique: jest.fn().mockResolvedValue({ id: 'user-1', email: 'user@example.com' }),
       },
@@ -550,7 +860,9 @@ describe('AuthService password reset URLs', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         create: jest.fn().mockResolvedValue({ id: 'token-1' }),
       },
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation((work: (tx: typeof prisma) => unknown) => work(prisma));
     const mail = { sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined) };
     const config = {
       get: jest.fn((key: string) => key === 'FRONTEND_ORIGIN'
@@ -585,6 +897,7 @@ describe('AuthService password reset URLs', () => {
 
   it('does not wait for reset email delivery before returning', async () => {
     const prisma = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'user-1', email: 'user@example.com' }]),
       user: {
         findUnique: jest.fn().mockResolvedValue({ id: 'user-1', email: 'user@example.com' }),
       },
@@ -592,7 +905,9 @@ describe('AuthService password reset URLs', () => {
         updateMany: jest.fn().mockResolvedValue({ count: 0 }),
         create: jest.fn().mockResolvedValue({ id: 'token-1' }),
       },
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation((work: (tx: typeof prisma) => unknown) => work(prisma));
     const mail = { sendPasswordResetEmail: jest.fn(() => new Promise(() => undefined)) };
     const config = { get: jest.fn((key: string) => key === 'FRONTEND_ORIGIN' ? 'https://swebudd.com' : undefined) };
     const service = new AuthService(
@@ -609,11 +924,128 @@ describe('AuthService password reset URLs', () => {
     expect(mail.sendPasswordResetEmail).toHaveBeenCalledTimes(1);
   });
 
+  it('serializes concurrent reset-token issuance so only the newest token remains active', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(bcrypt, 'hash').mockResolvedValue('stored-reset-hash' as never);
+    try {
+      const tokens: Array<Record<string, any>> = [];
+      const tx = {
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 'user-1', email: 'user@example.com' }]),
+        passwordResetToken: {
+          updateMany: jest.fn().mockImplementation(({ data }: any) => {
+            for (const token of tokens) {
+              if (token.usedAt === null) token.usedAt = data.usedAt;
+            }
+            return Promise.resolve({ count: tokens.filter((token) => token.usedAt !== null).length });
+          }),
+          create: jest.fn().mockImplementation(({ data }: any) => {
+            const token = { ...data, usedAt: null };
+            tokens.push(token);
+            return Promise.resolve(token);
+          }),
+        },
+      };
+      let tail = Promise.resolve();
+      const prisma = {
+        user: { findUnique: jest.fn().mockResolvedValue({ id: 'user-1' }) },
+        $transaction: jest.fn((work: (client: typeof tx) => unknown) => {
+          const run = tail.then(() => work(tx));
+          tail = run.then(() => undefined, () => undefined);
+          return run;
+        }),
+      };
+      const mail = { sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined) };
+      const service = new AuthService(
+        prisma as any,
+        {} as any,
+        { get: jest.fn() } as any,
+        mail as any,
+        {} as any,
+        {} as any,
+      );
+
+      const requests = [
+        service.forgotPassword('user@example.com'),
+        service.forgotPassword('user@example.com'),
+      ];
+      await jest.advanceTimersByTimeAsync(
+        PASSWORD_RESET_MIN_RESPONSE_MS + PASSWORD_RESET_RESPONSE_JITTER_MS,
+      );
+      await expect(Promise.all(requests)).resolves.toEqual([{ ok: true }, { ok: true }]);
+
+      expect(tokens).toHaveLength(2);
+      expect(tokens.filter((token) => token.usedAt === null)).toHaveLength(1);
+      expect(tokens[0].usedAt).toBeInstanceOf(Date);
+      expect(tokens[1].usedAt).toBeNull();
+    } finally {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
+    }
+  });
+
+  it('holds known and unknown forgot-password responses behind the same timing floor', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(bcrypt, 'hash').mockResolvedValue('stored-reset-hash' as never);
+    try {
+      const tx = {
+        $queryRaw: jest.fn().mockResolvedValue([{ id: 'user-1', email: 'known@example.com' }]),
+        passwordResetToken: {
+          updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+          create: jest.fn().mockResolvedValue({ id: 'reset-1' }),
+        },
+      };
+      const knownPrisma = {
+        user: { findUnique: jest.fn().mockResolvedValue({ id: 'user-1' }) },
+        $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
+      };
+      const missingPrisma = {
+        user: { findUnique: jest.fn().mockResolvedValue(null) },
+      };
+      const known = new AuthService(
+        knownPrisma as any,
+        {} as any,
+        { get: jest.fn() } as any,
+        { sendPasswordResetEmail: jest.fn().mockResolvedValue(undefined) } as any,
+        {} as any,
+        {} as any,
+      );
+      const missing = new AuthService(
+        missingPrisma as any,
+        {} as any,
+        { get: jest.fn() } as any,
+        { sendPasswordResetEmail: jest.fn() } as any,
+        {} as any,
+        {} as any,
+      );
+      let knownSettled = false;
+      let missingSettled = false;
+      const knownRequest = known.forgotPassword('known@example.com').then((result) => {
+        knownSettled = true;
+        return result;
+      });
+      const missingRequest = missing.forgotPassword('missing@example.com').then((result) => {
+        missingSettled = true;
+        return result;
+      });
+
+      await jest.advanceTimersByTimeAsync(PASSWORD_RESET_MIN_RESPONSE_MS - 1);
+      expect(knownSettled).toBe(false);
+      expect(missingSettled).toBe(false);
+      await jest.advanceTimersByTimeAsync(PASSWORD_RESET_RESPONSE_JITTER_MS + 1);
+      await expect(Promise.all([knownRequest, missingRequest]))
+        .resolves.toEqual([{ ok: true }, { ok: true }]);
+    } finally {
+      jest.useRealTimers();
+      jest.restoreAllMocks();
+    }
+  });
+
   it('looks up a reset token by its public selector and claims it atomically', async () => {
     const selector = 'a'.repeat(32);
     const secret = 'b'.repeat(64);
     const tokenHash = await bcrypt.hash(secret, 4);
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'user-1' }]),
       passwordResetToken: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       user: { update: jest.fn().mockResolvedValue({}) },
       refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
@@ -649,6 +1081,10 @@ describe('AuthService password reset URLs', () => {
       where: { id: selector, usedAt: null, expiresAt: { gt: expect.any(Date) } },
       data: { usedAt: expect.any(Date) },
     });
+    expect(tx.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', id: { not: selector }, usedAt: null },
+      data: { usedAt: expect.any(Date) },
+    });
     expect(tx.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
       data: { passwordHash: expect.any(String) },
@@ -660,6 +1096,7 @@ describe('AuthService password reset URLs', () => {
     const secret = 'd'.repeat(64);
     const tokenHash = await bcrypt.hash(secret, 4);
     const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'user-1' }]),
       passwordResetToken: { updateMany: jest.fn().mockResolvedValue({ count: 0 }) },
       user: { update: jest.fn() },
       refreshToken: { updateMany: jest.fn() },

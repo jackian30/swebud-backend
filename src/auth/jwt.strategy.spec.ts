@@ -30,6 +30,7 @@ describe('JwtStrategy onboarding state', () => {
       sessionId: 'session-1',
       loginSessionId: 'login-1',
       onboarded: expected,
+      emailVerified: false,
     });
     expect(prisma.refreshToken.findFirst).toHaveBeenCalledWith(expect.objectContaining({
       select: expect.objectContaining({
@@ -39,6 +40,7 @@ describe('JwtStrategy onboarding state', () => {
             dateOfBirth: true,
             legalConsentAt: true,
             dataConsentAt: true,
+            emailVerifiedAt: true,
           }),
         },
       }),

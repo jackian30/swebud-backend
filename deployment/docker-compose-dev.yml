@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE:-postgres@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-swebud}
@@ -27,6 +27,41 @@ services:
     networks:
       - swebud
 
+  db-roles:
+    image: ${POSTGRES_HELPER_IMAGE:-postgres@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50}
+    user: postgres
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_RUNTIME_USER: ${DATABASE_RUNTIME_USER:?Set the runtime database role}
+      DATABASE_ADMIN_READONLY_USER: ${DATABASE_ADMIN_READONLY_USER:?Set the admin read-only database role}
+      DATABASE_BACKUP_USER: ${DATABASE_BACKUP_USER:?Set the dedicated backup database role}
+      DIRECT_URL_FILE: /run/secrets/database_owner_url
+      DATABASE_RUNTIME_PASSWORD_FILE: /run/secrets/database_runtime_password
+      DATABASE_ADMIN_READONLY_PASSWORD_FILE: /run/secrets/database_readonly_password
+      DATABASE_BACKUP_PASSWORD_FILE: /run/secrets/database_backup_password
+    secrets:
+      - database_owner_url
+      - database_runtime_password
+      - database_readonly_password
+      - database_backup_password
+    volumes:
+      - ./provision-database-roles.sh:/deployment/provision-database-roles.sh:ro
+      - ./database-roles.sql:/deployment/database-roles.sql:ro
+    command: /bin/sh /deployment/provision-database-roles.sh
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    networks:
+      - swebud
+
   backend:
     build:
       context: ..
@@ -37,6 +72,8 @@ services:
     working_dir: /app
     restart: unless-stopped
     depends_on:
+      db-roles:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       mailhog:
@@ -49,8 +86,14 @@ services:
       DIRECT_URL: ${DIRECT_URL:?Set DIRECT_URL; deploy.sh generates it on first run}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET; deploy.sh generates it on first run}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET; deploy.sh generates it on first run}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:?Set ADMIN_JWT_SECRET; deploy.sh generates it on first run}
+      ADMIN_JWT_ISSUER: ${ADMIN_JWT_ISSUER:-swebudd-admin}
+      ADMIN_JWT_AUDIENCE: ${ADMIN_JWT_AUDIENCE:-swebudd-admin-moderation}
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
       REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-604800}
+      MINIMUM_ACCOUNT_AGE: ${MINIMUM_ACCOUNT_AGE:-18}
+      EMAIL_VERIFICATION_TTL_SECONDS: ${EMAIL_VERIFICATION_TTL_SECONDS:-86400}
+      EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: ${EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS:-60}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:9000}
       ADMIN_ORIGIN: ${ADMIN_ORIGIN:-http://localhost:9100,http://swebud-admin.loc}
       ALLOW_LOCAL_ORIGINS: ${ALLOW_LOCAL_ORIGINS:-true}
@@ -81,6 +124,11 @@ services:
       MEDIA_STORAGE_DRIVER: ${MEDIA_STORAGE_DRIVER:-local}
       MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-}
       MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-}
+      MEDIA_PROCESSING_TEMP_DIR: /app/media-processing-tmp
+      MEDIA_LEGACY_QUARANTINE_DIR: /app/media-processing-tmp/legacy-quarantine
+      MEDIA_UPLOAD_WORKER_CONCURRENCY: ${MEDIA_UPLOAD_WORKER_CONCURRENCY:-2}
+      MEDIA_PROCESSING_STALE_TEMP_SECONDS: ${MEDIA_PROCESSING_STALE_TEMP_SECONDS:-21600}
+      MEDIA_PROCESSING_STALE_CLEANUP_LIMIT: ${MEDIA_PROCESSING_STALE_CLEANUP_LIMIT:-100}
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
@@ -101,6 +149,7 @@ services:
       - ..:/app
       - swebud_backend_node_modules:/app/node_modules
       - swebud_uploads:/app/uploads
+      - swebud_media_processing_temp:/app/media-processing-tmp
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
@@ -119,3 +168,14 @@ volumes:
   swebud_postgres_data:
   swebud_backend_node_modules:
   swebud_uploads:
+  swebud_media_processing_temp:
+
+secrets:
+  database_owner_url:
+    file: ${DATABASE_OWNER_URL_SECRET_FILE:-./.secrets/direct-url}
+  database_runtime_password:
+    file: ${DATABASE_RUNTIME_PASSWORD_SECRET_FILE:-./.secrets/runtime-password}
+  database_readonly_password:
+    file: ${DATABASE_ADMIN_READONLY_PASSWORD_SECRET_FILE:-./.secrets/readonly-password}
+  database_backup_password:
+    file: ${DATABASE_BACKUP_PASSWORD_SECRET_FILE:-./.secrets/backup-password}

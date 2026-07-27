@@ -64,7 +64,7 @@ describe('UpdateMeDto', () => {
     }, metadata)).rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it.each(['displayName', 'username', 'activityPersonas', 'profileVisibility', 'defaultPostVisibility', 'hideProfileBadges', 'hiddenProfileBadgeCodes'])(
+  it.each(['displayName', 'username', 'dateOfBirth', 'activityPersonas', 'profileVisibility', 'defaultPostVisibility', 'hideProfileBadges', 'hiddenProfileBadgeCodes'])(
     'rejects null for the non-null profile setting %s',
     async (field) => {
       await expect(pipe.transform({ [field]: null }, metadata)).rejects.toBeInstanceOf(BadRequestException);
@@ -77,7 +77,6 @@ describe('UpdateMeDto', () => {
       profileImageUrl: null,
       coverImageUrl: null,
       gender: null,
-      dateOfBirth: null,
       latitude: null,
       longitude: null,
       activityPersona: null,
@@ -86,7 +85,6 @@ describe('UpdateMeDto', () => {
       profileImageUrl: null,
       coverImageUrl: null,
       gender: null,
-      dateOfBirth: null,
       latitude: null,
       longitude: null,
       activityPersona: null,

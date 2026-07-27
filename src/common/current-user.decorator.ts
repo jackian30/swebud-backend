@@ -5,6 +5,7 @@ export type AuthUser = {
   sessionId?: string;
   loginSessionId?: string | null;
   onboarded?: boolean;
+  emailVerified?: boolean;
 };
 
 export const CurrentUser = createParamDecorator((_data: unknown, ctx: ExecutionContext): AuthUser => {

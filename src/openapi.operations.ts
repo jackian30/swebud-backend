@@ -39,6 +39,7 @@ const uploads = [
  * adapter source and requires an exact subset match against this document.
  */
 export const FRONTEND_OPERATION_CONTRACTS: readonly FrontendOperationContract[] = [
+  ...operations('AuthPolicyResponse', ['GET /auth/policy']),
   ...operations('AuthTokensResponse', [
     'POST /auth/register',
     'POST /auth/login',
@@ -50,6 +51,18 @@ export const FRONTEND_OPERATION_CONTRACTS: readonly FrontendOperationContract[] 
     'POST /auth/forgot-password',
     'POST /auth/reset-password',
   ]),
+  {
+    path: '/auth/verify-email',
+    method: 'post' as const,
+    responseSchema: 'VerifyEmailResponse',
+    request: { schema: 'VerifyEmailDto' },
+  },
+  {
+    path: '/auth/resend-verification',
+    method: 'post' as const,
+    responseSchema: 'ResendVerificationResponse',
+    request: { schema: 'ResendVerificationDto', required: false },
+  },
   ...operations(null, ['POST /auth/logout']),
 
   ...operations('BuddyActivityOptionListResponse', ['GET /buddy/activities']),
@@ -248,6 +261,14 @@ export const FRONTEND_OPERATION_CONTRACTS: readonly FrontendOperationContract[] 
     responseSchema: 'UploadResponse',
     request: { schema: 'MultipartFileDto', mediaType: 'multipart/form-data' as const },
   })),
+  ...operations('UploadV2SessionResponse', [
+    'POST /uploads/v2/sessions',
+    'POST /uploads/v2/sessions/{sessionId}/complete',
+    'GET /uploads/v2/sessions/{sessionId}',
+    'DELETE /uploads/v2/sessions/{sessionId}',
+  ]),
+  ...operations('UploadV2PartUrlsResponse', ['POST /uploads/v2/sessions/{sessionId}/parts']),
+  ...operations('UploadV2ProgressResponse', ['GET /uploads/v2/sessions/{sessionId}/parts']),
 
   ...operations('MeResponse', [
     'GET /users/me',
@@ -298,14 +319,61 @@ export const FRONTEND_OPERATION_CONTRACTS: readonly FrontendOperationContract[] 
     'PUT /theme',
   ]),
 ].map((contract) => {
+  const key = `${contract.method.toUpperCase()} ${contract.path}`;
   if (contract.path === '/feed/viewed' && contract.method === 'post') {
     return { ...contract, request: { schema: 'FeedViewedDto' } };
+  }
+  if (key === 'POST /uploads/v2/sessions') {
+    return { ...contract, request: { schema: 'CreateUploadSessionDto' } };
+  }
+  if (key === 'POST /uploads/v2/sessions/{sessionId}/parts') {
+    return { ...contract, request: { schema: 'MintUploadPartsDto' } };
+  }
+  if (key === 'POST /uploads/v2/sessions/{sessionId}/complete') {
+    return { ...contract, request: { schema: 'CompleteUploadDto' } };
   }
   return contract;
 });
 
 /** Maintained backend operations not currently invoked by the frontend adapters. */
 export const BACKEND_ONLY_OPERATION_CONTRACTS: readonly FrontendOperationContract[] = [
+  ...operations('AdminReportQueueResponse', ['GET /admin/moderation/v1/reports']),
+  ...operations('AdminReportInternalNoteListResponse', ['GET /admin/moderation/v1/reports/{type}/{id}/notes']),
+  ...operations('AdminReportAppealListResponse', ['GET /admin/moderation/v1/reports/{type}/{id}/appeals']),
+  ...operations('AdminReportEvidenceListResponse', ['GET /admin/moderation/v1/reports/{type}/{id}/evidence']),
+  ...operations('AdminReportResponse', [
+    'PATCH /admin/moderation/v1/reports/{type}/{id}',
+    'PATCH /admin/moderation/v1/reports/{type}/{id}/assignment',
+    'POST /admin/moderation/v1/reports/{type}/{id}/escalations',
+  ]),
+  ...operations('AdminReportInternalNoteResponse', ['POST /admin/moderation/v1/reports/{type}/{id}/notes']),
+  ...operations('AdminReportAppealResponse', [
+    'POST /admin/moderation/v1/reports/{type}/{id}/appeals',
+    'PATCH /admin/moderation/v1/appeals/{id}',
+  ]),
+  ...operations('AdminReportEvidenceResponse', [
+    'POST /admin/moderation/v1/reports/{type}/{id}/evidence',
+    'PATCH /admin/moderation/v1/evidence/{id}/retention',
+  ]),
+  ...operations('AdminUserModerationResponse', [
+    'POST /admin/moderation/v1/users/{id}/ban',
+    'POST /admin/moderation/v1/users/{id}/unban',
+  ]),
+  ...operations('AdminUserSessionRevocationResponse', [
+    'POST /admin/moderation/v1/users/{id}/revoke-sessions',
+  ]),
+  ...operations('AdminPostModerationResponse', [
+    'POST /admin/moderation/v1/posts/{id}/quarantine',
+    'POST /admin/moderation/v1/posts/{id}/restore',
+  ]),
+  ...operations('AdminGroupModerationResponse', [
+    'POST /admin/moderation/v1/groups/{id}/quarantine',
+    'POST /admin/moderation/v1/groups/{id}/restore',
+  ]),
+  ...operations('AdminMessageModerationResponse', [
+    'POST /admin/moderation/v1/messages/{id}/quarantine',
+    'POST /admin/moderation/v1/messages/{id}/restore',
+  ]),
   ...operations('HealthLiveResponse', [
     'GET /health',
     'GET /health/live',
@@ -346,6 +414,33 @@ export const BACKEND_ONLY_OPERATION_CONTRACTS: readonly FrontendOperationContrac
   ...operations(null, ['DELETE /stories/{id}']),
 ].map((contract) => {
   const key = `${contract.method.toUpperCase()} ${contract.path}`;
+  if (key === 'PATCH /admin/moderation/v1/reports/{type}/{id}') return { ...contract, request: { schema: 'UpdateAdminReportDto' } };
+  if (key === 'PATCH /admin/moderation/v1/reports/{type}/{id}/assignment') return { ...contract, request: { schema: 'AssignAdminReportDto' } };
+  if (key === 'POST /admin/moderation/v1/reports/{type}/{id}/notes') return { ...contract, request: { schema: 'AddAdminReportNoteDto' } };
+  if (key === 'POST /admin/moderation/v1/reports/{type}/{id}/escalations') return { ...contract, request: { schema: 'EscalateAdminReportDto' } };
+  if (key === 'POST /admin/moderation/v1/reports/{type}/{id}/appeals') return { ...contract, request: { schema: 'CreateAdminAppealDto' } };
+  if (key === 'PATCH /admin/moderation/v1/appeals/{id}') return { ...contract, request: { schema: 'ReviewAdminAppealDto' } };
+  if (key === 'POST /admin/moderation/v1/reports/{type}/{id}/evidence') return { ...contract, request: { schema: 'CreateAdminEvidenceDto' } };
+  if (key === 'PATCH /admin/moderation/v1/evidence/{id}/retention') return { ...contract, request: { schema: 'UpdateAdminEvidenceRetentionDto' } };
+  if (key === 'POST /admin/moderation/v1/users/{id}/ban') return { ...contract, request: { schema: 'BanAdminUserDto' } };
+  if (key === 'POST /admin/moderation/v1/users/{id}/unban') return { ...contract, request: { schema: 'UnbanAdminUserDto' } };
+  if (key === 'POST /admin/moderation/v1/users/{id}/revoke-sessions') {
+    return { ...contract, request: { schema: 'RevokeAdminUserSessionsDto' } };
+  }
+  if (
+    key === 'POST /admin/moderation/v1/posts/{id}/quarantine'
+    || key === 'POST /admin/moderation/v1/groups/{id}/quarantine'
+    || key === 'POST /admin/moderation/v1/messages/{id}/quarantine'
+  ) {
+    return { ...contract, request: { schema: 'QuarantineAdminContentDto' } };
+  }
+  if (
+    key === 'POST /admin/moderation/v1/posts/{id}/restore'
+    || key === 'POST /admin/moderation/v1/groups/{id}/restore'
+    || key === 'POST /admin/moderation/v1/messages/{id}/restore'
+  ) {
+    return { ...contract, request: { schema: 'RestoreAdminContentDto' } };
+  }
   if (key === 'POST /chat/keys') return { ...contract, request: { schema: 'RegisterChatKeyDto' } };
   if (key === 'POST /uploads/media') return { ...contract, request: { schema: 'MultipartFileDto', mediaType: 'multipart/form-data' } };
   if (key === 'POST /uploads/media/batch') return { ...contract, request: { schema: 'MultipartFilesDto', mediaType: 'multipart/form-data' } };

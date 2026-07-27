@@ -230,11 +230,38 @@ enum ReportStatus {
   @@map("report_status")
 }
 
+enum ModerationReportType {
+  post
+  user
+  group
+  message
+
+  @@map("moderation_report_type")
+}
+
+enum ReportAppealStatus {
+  submitted
+  under_review
+  upheld
+  overturned
+  dismissed
+  withdrawn
+
+  @@map("report_appeal_status")
+}
+
 enum UserModerationStatus {
   active
   banned
 
   @@map("user_moderation_status")
+}
+
+enum ContentModerationStatus {
+  active
+  quarantined
+
+  @@map("content_moderation_status")
 }
 
 enum PostVisibility {
@@ -281,6 +308,51 @@ enum ActivitySource {
   @@map("activity_source")
 }
 
+enum MediaUploadSessionStatus {
+  creating
+  uploading
+  completing
+  queued
+  processing
+  ready
+  rejected
+  failed
+  cancelled
+  expired
+
+  @@map("media_upload_session_status")
+}
+
+enum MediaAssetStatus {
+  quarantined
+  processing
+  ready
+  rejected
+
+  @@map("media_asset_status")
+}
+
+enum MediaProcessingJobStatus {
+  pending
+  leased
+  retry_wait
+  succeeded
+  dead_letter
+  cancelled
+
+  @@map("media_processing_job_status")
+}
+
+enum MediaPublishAttemptStatus {
+  staged
+  published
+  winner
+  cleanup_pending
+  cleaned
+
+  @@map("media_publish_attempt_status")
+}
+
 model User {
   id                      String               @id @default(uuid())
   email                   String               @unique
@@ -305,6 +377,8 @@ model User {
   banReason               String?              @map("ban_reason")
   googleId                String?              @unique @map("google_id")
   googleEmailVerified     Boolean              @default(false) @map("google_email_verified")
+  emailVerifiedAt         DateTime?            @map("email_verified_at")
+  emailVerificationSentAt DateTime?            @map("email_verification_sent_at")
   legalConsentAt          DateTime?            @map("legal_consent_at")
   dataConsentAt           DateTime?            @map("data_consent_at")
   chatPublicKey           String?              @map("chat_public_key")
@@ -340,6 +414,7 @@ model User {
   loginSessions                LoginSession[]
   refreshTokens                RefreshToken[]
   passwordResetTokens          PasswordResetToken[]
+  emailVerificationTokens      EmailVerificationToken[]
   following                    Follow[]                      @relation("Following")
   followers                    Follow[]                      @relation("Followers")
   sentFollowRequests           FollowRequest[]               @relation("SentFollowRequests")
@@ -391,6 +466,8 @@ model User {
   storyViews                   StoryView[]
   storyReactions               StoryReaction[]
   badges                       UserBadge[]
+  mediaUploadSessions          MediaUploadSession[]
+  mediaAssets                  MediaAsset[]
 
   @@index([latitude, longitude])
   @@index([createdAt])
@@ -788,24 +865,42 @@ model PasswordResetToken {
   @@map("password_reset_tokens")
 }
 
+model EmailVerificationToken {
+  id        String    @id
+  tokenHash String    @map("token_hash")
+  userId    String    @map("user_id")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([userId, usedAt, expiresAt])
+  @@map("email_verification_tokens")
+}
+
 model Post {
-  id             String         @id @default(uuid())
-  authorId       String         @map("author_id")
-  profileOwnerId String?        @map("profile_owner_id")
-  groupId        String?        @map("group_id")
-  text           String?
-  latitude       Float?
-  longitude      Float?
-  viewCount      Int            @default(0) @map("view_count")
-  likeCount      Int            @default(0) @map("like_count")
-  commentCount   Int            @default(0) @map("comment_count")
-  pinnedAt       DateTime?      @map("pinned_at")
-  visibility     PostVisibility @default(public)
-  isAnonymous    Boolean        @default(false) @map("is_anonymous")
-  activityId     String?        @map("activity_id")
-  editedAt       DateTime?      @map("edited_at")
-  createdAt      DateTime       @default(now()) @map("created_at")
-  updatedAt      DateTime       @updatedAt @map("updated_at")
+  id               String                  @id @default(uuid())
+  authorId         String                  @map("author_id")
+  profileOwnerId   String?                 @map("profile_owner_id")
+  groupId          String?                 @map("group_id")
+  text             String?
+  latitude         Float?
+  longitude        Float?
+  viewCount        Int                     @default(0) @map("view_count")
+  likeCount        Int                     @default(0) @map("like_count")
+  commentCount     Int                     @default(0) @map("comment_count")
+  pinnedAt         DateTime?               @map("pinned_at")
+  visibility       PostVisibility          @default(public)
+  moderationStatus ContentModerationStatus @default(active) @map("moderation_status")
+  quarantinedAt    DateTime?               @map("quarantined_at")
+  quarantinedById  String?                 @map("quarantined_by_id")
+  quarantineReason String?                 @map("quarantine_reason")
+  isAnonymous      Boolean                 @default(false) @map("is_anonymous")
+  activityId       String?                 @map("activity_id")
+  editedAt         DateTime?               @map("edited_at")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
 
   author            User               @relation(fields: [authorId], references: [id], onDelete: Cascade)
   profileOwner      User?              @relation("ProfileWallPosts", fields: [profileOwnerId], references: [id], onDelete: Cascade)
@@ -829,6 +924,7 @@ model Post {
   @@index([groupId, createdAt])
   @@index([activityId])
   @@index([visibility, createdAt])
+  @@index([moderationStatus, createdAt])
   @@index([createdAt])
   @@index([latitude, longitude])
   @@map("posts")
@@ -970,16 +1066,20 @@ model Comment {
 }
 
 model Group {
-  id                  String                 @id @default(uuid())
+  id                  String                  @id @default(uuid())
   name                String
-  slug                String                 @unique
+  slug                String                  @unique
   description         String?
-  profileImageUrl     String?                @map("profile_image_url")
-  coverImageUrl       String?                @map("cover_image_url")
-  visibility          GroupVisibility        @default(public)
-  inviteCode          String?                @unique @map("invite_code")
-  allowAnonymousPosts Boolean                @default(false) @map("allow_anonymous_posts")
-  createdAt           DateTime               @default(now()) @map("created_at")
+  profileImageUrl     String?                 @map("profile_image_url")
+  coverImageUrl       String?                 @map("cover_image_url")
+  visibility          GroupVisibility         @default(public)
+  moderationStatus    ContentModerationStatus @default(active) @map("moderation_status")
+  quarantinedAt       DateTime?               @map("quarantined_at")
+  quarantinedById     String?                 @map("quarantined_by_id")
+  quarantineReason    String?                 @map("quarantine_reason")
+  inviteCode          String?                 @unique @map("invite_code")
+  allowAnonymousPosts Boolean                 @default(false) @map("allow_anonymous_posts")
+  createdAt           DateTime                @default(now()) @map("created_at")
   members             GroupMember[]
   readStates          GroupChatReadState[]
   chatChannels        GroupChatChannel[]
@@ -992,10 +1092,11 @@ model Group {
   legacyPosts         GroupPost[]
   reports             GroupReport[]
   buddyRooms          BuddyRoom[]
-  buddySessionRecaps  BuddySessionRecap[]    @relation("BuddySessionRecapGroups")
+  buddySessionRecaps  BuddySessionRecap[]     @relation("BuddySessionRecapGroups")
   invites             GroupInvite[]
 
   @@index([visibility, createdAt])
+  @@index([moderationStatus, createdAt])
   @@map("groups")
 }
 
@@ -1219,30 +1320,34 @@ model MessageReaction {
 }
 
 model Message {
-  id                  String            @id @default(uuid())
-  senderId            String            @map("sender_id")
-  recipientId         String?           @map("recipient_id")
-  groupId             String?           @map("group_id")
-  buddyGroupChatId    String?           @map("buddy_group_chat_id")
-  channelId           String?           @map("channel_id")
+  id                  String                  @id @default(uuid())
+  senderId            String                  @map("sender_id")
+  recipientId         String?                 @map("recipient_id")
+  groupId             String?                 @map("group_id")
+  buddyGroupChatId    String?                 @map("buddy_group_chat_id")
+  channelId           String?                 @map("channel_id")
   body                String
-  referenceType       String?           @map("reference_type")
-  referenceId         String?           @map("reference_id")
-  referenceMediaUrl   String?           @map("reference_media_url")
-  referenceText       String?           @map("reference_text")
-  referenceAuthorName String?           @map("reference_author_name")
+  referenceType       String?                 @map("reference_type")
+  referenceId         String?                 @map("reference_id")
+  referenceMediaUrl   String?                 @map("reference_media_url")
+  referenceText       String?                 @map("reference_text")
+  referenceAuthorName String?                 @map("reference_author_name")
   ciphertext          String?
   nonce               String?
-  encrypted           Boolean           @default(false)
-  readAt              DateTime?         @map("read_at")
-  deletedAt           DateTime?         @map("deleted_at")
-  deletedById         String?           @map("deleted_by_id")
-  createdAt           DateTime          @default(now()) @map("created_at")
-  sender              User              @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
-  recipient           User?             @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
-  group               Group?            @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  buddyGroupChat      BuddyGroupChat?   @relation(fields: [buddyGroupChatId], references: [id], onDelete: Cascade)
-  channel             GroupChatChannel? @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  encrypted           Boolean                 @default(false)
+  readAt              DateTime?               @map("read_at")
+  deletedAt           DateTime?               @map("deleted_at")
+  deletedById         String?                 @map("deleted_by_id")
+  moderationStatus    ContentModerationStatus @default(active) @map("moderation_status")
+  quarantinedAt       DateTime?               @map("quarantined_at")
+  quarantinedById     String?                 @map("quarantined_by_id")
+  quarantineReason    String?                 @map("quarantine_reason")
+  createdAt           DateTime                @default(now()) @map("created_at")
+  sender              User                    @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  recipient           User?                   @relation("ReceivedMessages", fields: [recipientId], references: [id], onDelete: Cascade)
+  group               Group?                  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  buddyGroupChat      BuddyGroupChat?         @relation(fields: [buddyGroupChatId], references: [id], onDelete: Cascade)
+  channel             GroupChatChannel?       @relation(fields: [channelId], references: [id], onDelete: Cascade)
   reactions           MessageReaction[]
   hiddenBy            HiddenMessage[]
   pinnedBy            PinnedMessage[]
@@ -1255,6 +1360,7 @@ model Message {
   @@index([groupId, createdAt])
   @@index([buddyGroupChatId, createdAt])
   @@index([channelId, createdAt])
+  @@index([moderationStatus, createdAt])
   @@map("messages")
 }
 
@@ -1405,106 +1511,257 @@ model HiddenPost {
 }
 
 model PostReport {
-  id             String           @id @default(uuid())
-  postId         String           @map("post_id")
-  userId         String           @map("user_id")
-  reason         PostReportReason @default(other)
-  category       ReportCategory   @default(other)
-  note           String?
-  details        String?
-  status         ReportStatus     @default(open)
-  priority       Int              @default(0)
-  reviewedAt     DateTime?        @map("reviewed_at")
-  reviewedById   String?          @map("reviewed_by_id")
-  actionTaken    String?          @map("action_taken")
-  resolutionNote String?          @map("resolution_note")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at")
-  post           Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
-  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String           @id @default(uuid())
+  postId             String           @map("post_id")
+  userId             String           @map("user_id")
+  reason             PostReportReason @default(other)
+  category           ReportCategory   @default(other)
+  note               String?
+  details            String?
+  status             ReportStatus     @default(open)
+  priority           Int              @default(0)
+  assignedReviewerId String?          @map("assigned_reviewer_id")
+  assignedAt         DateTime?        @map("assigned_at")
+  slaDueAt           DateTime?        @map("sla_due_at")
+  escalationLevel    Int              @default(0) @map("escalation_level")
+  escalatedAt        DateTime?        @map("escalated_at")
+  escalatedById      String?          @map("escalated_by_id")
+  escalationReason   String?          @map("escalation_reason")
+  reviewedAt         DateTime?        @map("reviewed_at")
+  reviewedById       String?          @map("reviewed_by_id")
+  actionTaken        String?          @map("action_taken")
+  resolutionNote     String?          @map("resolution_note")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at")
+  post               Post             @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([postId, userId])
   @@index([status, category, createdAt])
+  @@index([assignedReviewerId, status, createdAt])
+  @@index([slaDueAt, status])
+  @@index([escalationLevel, status, createdAt])
   @@index([postId, createdAt])
   @@index([userId, createdAt])
   @@map("post_reports")
 }
 
 model UserReport {
-  id             String           @id @default(uuid())
-  reportedId     String           @map("reported_id")
-  reporterId     String           @map("reporter_id")
-  reason         UserReportReason @default(other)
-  category       ReportCategory   @default(other)
-  note           String?
-  details        String?
-  status         ReportStatus     @default(open)
-  priority       Int              @default(0)
-  reviewedAt     DateTime?        @map("reviewed_at")
-  reviewedById   String?          @map("reviewed_by_id")
-  actionTaken    String?          @map("action_taken")
-  resolutionNote String?          @map("resolution_note")
-  createdAt      DateTime         @default(now()) @map("created_at")
-  updatedAt      DateTime         @default(now()) @updatedAt @map("updated_at")
-  reported       User             @relation("UserReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
-  reporter       User             @relation("UserReportsSent", fields: [reporterId], references: [id], onDelete: Cascade)
+  id                 String           @id @default(uuid())
+  reportedId         String           @map("reported_id")
+  reporterId         String           @map("reporter_id")
+  reason             UserReportReason @default(other)
+  category           ReportCategory   @default(other)
+  note               String?
+  details            String?
+  status             ReportStatus     @default(open)
+  priority           Int              @default(0)
+  assignedReviewerId String?          @map("assigned_reviewer_id")
+  assignedAt         DateTime?        @map("assigned_at")
+  slaDueAt           DateTime?        @map("sla_due_at")
+  escalationLevel    Int              @default(0) @map("escalation_level")
+  escalatedAt        DateTime?        @map("escalated_at")
+  escalatedById      String?          @map("escalated_by_id")
+  escalationReason   String?          @map("escalation_reason")
+  reviewedAt         DateTime?        @map("reviewed_at")
+  reviewedById       String?          @map("reviewed_by_id")
+  actionTaken        String?          @map("action_taken")
+  resolutionNote     String?          @map("resolution_note")
+  createdAt          DateTime         @default(now()) @map("created_at")
+  updatedAt          DateTime         @default(now()) @updatedAt @map("updated_at")
+  reported           User             @relation("UserReportsReceived", fields: [reportedId], references: [id], onDelete: Cascade)
+  reporter           User             @relation("UserReportsSent", fields: [reporterId], references: [id], onDelete: Cascade)
 
   @@unique([reportedId, reporterId])
   @@index([status, category, createdAt])
+  @@index([assignedReviewerId, status, createdAt])
+  @@index([slaDueAt, status])
+  @@index([escalationLevel, status, createdAt])
   @@index([reportedId, createdAt])
   @@index([reporterId, createdAt])
   @@map("user_reports")
 }
 
 model GroupReport {
-  id             String            @id @default(uuid())
-  groupId        String            @map("group_id")
-  userId         String            @map("user_id")
-  reason         GroupReportReason @default(other)
-  category       ReportCategory    @default(other)
-  note           String?
-  details        String?
-  status         ReportStatus      @default(open)
-  priority       Int               @default(0)
-  reviewedAt     DateTime?         @map("reviewed_at")
-  reviewedById   String?           @map("reviewed_by_id")
-  actionTaken    String?           @map("action_taken")
-  resolutionNote String?           @map("resolution_note")
-  createdAt      DateTime          @default(now()) @map("created_at")
-  updatedAt      DateTime          @default(now()) @updatedAt @map("updated_at")
-  group          Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
-  user           User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String            @id @default(uuid())
+  groupId            String            @map("group_id")
+  userId             String            @map("user_id")
+  reason             GroupReportReason @default(other)
+  category           ReportCategory    @default(other)
+  note               String?
+  details            String?
+  status             ReportStatus      @default(open)
+  priority           Int               @default(0)
+  assignedReviewerId String?           @map("assigned_reviewer_id")
+  assignedAt         DateTime?         @map("assigned_at")
+  slaDueAt           DateTime?         @map("sla_due_at")
+  escalationLevel    Int               @default(0) @map("escalation_level")
+  escalatedAt        DateTime?         @map("escalated_at")
+  escalatedById      String?           @map("escalated_by_id")
+  escalationReason   String?           @map("escalation_reason")
+  reviewedAt         DateTime?         @map("reviewed_at")
+  reviewedById       String?           @map("reviewed_by_id")
+  actionTaken        String?           @map("action_taken")
+  resolutionNote     String?           @map("resolution_note")
+  createdAt          DateTime          @default(now()) @map("created_at")
+  updatedAt          DateTime          @default(now()) @updatedAt @map("updated_at")
+  group              Group             @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user               User              @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([groupId, userId])
   @@index([status, category, createdAt])
+  @@index([assignedReviewerId, status, createdAt])
+  @@index([slaDueAt, status])
+  @@index([escalationLevel, status, createdAt])
   @@index([groupId, createdAt])
   @@index([userId, createdAt])
   @@map("group_reports")
 }
 
 model MessageReport {
-  id             String         @id @default(uuid())
-  messageId      String         @map("message_id")
-  userId         String         @map("user_id")
-  category       ReportCategory @default(other)
-  note           String?
-  details        String?
-  status         ReportStatus   @default(open)
-  priority       Int            @default(0)
-  reviewedAt     DateTime?      @map("reviewed_at")
-  reviewedById   String?        @map("reviewed_by_id")
-  actionTaken    String?        @map("action_taken")
-  resolutionNote String?        @map("resolution_note")
-  createdAt      DateTime       @default(now()) @map("created_at")
-  updatedAt      DateTime       @updatedAt @map("updated_at")
-  message        Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id                 String         @id @default(uuid())
+  messageId          String         @map("message_id")
+  userId             String         @map("user_id")
+  category           ReportCategory @default(other)
+  note               String?
+  details            String?
+  status             ReportStatus   @default(open)
+  priority           Int            @default(0)
+  assignedReviewerId String?        @map("assigned_reviewer_id")
+  assignedAt         DateTime?      @map("assigned_at")
+  slaDueAt           DateTime?      @map("sla_due_at")
+  escalationLevel    Int            @default(0) @map("escalation_level")
+  escalatedAt        DateTime?      @map("escalated_at")
+  escalatedById      String?        @map("escalated_by_id")
+  escalationReason   String?        @map("escalation_reason")
+  reviewedAt         DateTime?      @map("reviewed_at")
+  reviewedById       String?        @map("reviewed_by_id")
+  actionTaken        String?        @map("action_taken")
+  resolutionNote     String?        @map("resolution_note")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+  message            Message        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user               User           @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([messageId, userId])
   @@index([status, category, createdAt])
+  @@index([assignedReviewerId, status, createdAt])
+  @@index([slaDueAt, status])
+  @@index([escalationLevel, status, createdAt])
   @@index([messageId, createdAt])
   @@index([userId, createdAt])
   @@map("message_reports")
+}
+
+model AdminReportInternalNote {
+  id         String               @id @default(uuid())
+  reportType ModerationReportType @map("report_type")
+  reportId   String               @map("report_id")
+  authorId   String               @map("author_id")
+  body       String
+  createdAt  DateTime             @default(now()) @map("created_at")
+
+  @@index([reportType, reportId, createdAt])
+  @@map("admin_report_internal_notes")
+}
+
+model AdminReportAppeal {
+  id                 String               @id @default(uuid())
+  reportType         ModerationReportType @map("report_type")
+  reportId           String               @map("report_id")
+  appellantUserId    String?              @map("appellant_user_id")
+  statement          String
+  status             ReportAppealStatus   @default(submitted)
+  assignedReviewerId String?              @map("assigned_reviewer_id")
+  assignedAt         DateTime?            @map("assigned_at")
+  reviewedAt         DateTime?            @map("reviewed_at")
+  reviewedById       String?              @map("reviewed_by_id")
+  resolutionNote     String?              @map("resolution_note")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  @@index([reportType, reportId, createdAt])
+  @@index([status, createdAt])
+  @@index([assignedReviewerId, status, createdAt])
+  @@map("admin_report_appeals")
+}
+
+model AdminReportEvidence {
+  id                 String               @id @default(uuid())
+  reportType         ModerationReportType @map("report_type")
+  reportId           String               @map("report_id")
+  storageKey         String               @map("storage_key")
+  sha256             String
+  mediaType          String               @map("media_type")
+  byteSize           Int                  @map("byte_size")
+  metadata           Json
+  retentionExpiresAt DateTime             @map("retention_expires_at")
+  legalHold          Boolean              @default(false) @map("legal_hold")
+  createdById        String               @map("created_by_id")
+  createdAt          DateTime             @default(now()) @map("created_at")
+  updatedAt          DateTime             @updatedAt @map("updated_at")
+
+  @@index([reportType, reportId, createdAt])
+  @@index([retentionExpiresAt, legalHold])
+  @@map("admin_report_evidence")
+}
+
+model AdminJwtJti {
+  jti       String   @id
+  actorId   String   @map("actor_id")
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([expiresAt])
+  @@index([actorId, createdAt])
+  @@map("admin_jwt_jtis")
+}
+
+model AdminIdempotencyRecord {
+  id          String   @id @default(uuid())
+  actorId     String   @map("actor_id")
+  key         String
+  operation   String
+  requestHash String   @map("request_hash")
+  requestId   String   @unique @map("request_id")
+  response    Json?
+  expiresAt   DateTime @map("expires_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@unique([actorId, key])
+  @@index([expiresAt])
+  @@map("admin_idempotency_records")
+}
+
+model AdminAuditEvent {
+  id         String   @id @default(uuid())
+  requestId  String   @unique @map("request_id")
+  actorId    String   @map("actor_id")
+  actorJti   String   @map("actor_jti")
+  action     String
+  targetType String   @map("target_type")
+  targetId   String   @map("target_id")
+  metadata   Json
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([actorId, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@map("admin_audit_events")
+}
+
+model AdminOutboxEvent {
+  id            String    @id @default(uuid())
+  requestId     String    @unique @map("request_id")
+  eventType     String    @map("event_type")
+  aggregateType String    @map("aggregate_type")
+  aggregateId   String    @map("aggregate_id")
+  payload       Json
+  createdAt     DateTime  @default(now()) @map("created_at")
+  publishedAt   DateTime? @map("published_at")
+  attempts      Int       @default(0)
+
+  @@index([publishedAt, createdAt])
+  @@map("admin_outbox_events")
 }
 
 model Block {
@@ -1634,4 +1891,131 @@ model UserSearchHistory {
   @@index([userId, updatedAt])
   @@index([targetUserId])
   @@map("user_search_history")
+}
+
+model MediaUploadSession {
+  id                         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId                     String                   @map("user_id")
+  idempotencyKey             String?                  @map("idempotency_key")
+  collection                 String
+  declaredMimeType           String                   @map("declared_mime_type")
+  declaredSize               Int                      @map("declared_size")
+  declaredSha256             String?                  @map("declared_sha256")
+  quarantineBucket           String                   @map("quarantine_bucket")
+  quarantineKey              String                   @map("quarantine_key")
+  providerUploadId           String?                  @map("provider_upload_id")
+  checksumAlgorithm          String                   @default("SHA256") @map("checksum_algorithm")
+  partSize                   Int                      @map("part_size")
+  expectedPartCount          Int                      @map("expected_part_count")
+  status                     MediaUploadSessionStatus @default(creating)
+  completionClaimId          String?                  @map("completion_claim_id") @db.Uuid
+  objectEtag                 String?                  @map("object_etag")
+  objectChecksumSha256       String?                  @map("object_checksum_sha256")
+  failureCode                String?                  @map("failure_code")
+  failureMessage             String?                  @map("failure_message")
+  expiresAt                  DateTime                 @map("expires_at")
+  completedAt                DateTime?                @map("completed_at")
+  cancelledAt                DateTime?                @map("cancelled_at")
+  quarantineCleanupStartedAt DateTime?                @map("quarantine_cleanup_started_at")
+  quarantineDeletedAt        DateTime?                @map("quarantine_deleted_at")
+  createdAt                  DateTime                 @default(now()) @map("created_at")
+  updatedAt                  DateTime                 @updatedAt @map("updated_at")
+  user                       User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parts                      MediaUploadPart[]
+  asset                      MediaAsset?
+  processingJob              MediaProcessingJob?
+
+  @@unique([userId, idempotencyKey])
+  @@unique([quarantineBucket, quarantineKey])
+  @@index([userId, status, createdAt])
+  @@index([status, expiresAt])
+  @@index([createdAt])
+  @@map("media_upload_sessions")
+}
+
+model MediaUploadPart {
+  sessionId      String             @map("session_id") @db.Uuid
+  partNumber     Int                @map("part_number")
+  etag           String
+  checksumSha256 String             @map("checksum_sha256")
+  byteSize       Int                @map("byte_size")
+  createdAt      DateTime           @default(now()) @map("created_at")
+  updatedAt      DateTime           @updatedAt @map("updated_at")
+  session        MediaUploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@id([sessionId, partNumber])
+  @@index([sessionId, createdAt])
+  @@map("media_upload_parts")
+}
+
+model MediaAsset {
+  id              String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId       String             @unique @map("session_id") @db.Uuid
+  userId          String             @map("user_id")
+  collection      String
+  status          MediaAssetStatus   @default(quarantined)
+  mimeType        String             @map("mime_type")
+  byteSize        Int                @map("byte_size")
+  sha256          String?
+  publicBucket    String?            @map("public_bucket")
+  publicKey       String?            @unique @map("public_key")
+  publicUrl       String?            @map("public_url")
+  width           Int?
+  height          Int?
+  durationSeconds Float?             @map("duration_seconds")
+  failureCode     String?            @map("failure_code")
+  failureMessage  String?            @map("failure_message")
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+  session         MediaUploadSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, status, createdAt])
+  @@index([status, createdAt])
+  @@map("media_assets")
+}
+
+model MediaProcessingJob {
+  id               String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId        String                   @unique @map("session_id") @db.Uuid
+  status           MediaProcessingJobStatus @default(pending)
+  attempts         Int                      @default(0)
+  maxAttempts      Int                      @default(5) @map("max_attempts")
+  availableAt      DateTime                 @default(now()) @map("available_at")
+  leaseOwner       String?                  @map("lease_owner")
+  leasedAt         DateTime?                @map("leased_at")
+  leaseExpiresAt   DateTime?                @map("lease_expires_at")
+  lastErrorCode    String?                  @map("last_error_code")
+  lastErrorMessage String?                  @map("last_error_message")
+  completedAt      DateTime?                @map("completed_at")
+  createdAt        DateTime                 @default(now()) @map("created_at")
+  updatedAt        DateTime                 @updatedAt @map("updated_at")
+  session          MediaUploadSession       @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([status, availableAt, createdAt])
+  @@index([status, leaseExpiresAt])
+  @@map("media_processing_jobs")
+}
+
+model MediaPublishAttempt {
+  id           String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sessionId    String                    @map("session_id") @db.Uuid
+  assetId      String                    @map("asset_id") @db.Uuid
+  jobId        String                    @map("job_id") @db.Uuid
+  workerId     String                    @map("worker_id")
+  attempt      Int
+  publicBucket String                    @map("public_bucket")
+  publicKey    String                    @unique @map("public_key")
+  status       MediaPublishAttemptStatus @default(staged)
+  lastError    String?                   @map("last_error")
+  publishedAt  DateTime?                 @map("published_at")
+  finalizedAt  DateTime?                 @map("finalized_at")
+  cleanedAt    DateTime?                 @map("cleaned_at")
+  createdAt    DateTime                  @default(now()) @map("created_at")
+  updatedAt    DateTime                  @updatedAt @map("updated_at")
+
+  @@index([sessionId, status, createdAt])
+  @@index([jobId, status])
+  @@index([status, createdAt])
+  @@map("media_publish_attempts")
 }

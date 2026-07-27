@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
@@ -9,17 +9,33 @@ import { activityPersonaLinkSelect, exposeActivityPersonas, replaceActivityPerso
 import { availableProfileBadgesFor, exposeProfileBadges, profileBadgeSelect } from '../common/profile-badges';
 import { normalizeUsername } from '../common/usernames';
 import { presentPublicPost, publicActivitySelect, publicBuddySessionRecapSelect } from '../common/post-presentation';
+import { ConfigService } from '@nestjs/config';
+import { assertMeetsMinimumAccountAge } from '../common/account-age';
+import { EmailVerificationService } from '../auth/email-verification.service';
 
 type PublicPresentationUser = Parameters<typeof exposeActivityPersonas>[0] & Parameters<typeof exposeProfileBadges>[0];
 
 @Injectable()
 export class UsersService {
-  constructor(private prisma: PrismaService, private notifications: NotificationsService) {}
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(
+    private prisma: PrismaService,
+    private notifications: NotificationsService,
+    private config: ConfigService = null!,
+    private emailVerification: EmailVerificationService = null!,
+  ) {}
 
   async me(userId: string) { return this.withOnboarding(await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: this.select() })); }
   async updateMe(userId: string, dto: UpdateMeDto) {
+    const requestedDateOfBirth = dto.dateOfBirth;
+    if (requestedDateOfBirth !== undefined) {
+      if (!requestedDateOfBirth) throw new BadRequestException('Birth date cannot be removed');
+      assertMeetsMinimumAccountAge(requestedDateOfBirth, this.config);
+    }
     const username = normalizeUsername(dto.username);
-    const { displayName, activityPersona, activityPersonas, ...rest } = dto;
+    const { displayName, activityPersona, activityPersonas, dateOfBirth: _dateOfBirth, ...rest } = dto;
+    void _dateOfBirth;
     delete rest.username;
     const requestedActivityPersonas = activityPersonas !== undefined
       ? activityPersonas
@@ -31,7 +47,25 @@ export class UsersService {
       const existing = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
       if (existing && existing.id !== userId) throw new ConflictException('Username already taken');
     }
-    const user = await this.prisma.user.update({ where: { id: userId }, data: { ...rest, ...(requestedActivityPersonas !== undefined ? { activityPersonas: replaceActivityPersonaLinks(requestedActivityPersonas) } : {}), ...(username ? { username, usernameFinalized: true } : {}), ...(displayName !== undefined ? { displayName: displayName.trim() || null } : {}) }, select: this.select() });
+    let user;
+    try {
+      user = await this.prisma.user.update({
+        where: { id: userId, ...(requestedDateOfBirth !== undefined ? { dateOfBirth: null } : {}) },
+        data: {
+          ...rest,
+          ...(requestedDateOfBirth !== undefined ? { dateOfBirth: requestedDateOfBirth } : {}),
+          ...(requestedActivityPersonas !== undefined ? { activityPersonas: replaceActivityPersonaLinks(requestedActivityPersonas) } : {}),
+          ...(username ? { username, usernameFinalized: true } : {}),
+          ...(displayName !== undefined ? { displayName: displayName.trim() || null } : {}),
+        },
+        select: this.select(),
+      });
+    } catch (error) {
+      if (requestedDateOfBirth !== undefined && this.isNotFoundError(error)) {
+        throw new BadRequestException('Birth date can only be corrected by account support');
+      }
+      throw error;
+    }
     return this.withOnboarding(user);
   }
   async completeOnboarding(userId: string, dto: CompleteUserOnboardingDto) {
@@ -39,30 +73,123 @@ export class UsersService {
     const username = normalizeUsername(dto.username);
     if (!username) throw new BadRequestException('Username is required');
     if (!dto.dateOfBirth) throw new BadRequestException('Birth date is required');
+    assertMeetsMinimumAccountAge(dto.dateOfBirth, this.config);
     const existing = await this.prisma.user.findUnique({ where: { username }, select: { id: true } });
     if (existing && existing.id !== userId) throw new ConflictException('Username already taken');
     const activityPersonas = dto.activityPersonas ?? [];
-    const user = await this.prisma.user.update({ where: { id: userId }, data: { username, usernameFinalized: true, dateOfBirth: dto.dateOfBirth, legalConsentAt: new Date(), dataConsentAt: new Date(), activityPersonas: replaceActivityPersonaLinks(activityPersonas) }, select: this.select() });
+    let user;
+    try {
+      user = await this.prisma.user.update({
+        where: { id: userId, dateOfBirth: null },
+        data: { username, usernameFinalized: true, dateOfBirth: dto.dateOfBirth, legalConsentAt: new Date(), dataConsentAt: new Date(), activityPersonas: replaceActivityPersonaLinks(activityPersonas) },
+        select: this.select(),
+      });
+    } catch (error) {
+      if (this.isNotFoundError(error)) {
+        throw new BadRequestException('Onboarding is already complete; contact support to correct account details');
+      }
+      throw error;
+    }
     return this.withOnboarding(user);
   }
   async updateAccount(userId: string, dto: UpdateAccountDto) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { id: true, email: true, passwordHash: true } });
     if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) throw new UnauthorizedException('Current password is incorrect');
     const email = dto.email.toLowerCase().trim();
-    if (email !== user.email) {
-      const existing = await this.prisma.user.findUnique({ where: { email }, select: { id: true } });
-      if (existing && existing.id !== userId) throw new ConflictException('Email already registered');
+    const changedAt = new Date();
+    const { updated, emailChanged } = await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string; email: string; passwordHash: string }[]>(Prisma.sql`
+        SELECT
+          "id",
+          "email",
+          "password_hash" AS "passwordHash"
+        FROM "users"
+        WHERE "id" = ${userId}
+        FOR UPDATE
+      `);
+      const current = locked[0];
+      if (!current) throw new NotFoundException('User was not found');
+      if (current.passwordHash !== user.passwordHash) {
+        throw new UnauthorizedException('Account credentials changed; retry the email update');
+      }
+
+      const emailChanged = email !== current.email;
+      if (emailChanged) {
+        const existing = await tx.user.findUnique({ where: { email }, select: { id: true } });
+        if (existing && existing.id !== userId) throw new ConflictException('Email already registered');
+      }
+      const updated = await tx.user.update({
+        where: { id: userId },
+        data: {
+          email,
+          ...(emailChanged
+            ? {
+                emailVerifiedAt: null,
+                emailVerificationSentAt: null,
+                googleId: null,
+                googleEmailVerified: false,
+              }
+            : {}),
+        },
+        select: this.select(),
+      });
+      if (emailChanged) {
+        await tx.emailVerificationToken.updateMany({
+          where: { userId, usedAt: null },
+          data: { usedAt: changedAt },
+        });
+        await tx.passwordResetToken.updateMany({
+          where: { userId, usedAt: null },
+          data: { usedAt: changedAt },
+        });
+        await tx.refreshToken.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: changedAt },
+        });
+        await tx.loginSession.updateMany({
+          where: { userId, revokedAt: null },
+          data: { revokedAt: changedAt },
+        });
+      }
+      return { updated, emailChanged };
+    });
+    if (emailChanged && this.emailVerification) {
+      await this.emailVerification.sendForUser(userId, true).catch((error) => {
+        this.logger.warn(`Email-change verification dispatch failed: ${error instanceof Error ? error.message : 'unknown error'}`);
+      });
     }
-    return this.prisma.user.update({ where: { id: userId }, data: { email }, select: this.select() }).then((user) => this.withOnboarding(user));
+    return this.withOnboarding(updated);
   }
   async updatePassword(userId: string, dto: UpdatePasswordDto) {
     const user = await this.prisma.user.findUniqueOrThrow({ where: { id: userId }, select: { passwordHash: true } });
     if (!(await bcrypt.compare(dto.currentPassword, user.passwordHash))) throw new UnauthorizedException('Current password is incorrect');
-    await this.prisma.$transaction([
-      this.prisma.user.update({ where: { id: userId }, data: { passwordHash: await bcrypt.hash(dto.newPassword, 12) } }),
-      this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-      this.prisma.loginSession.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } }),
-    ]);
+    const passwordHash = await bcrypt.hash(dto.newPassword, 12);
+    const revokedAt = new Date();
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ passwordHash: string }[]>(Prisma.sql`
+        SELECT "password_hash" AS "passwordHash"
+        FROM "users"
+        WHERE "id" = ${userId}
+        FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException('User was not found');
+      if (locked[0].passwordHash !== user.passwordHash) {
+        throw new UnauthorizedException('Account credentials changed; retry the password update');
+      }
+      await tx.user.update({ where: { id: userId }, data: { passwordHash } });
+      await tx.passwordResetToken.updateMany({
+        where: { userId, usedAt: null },
+        data: { usedAt: revokedAt },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt },
+      });
+      await tx.loginSession.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt },
+      });
+    });
     return { ok: true };
   }
   sessions(userId: string, currentSessionId?: string | null) {
@@ -75,11 +202,24 @@ export class UsersService {
   }
 
   async revokeSession(userId: string, sessionId: string) {
-    const revokedAt = new Date();
-    await this.prisma.$transaction([
-      this.prisma.loginSession.updateMany({ where: { id: sessionId, userId }, data: { revokedAt } }),
-      this.prisma.refreshToken.updateMany({ where: { loginSessionId: sessionId, userId, revokedAt: null }, data: { revokedAt } }),
-    ]);
+    await this.prisma.$transaction(async (tx) => {
+      const locked = await tx.$queryRaw<{ id: string }[]>(Prisma.sql`
+        SELECT "id"
+        FROM "users"
+        WHERE "id" = ${userId}
+        FOR UPDATE
+      `);
+      if (locked.length !== 1) throw new NotFoundException('User was not found');
+      const revokedAt = new Date();
+      await tx.loginSession.updateMany({
+        where: { id: sessionId, userId },
+        data: { revokedAt },
+      });
+      await tx.refreshToken.updateMany({
+        where: { loginSessionId: sessionId, userId, revokedAt: null },
+        data: { revokedAt },
+      });
+    });
     return { ok: true };
   }
 
@@ -523,6 +663,7 @@ export class UsersService {
     hiddenProfileBadgeCodes?: string[] | null;
     badges?: any;
     verified?: boolean | null;
+    emailVerifiedAt?: Date | string | null;
     chatPublicKey?: string | null;
     createdAt?: Date | string;
     _count?: Record<string, number>;
@@ -548,13 +689,14 @@ export class UsersService {
       badges: visibleUser.badges,
       availableProfileBadges: availableProfileBadgesFor(user),
       verified: visibleUser.verified,
+      emailVerified: Boolean(user.emailVerifiedAt),
       chatPublicKey: visibleUser.chatPublicKey,
       createdAt: visibleUser.createdAt,
       _count: visibleUser._count,
       onboardingComplete: Boolean(user.usernameFinalized && user.dateOfBirth && user.legalConsentAt && user.dataConsentAt),
     };
   }
-  private select() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, gender: true, dateOfBirth: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, profileVisibility: true, defaultPostVisibility: true, betaUser: true, hideProfileBadges: true, hiddenProfileBadgeCodes: true, badges: { select: profileBadgeSelect }, verified: true, chatPublicKey: true, createdAt: true, _count: { select: { followers: true, following: true } } } as const; }
+  private select() { return { id: true, email: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, gender: true, dateOfBirth: true, emailVerifiedAt: true, activityPersonas: activityPersonaLinkSelect, legalConsentAt: true, dataConsentAt: true, profileVisibility: true, defaultPostVisibility: true, betaUser: true, hideProfileBadges: true, hiddenProfileBadgeCodes: true, badges: { select: profileBadgeSelect }, verified: true, chatPublicKey: true, createdAt: true, _count: { select: { followers: true, following: true } } } as const; }
   private publicSelect() { return { id: true, displayName: true, username: true, usernameFinalized: true, bio: true, profileImageUrl: true, coverImageUrl: true, activityPersonas: activityPersonaLinkSelect, profileVisibility: true, betaUser: true, hideProfileBadges: true, hiddenProfileBadgeCodes: true, badges: { select: profileBadgeSelect }, verified: true, chatPublicKey: true, createdAt: true } as const; }
   private lockedProfileSelect() { return { id: true, displayName: true, username: true, profileImageUrl: true, verified: true, profileVisibility: true } as const; }
   private async resolveUserId(identifier: string) {
@@ -614,6 +756,11 @@ export class UsersService {
       select: { id: true },
     });
     if (overflow.length) await this.prisma.userSearchHistory.deleteMany({ where: { id: { in: overflow.map((entry) => entry.id) } } });
+  }
+
+  private isNotFoundError(error: unknown) {
+    return typeof error === 'object' && error !== null && 'code' in error
+      && (error as { code?: string }).code === 'P2025';
   }
 
   private async recomputeEngagementCounters(tx: Prisma.TransactionClient) {

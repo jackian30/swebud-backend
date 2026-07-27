@@ -6,7 +6,7 @@ ARG LOCAL_GID=1000
 RUN apk add --no-cache ffmpeg
 
 WORKDIR /app
-RUN mkdir -p /app/node_modules \
+RUN mkdir -p /app/node_modules /app/media-processing-tmp \
     && chown -R "${LOCAL_UID}:${LOCAL_GID}" /app
 
 # Match the host developer so build artifacts written through the bind mount

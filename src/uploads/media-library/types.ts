@@ -29,13 +29,15 @@ export type MediaCollection = {
 };
 
 export type ProcessedMedia = {
-  buffer: Buffer;
+  path: string;
   filename: string;
   mimeType: string;
   size: number;
   type: MediaKind;
+  temporary: boolean;
   width?: number;
   height?: number;
+  durationSeconds?: number;
 };
 
 export type StoredMedia = {

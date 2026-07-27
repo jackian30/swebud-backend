@@ -1,10 +1,11 @@
 import { Controller, Get, Patch, Post, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { VerifiedAccountGuard } from '../auth/verified-account.guard';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { UuidParam } from '../common/uuid-param.decorator';
 import { NotificationsService } from './notifications.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, VerifiedAccountGuard)
 @Controller('notifications')
 export class NotificationsController {
   constructor(private notifications: NotificationsService) {}

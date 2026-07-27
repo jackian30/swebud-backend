@@ -1,11 +1,12 @@
 import { Body, Controller, Delete, Get, Patch, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { VerifiedAccountGuard } from '../auth/verified-account.guard';
 import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { UuidParam } from '../common/uuid-param.decorator';
 import { ActivitiesService } from './activities.service';
 import { ActivityListQueryDto, ActivityStatsQueryDto, CreateActivityDto, UpdateActivityDto } from './dto';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, VerifiedAccountGuard)
 @Controller('activities')
 export class ActivitiesController {
   constructor(private activities: ActivitiesService) {}

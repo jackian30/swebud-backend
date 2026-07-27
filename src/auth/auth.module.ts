@@ -8,11 +8,13 @@ import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt.guard';
 import { JwtStrategy } from './jwt.strategy';
 import { TurnstileService } from './turnstile.service';
+import { EmailVerificationService } from './email-verification.service';
+import { VerifiedAccountGuard } from './verified-account.guard';
 
 @Module({
   imports: [PassportModule, JwtModule.register({}), MailModule, NotificationsModule],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, JwtAuthGuard, TurnstileService],
-  exports: [JwtAuthGuard],
+  providers: [AuthService, JwtStrategy, JwtAuthGuard, VerifiedAccountGuard, TurnstileService, EmailVerificationService],
+  exports: [JwtAuthGuard, VerifiedAccountGuard, EmailVerificationService],
 })
 export class AuthModule {}

@@ -195,12 +195,21 @@ describe('UsersService self-response privacy', () => {
   async function responseFor(flow: 'me' | 'update' | 'onboarding' | 'account') {
     const user = sensitiveSelf();
     const prisma: any = {
+      $queryRaw: jest.fn().mockResolvedValue([{
+        id: user.id,
+        email: user.email,
+        passwordHash: user.passwordHash,
+      }]),
       user: {
         findUnique: jest.fn().mockResolvedValue(null),
         findUniqueOrThrow: jest.fn().mockResolvedValue(user),
         update: jest.fn().mockResolvedValue(user),
       },
+      emailVerificationToken: { updateMany: jest.fn() },
+      passwordResetToken: { updateMany: jest.fn() },
+      $transaction: jest.fn(),
     };
+    prisma.$transaction.mockImplementation((work: (tx: typeof prisma) => unknown) => work(prisma));
     const service = new UsersService(prisma, { create: jest.fn() } as any);
     jest.spyOn(bcrypt, 'compare').mockResolvedValue(true as never);
 
@@ -518,10 +527,11 @@ describe('UsersService account sessions', () => {
   });
 
   it('revokes the visible login session and linked refresh tokens together', async () => {
-    const prisma = {
+    const prisma: any = {
       loginSession: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
       refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
-      $transaction: jest.fn(async (operations: unknown[]) => Promise.all(operations)),
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'user-1' }]),
+      $transaction: jest.fn(async (work: (tx: any) => unknown) => work(prisma)),
     };
     const service = new UsersService(prisma as any, { create: jest.fn() } as any);
 
@@ -535,6 +545,7 @@ describe('UsersService account sessions', () => {
       where: { loginSessionId: 'login-session-1', userId: 'user-1', revokedAt: null },
       data: { revokedAt: expect.any(Date) },
     });
+    expect(prisma.$queryRaw).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -593,6 +604,55 @@ describe('UsersService mutual-follow message request transition', () => {
 
     expect(tx.messageRequest.updateMany).toHaveBeenCalledTimes(2);
     expect(tx.message.create).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('UsersService authenticated password changes', () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  it('locks the account and invalidates reset links and every active session with the password update', async () => {
+    jest.spyOn(bcrypt, 'compare').mockResolvedValue(true as never);
+    jest.spyOn(bcrypt, 'hash').mockResolvedValue('new-password-hash' as never);
+    const tx = {
+      $queryRaw: jest.fn().mockResolvedValue([{ passwordHash: 'old-password-hash' }]),
+      user: { update: jest.fn().mockResolvedValue({ id: 'user-1' }) },
+      passwordResetToken: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+      refreshToken: { updateMany: jest.fn().mockResolvedValue({ count: 3 }) },
+      loginSession: { updateMany: jest.fn().mockResolvedValue({ count: 2 }) },
+    };
+    const prisma = {
+      user: {
+        findUniqueOrThrow: jest.fn().mockResolvedValue({ passwordHash: 'old-password-hash' }),
+      },
+      $transaction: jest.fn((work: (client: typeof tx) => unknown) => work(tx)),
+    };
+    const service = new UsersService(prisma as any, {} as any);
+
+    await expect(service.updatePassword('user-1', {
+      currentPassword: 'old-password',
+      newPassword: 'new-password-value',
+    })).resolves.toEqual({ ok: true });
+
+    expect(tx.user.update).toHaveBeenCalledWith({
+      where: { id: 'user-1' },
+      data: { passwordHash: 'new-password-hash' },
+    });
+    expect(tx.passwordResetToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', usedAt: null },
+      data: { usedAt: expect.any(Date) },
+    });
+    expect(tx.refreshToken.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(tx.loginSession.updateMany).toHaveBeenCalledWith({
+      where: { userId: 'user-1', revokedAt: null },
+      data: { revokedAt: expect.any(Date) },
+    });
+    expect(tx.passwordResetToken.updateMany.mock.calls[0][0].data.usedAt)
+      .toBe(tx.refreshToken.updateMany.mock.calls[0][0].data.revokedAt);
+    expect(tx.refreshToken.updateMany.mock.calls[0][0].data.revokedAt)
+      .toBe(tx.loginSession.updateMany.mock.calls[0][0].data.revokedAt);
   });
 });
 

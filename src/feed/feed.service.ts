@@ -204,7 +204,7 @@ export class FeedService {
 
   suggestedGroups(userId: string) {
     return this.prisma.group.findMany({
-      where: { visibility: 'public', members: { none: { userId } } },
+      where: { moderationStatus: 'active', visibility: 'public', members: { none: { userId } } },
       take: 10,
       orderBy: { createdAt: 'desc' },
       select: {

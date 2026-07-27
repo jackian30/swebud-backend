@@ -19,8 +19,9 @@ import { StoriesModule } from './stories/stories.module';
 import { RealtimePresenceModule } from './realtime/realtime-presence.module';
 import { RateLimitMiddleware } from './common/security';
 import { HealthController } from './health.controller';
+import { AdminModerationModule } from './admin-moderation/admin-moderation.module';
 
-@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, MailModule, AuthModule, UsersModule, FeedModule, PostsModule, GroupsModule, RealtimePresenceModule, ChatModule, ThemeModule, UploadsModule, NotificationsModule, BuddyModule, IntegrationsModule, ActivitiesModule, KlipyModule, StoriesModule], controllers: [HealthController] })
+@Module({ imports: [ConfigModule.forRoot({ isGlobal: true }), PrismaModule, MailModule, AdminModerationModule, AuthModule, UsersModule, FeedModule, PostsModule, GroupsModule, RealtimePresenceModule, ChatModule, ThemeModule, UploadsModule, NotificationsModule, BuddyModule, IntegrationsModule, ActivitiesModule, KlipyModule, StoriesModule], controllers: [HealthController] })
 export class AppModule implements NestModule {
   configure(consumer: MiddlewareConsumer) {
     consumer.apply(RateLimitMiddleware).forRoutes('*');

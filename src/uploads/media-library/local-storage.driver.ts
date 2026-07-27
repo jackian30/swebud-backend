@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
-import { mkdirSync } from 'fs';
-import { writeFile } from 'fs/promises';
+import { createReadStream, createWriteStream, mkdirSync } from 'fs';
 import { join } from 'path';
+import { pipeline } from 'stream/promises';
 import { mediaCollections } from './collections';
 import { StorageDriver } from './storage-driver';
 import { MediaCollection, ProcessedMedia } from './types';
@@ -16,7 +16,10 @@ export class LocalStorageDriver implements StorageDriver {
 
   async put(collection: MediaCollection, media: ProcessedMedia) {
     const key = `${collection.folder}/${media.filename}`;
-    await writeFile(join(uploadRoot, key), media.buffer);
+    await pipeline(
+      createReadStream(media.path),
+      createWriteStream(join(uploadRoot, key), { flags: 'wx', mode: 0o644 }),
+    );
     return { key, url: `/api/uploads/${key}`, path: `/uploads/${key}` };
   }
 }

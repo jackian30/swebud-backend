@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: ${POSTGRES_IMAGE:-postgres@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-swebud}
@@ -16,20 +16,64 @@ services:
     networks:
       - swebud
 
-  migrate:
-    build:
-      context: ..
-      dockerfile: Dockerfile
+  db-roles:
+    image: ${POSTGRES_HELPER_IMAGE:-postgres@sha256:4e6e670bb069649261c9c18031f0aded7bb249a5b6664ddec29c013a89310d50}
+    user: postgres
     restart: "no"
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      DATABASE_RUNTIME_USER: ${DATABASE_RUNTIME_USER:?Set the runtime database role}
+      DATABASE_ADMIN_READONLY_USER: ${DATABASE_ADMIN_READONLY_USER:?Set the admin read-only database role}
+      DATABASE_BACKUP_USER: ${DATABASE_BACKUP_USER:?Set the dedicated backup database role}
+      DIRECT_URL_FILE: /run/secrets/database_owner_url
+      DATABASE_RUNTIME_PASSWORD_FILE: /run/secrets/database_runtime_password
+      DATABASE_ADMIN_READONLY_PASSWORD_FILE: /run/secrets/database_readonly_password
+      DATABASE_BACKUP_PASSWORD_FILE: /run/secrets/database_backup_password
+    secrets:
+      - database_owner_url
+      - database_runtime_password
+      - database_readonly_password
+      - database_backup_password
+    volumes:
+      - ./provision-database-roles.sh:/deployment/provision-database-roles.sh:ro
+      - ./database-roles.sql:/deployment/database-roles.sql:ro
+    command: /bin/sh /deployment/provision-database-roles.sh
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    networks:
+      - swebud
+
+  migrate:
+    image: ${BACKEND_IMAGE:-swebud-backend:local}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: "no"
+    depends_on:
+      db-roles:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
       NODE_ENV: production
       SWEBUDD_SKIP_ENTRYPOINT_MIGRATIONS: "true"
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the application database URL}
-      DIRECT_URL: ${DIRECT_URL:?Set DIRECT_URL to a direct migration database URL}
-    command: sh -c 'DATABASE_URL="$$DIRECT_URL" npm run prisma:deploy'
+      DIRECT_URL_FILE: /run/secrets/database_owner_url
+    secrets:
+      - database_owner_url
+    command: >-
+      sh -ceu 'DIRECT_URL="$$(cat "$$DIRECT_URL_FILE")";
+      export DIRECT_URL;
+      DATABASE_URL="$$DIRECT_URL";
+      export DATABASE_URL;
+      exec npm run prisma:deploy'
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m,mode=1777
@@ -41,7 +85,39 @@ services:
     networks:
       - swebud
 
+  clamav:
+    image: ${CLAMAV_IMAGE:-clamav/clamav@sha256:7f5389ccaa2368c383fa80e167ccfe44348d71e685f926fce4755eed1757673a}
+    restart: unless-stopped
+    environment:
+      # Upload policy accepts files up to 128 MiB, so clamd's INSTREAM ceiling
+      # must not be lower. The official entrypoint applies CLAMD_CONF_*.
+      CLAMD_CONF_StreamMaxLength: 128M
+      # This service has no egress. Refresh signatures by deliberately updating
+      # the reviewed immutable image digest during the patch cycle.
+      CLAMAV_NO_FRESHCLAMD: "true"
+      CLAMD_STARTUP_TIMEOUT: 300
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "clamdcheck.sh"]
+      interval: 15s
+      timeout: 5s
+      retries: 20
+      start_period: 60s
+    networks:
+      - malware
+
   backend:
+    image: ${BACKEND_IMAGE:-swebud-backend:local}
     build:
       context: ..
       dockerfile: Dockerfile
@@ -51,6 +127,8 @@ services:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
+      clamav:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       SWEBUDD_SKIP_ENTRYPOINT_MIGRATIONS: "true"
@@ -58,8 +136,14 @@ services:
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL to the application database URL}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET to a strong random value}
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?Set JWT_REFRESH_SECRET to a different strong random value}
+      ADMIN_JWT_SECRET: ${ADMIN_JWT_SECRET:?Set ADMIN_JWT_SECRET to a third distinct strong random value}
+      ADMIN_JWT_ISSUER: ${ADMIN_JWT_ISSUER:?Set ADMIN_JWT_ISSUER}
+      ADMIN_JWT_AUDIENCE: ${ADMIN_JWT_AUDIENCE:?Set ADMIN_JWT_AUDIENCE}
       JWT_ACCESS_TTL_SECONDS: ${JWT_ACCESS_TTL_SECONDS:-900}
       REFRESH_TOKEN_TTL_SECONDS: ${REFRESH_TOKEN_TTL_SECONDS:-604800}
+      MINIMUM_ACCOUNT_AGE: ${MINIMUM_ACCOUNT_AGE:-18}
+      EMAIL_VERIFICATION_TTL_SECONDS: ${EMAIL_VERIFICATION_TTL_SECONDS:-86400}
+      EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: ${EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS:-60}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:?Set FRONTEND_ORIGIN to the production frontend origin}
       ADMIN_ORIGIN: ${ADMIN_ORIGIN:-}
       ALLOW_LOCAL_ORIGINS: ${ALLOW_LOCAL_ORIGINS:-false}
@@ -87,12 +171,50 @@ services:
       CLOUDFLARE_TURNSTILE_SECRET_KEY: ${CLOUDFLARE_TURNSTILE_SECRET_KEY:?Set CLOUDFLARE_TURNSTILE_SECRET_KEY to the production secret}
       KLIPY_API_KEY: ${KLIPY_API_KEY:-}
       KLIPY_CLIENT_KEY: ${KLIPY_CLIENT_KEY:-swebud-local}
-      MEDIA_STORAGE_DRIVER: ${MEDIA_STORAGE_DRIVER:-local}
-      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:-}
-      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:-}
+      MEDIA_STORAGE_DRIVER: ${MEDIA_STORAGE_DRIVER:?Set MEDIA_STORAGE_DRIVER=s3}
+      MEDIA_S3_BUCKET: ${MEDIA_S3_BUCKET:?Set the public media bucket}
+      MEDIA_S3_PREFIX: ${MEDIA_S3_PREFIX:-}
+      MEDIA_PUBLIC_BASE_URL: ${MEDIA_PUBLIC_BASE_URL:?Set the public media base URL}
+      MEDIA_QUARANTINE_S3_BUCKET: ${MEDIA_QUARANTINE_S3_BUCKET:?Set a separate private quarantine bucket}
+      MEDIA_UPLOAD_WORKER_ENABLED: "true"
+      MEDIA_LEGACY_PROXY_UPLOADS_ENABLED: "false"
+      # Large worker inputs and transcoded outputs belong on this dedicated
+      # disk-backed volume, never the memory-backed /tmp or public uploads.
+      MEDIA_PROCESSING_TEMP_DIR: /app/media-processing-tmp
+      MEDIA_LEGACY_QUARANTINE_DIR: /app/media-processing-tmp/legacy-quarantine
+      MEDIA_UPLOAD_MAX_ACTIVE_PER_USER: ${MEDIA_UPLOAD_MAX_ACTIVE_PER_USER:-3}
+      MEDIA_UPLOAD_ROLLING_QUOTA_BYTES: ${MEDIA_UPLOAD_ROLLING_QUOTA_BYTES:-524288000}
+      MEDIA_UPLOAD_ROLLING_QUOTA_HOURS: ${MEDIA_UPLOAD_ROLLING_QUOTA_HOURS:-24}
+      MEDIA_UPLOAD_PART_BYTES: ${MEDIA_UPLOAD_PART_BYTES:-8388608}
+      MEDIA_UPLOAD_SESSION_TTL_SECONDS: ${MEDIA_UPLOAD_SESSION_TTL_SECONDS:-1800}
+      MEDIA_UPLOAD_URL_TTL_SECONDS: ${MEDIA_UPLOAD_URL_TTL_SECONDS:-300}
+      MEDIA_UPLOAD_WORKER_CONCURRENCY: ${MEDIA_UPLOAD_WORKER_CONCURRENCY:-2}
+      MEDIA_UPLOAD_JOB_MAX_ATTEMPTS: ${MEDIA_UPLOAD_JOB_MAX_ATTEMPTS:-5}
+      MEDIA_UPLOAD_JOB_LEASE_SECONDS: ${MEDIA_UPLOAD_JOB_LEASE_SECONDS:-300}
+      MEDIA_UPLOAD_WORKER_POLL_MS: ${MEDIA_UPLOAD_WORKER_POLL_MS:-2000}
+      MEDIA_S3_REQUEST_TIMEOUT_MS: ${MEDIA_S3_REQUEST_TIMEOUT_MS:-30000}
+      MEDIA_S3_DOWNLOAD_TIMEOUT_MS: ${MEDIA_S3_DOWNLOAD_TIMEOUT_MS:-180000}
+      MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS: ${MEDIA_MULTIPART_COMPLETE_TIMEOUT_MS:-120000}
+      MEDIA_UPLOAD_COMPLETION_STALE_SECONDS: ${MEDIA_UPLOAD_COMPLETION_STALE_SECONDS:-300}
+      MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS: ${MEDIA_QUARANTINE_CLEANUP_TOMBSTONE_SECONDS:-1800}
+      MEDIA_PUBLISH_TIMEOUT_MS: ${MEDIA_PUBLISH_TIMEOUT_MS:-120000}
+      MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS: ${MEDIA_PUBLISH_CLEANUP_GRACE_SECONDS:-1800}
+      MEDIA_PUBLISH_CLEANUP_TOMBSTONE_SECONDS: ${MEDIA_PUBLISH_CLEANUP_TOMBSTONE_SECONDS:-300}
+      MEDIA_PROCESSING_CONCURRENCY: ${MEDIA_PROCESSING_CONCURRENCY:-2}
+      MEDIA_PROCESSING_MAX_QUEUE: ${MEDIA_PROCESSING_MAX_QUEUE:-16}
+      MEDIA_PROCESSING_STALE_TEMP_SECONDS: ${MEDIA_PROCESSING_STALE_TEMP_SECONDS:-21600}
+      MEDIA_PROCESSING_STALE_CLEANUP_LIMIT: ${MEDIA_PROCESSING_STALE_CLEANUP_LIMIT:-100}
+      MEDIA_MALWARE_SCANNER: clamd-tcp
+      MEDIA_MALWARE_SCAN_TIMEOUT_MS: ${MEDIA_MALWARE_SCAN_TIMEOUT_MS:-60000}
+      MEDIA_CLAMD_TCP_HOST: clamav
+      MEDIA_CLAMD_TCP_PORT: 3310
+      MEDIA_CLAMD_TRUSTED_NETWORK: "true"
       AWS_REGION: ${AWS_REGION:-us-east-1}
       AWS_S3_ENDPOINT: ${AWS_S3_ENDPOINT:-}
       AWS_S3_FORCE_PATH_STYLE: ${AWS_S3_FORCE_PATH_STYLE:-false}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_SESSION_TOKEN: ${AWS_SESSION_TOKEN:-}
       STRAVA_CLIENT_ID: ${STRAVA_CLIENT_ID:-}
       STRAVA_CLIENT_SECRET: ${STRAVA_CLIENT_SECRET:-}
       STRAVA_WEBHOOK_VERIFY_TOKEN: ${STRAVA_WEBHOOK_VERIFY_TOKEN:-}
@@ -112,6 +234,7 @@ services:
       - "127.0.0.1:${BACKEND_PORT:-3002}:3000"
     volumes:
       - swebud_uploads:/app/uploads
+      - swebud_media_processing_temp:/app/media-processing-tmp
     healthcheck:
       test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
       interval: 15s
@@ -120,12 +243,26 @@ services:
       start_period: 20s
     networks:
       - swebud
+      - malware
 
 networks:
   swebud:
     name: ${SWEBUD_NETWORK:-swebud}
     external: true
+  malware:
+    internal: true
 
 volumes:
   swebud_postgres_data:
   swebud_uploads:
+  swebud_media_processing_temp:
+
+secrets:
+  database_owner_url:
+    file: ${DATABASE_OWNER_URL_SECRET_FILE:-./.secrets/direct-url}
+  database_runtime_password:
+    file: ${DATABASE_RUNTIME_PASSWORD_SECRET_FILE:-./.secrets/runtime-password}
+  database_readonly_password:
+    file: ${DATABASE_ADMIN_READONLY_PASSWORD_SECRET_FILE:-./.secrets/readonly-password}
+  database_backup_password:
+    file: ${DATABASE_BACKUP_PASSWORD_SECRET_FILE:-./.secrets/backup-password}

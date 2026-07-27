@@ -5,22 +5,28 @@ import { AllowPendingOnboarding } from '../auth/allow-pending-onboarding.decorat
 import { UuidParam } from '../common/uuid-param.decorator';
 import { CompleteUserOnboardingDto, DeleteMeDto, ReportUserDto, SaveSearchHistoryDto, UpdateAccountDto, UpdateMeDto, UpdatePasswordDto, UserFollowingQueryDto, UserSearchHistoryQueryDto, UserSearchQueryDto } from './dto';
 import { UsersService } from './users.service';
+import { VerifiedAccountGuard } from '../auth/verified-account.guard';
+import { AllowUnverifiedMutation } from '../auth/allow-unverified-mutation.decorator';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, VerifiedAccountGuard)
 @Controller('users')
 export class UsersController {
   constructor(private users: UsersService) {}
   @AllowPendingOnboarding()
   @Get('me') me(@CurrentUser() user: AuthUser) { return this.users.me(user.id); }
-  @Patch('me') updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateMeDto) { return this.users.updateMe(user.id, dto); }
+  @Patch('me') @UseGuards(VerifiedAccountGuard) updateMe(@CurrentUser() user: AuthUser, @Body() dto: UpdateMeDto) { return this.users.updateMe(user.id, dto); }
   @AllowPendingOnboarding()
-  @Patch('me/onboarding') completeOnboarding(@CurrentUser() user: AuthUser, @Body() dto: CompleteUserOnboardingDto) { return this.users.completeOnboarding(user.id, dto); }
-  @Patch('me/account') updateAccount(@CurrentUser() user: AuthUser, @Body() dto: UpdateAccountDto) { return this.users.updateAccount(user.id, dto); }
-  @Patch('me/password') updatePassword(@CurrentUser() user: AuthUser, @Body() dto: UpdatePasswordDto) { return this.users.updatePassword(user.id, dto); }
+  @Patch('me/onboarding') @AllowUnverifiedMutation('Pending users must be able to complete required onboarding.') completeOnboarding(@CurrentUser() user: AuthUser, @Body() dto: CompleteUserOnboardingDto) { return this.users.completeOnboarding(user.id, dto); }
   @AllowPendingOnboarding()
-  @Delete('me') deleteMe(@CurrentUser() user: AuthUser, @Body() dto: DeleteMeDto) { return this.users.deleteMe(user.id, dto); }
+  @Patch('me/account') @AllowUnverifiedMutation('Account and email recovery must remain available to unverified users.') updateAccount(@CurrentUser() user: AuthUser, @Body() dto: UpdateAccountDto) { return this.users.updateAccount(user.id, dto); }
+  @AllowPendingOnboarding()
+  @Patch('me/password') @AllowUnverifiedMutation('Password recovery and credential hardening must remain available to unverified users.') updatePassword(@CurrentUser() user: AuthUser, @Body() dto: UpdatePasswordDto) { return this.users.updatePassword(user.id, dto); }
+  @AllowPendingOnboarding()
+  @Delete('me') @AllowUnverifiedMutation('Every user must retain the ability to delete their account.') deleteMe(@CurrentUser() user: AuthUser, @Body() dto: DeleteMeDto) { return this.users.deleteMe(user.id, dto); }
+  @AllowPendingOnboarding()
   @Get('me/sessions') sessions(@CurrentUser() user: AuthUser) { return this.users.sessions(user.id, user.loginSessionId); }
-  @Delete('me/sessions/:id') revokeSession(@CurrentUser() user: AuthUser, @UuidParam('id') id: string) { return this.users.revokeSession(user.id, id); }
+  @AllowPendingOnboarding()
+  @Delete('me/sessions/:id') @AllowUnverifiedMutation('Session revocation is an account-security control.') revokeSession(@CurrentUser() user: AuthUser, @UuidParam('id') id: string) { return this.users.revokeSession(user.id, id); }
   @Get('me/followers') followers(@CurrentUser() user: AuthUser) { return this.users.followers(user.id); }
   @Get('me/following') following(@CurrentUser() user: AuthUser, @Query() query: UserFollowingQueryDto) { return this.users.following(user.id, query.nonFollowback); }
   @Get('me/mutual') mutual(@CurrentUser() user: AuthUser) { return this.users.mutual(user.id); }
@@ -46,9 +52,9 @@ export class UsersController {
   @Get(':id/following') profileFollowing(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.profileFollowing(id, user.id); }
   @Post(':id/follow') follow(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.follow(user.id, id); }
   @Delete(':id/follow') unfollow(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.unfollow(user.id, id); }
-  @Post(':id/block') block(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.block(user.id, id); }
-  @Delete(':id/block') unblock(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.unblock(user.id, id); }
-  @Post(':id/report') report(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ReportUserDto) { return this.users.report(user.id, id, dto); }
+  @Post(':id/block') @AllowUnverifiedMutation('Blocking remains available as an immediate user-safety control.') block(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.block(user.id, id); }
+  @Delete(':id/block') @AllowUnverifiedMutation('Users may reverse their own safety block before verification.') unblock(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.unblock(user.id, id); }
+  @Post(':id/report') @AllowUnverifiedMutation('Safety reports remain available before email verification.') report(@CurrentUser() user: AuthUser, @Param('id') id: string, @Body() dto: ReportUserDto) { return this.users.report(user.id, id, dto); }
   @Get(':id') profile(@CurrentUser() user: AuthUser, @Param('id') id: string) { return this.users.profile(user.id, id); }
 
 }

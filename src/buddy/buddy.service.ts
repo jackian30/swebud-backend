@@ -244,7 +244,10 @@ export class BuddyService {
       baseWhere.scope = 'group';
       baseWhere.groupId = query.groupId;
     } else if (query.scope === 'group') {
-      const memberships = await this.prisma.groupMember.findMany({ where: { userId }, select: { groupId: true } });
+      const memberships = await this.prisma.groupMember.findMany({
+        where: { userId, group: { moderationStatus: 'active' } },
+        select: { groupId: true },
+      });
       baseWhere.scope = 'group';
       baseWhere.groupId = { in: memberships.map((member) => member.groupId) };
     } else {
@@ -361,7 +364,7 @@ export class BuddyService {
     return {
       sent: messages.length,
       recipients: recipients.map((recipient) => exposeActivityPersonas(recipient)),
-      messages,
+      messages: messages.map((message) => this.presentModeratedMessage(message)),
     };
   }
 
@@ -696,6 +699,7 @@ export class BuddyService {
       include: { participants: { select: { userId: true, role: true, leftAt: true, kickedAt: true } } },
     });
     if (!room) throw new NotFoundException('Buddy session not found');
+    if (room.scope === BuddySessionScope.group && room.groupId) await this.ensureGroupMember(userId, room.groupId);
     const requester = this.activeRoomParticipant(room, userId);
     if (!this.canManageRoom(requester?.role)) throw new ForbiddenException('Only session owners and admins can close this buddy session.');
     const recap = await this.createRoomRecap(userId, roomId).catch(() => null);
@@ -1393,6 +1397,7 @@ export class BuddyService {
       include: this.roomInclude(),
     });
     if (!room || room.expiresAt <= new Date()) throw new NotFoundException('Buddy session not found');
+    if (room.scope === BuddySessionScope.group && room.groupId) await this.ensureGroupMember(userId, room.groupId);
     if (!this.canManageRoom(this.activeRoomParticipant(room, userId)?.role)) throw new ForbiddenException('Only session owners and admins can send direct invites.');
     return room;
   }
@@ -1403,6 +1408,7 @@ export class BuddyService {
       include: this.roomInclude(),
     });
     if (!room || room.expiresAt <= new Date()) throw new NotFoundException('Buddy session not found');
+    if (room.scope === BuddySessionScope.group && room.groupId) await this.ensureGroupMember(userId, room.groupId);
     if (!this.canManageRoom(this.activeRoomParticipant(room, userId)?.role)) throw new ForbiddenException(message);
     return room;
   }
@@ -1410,9 +1416,12 @@ export class BuddyService {
   private async ensureActiveRoomParticipant(userId: string, roomId: string) {
     const session = await this.prisma.buddySession.findFirst({
       where: { userId, roomId, expiresAt: { gt: new Date() } },
-      select: { id: true },
+      select: { id: true, room: { select: { scope: true, groupId: true } } },
     });
     if (!session) throw new ForbiddenException('Join this buddy session first.');
+    if (session.room?.scope === BuddySessionScope.group && session.room.groupId) {
+      await this.ensureGroupMember(userId, session.room.groupId);
+    }
   }
 
   private async ensureCanAccessRoomMessage(userId: string, roomId: string, messageId: string) {
@@ -1584,7 +1593,9 @@ export class BuddyService {
   }
 
   private async ensureGroupMember(userId: string, groupId: string) {
-    const member = await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId, userId } } });
+    const member = await this.prisma.groupMember.findFirst({
+      where: { groupId, userId, group: { moderationStatus: 'active' } },
+    });
     if (!member) throw new ForbiddenException('Join the group first.');
   }
 
@@ -1859,6 +1870,15 @@ export class BuddyService {
       recipient: { select: { id: true, displayName: true, username: true, profileImageUrl: true } },
       reactions: true,
     } as const;
+  }
+
+  private presentModeratedMessage(message: any) {
+    const presented = { ...message };
+    delete presented.moderationStatus;
+    delete presented.quarantinedAt;
+    delete presented.quarantinedById;
+    delete presented.quarantineReason;
+    return presented;
   }
 
   private sessionMessageInclude() {

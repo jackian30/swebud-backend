@@ -69,14 +69,16 @@ export class PostsService {
   }
 
   async remove(userId: string, id: string) {
-    const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true } });
+    const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true, moderationStatus: true } });
+    this.assertNotQuarantined(post);
     if (post.authorId !== userId) throw new ForbiddenException('Only the author can delete this post');
-    await this.prisma.post.delete({ where: { id } });
+    await this.prisma.post.delete({ where: { id, moderationStatus: 'active' } });
   }
 
 
   async update(userId: string, id: string, dto: UpdatePostDto) {
-    const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true, text: true, images: { orderBy: { sortOrder: 'asc' } }, taggedUsers: { select: { userId: true } } } });
+    const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true, moderationStatus: true, text: true, images: { orderBy: { sortOrder: 'asc' } }, taggedUsers: { select: { userId: true } } } });
+    this.assertNotQuarantined(post);
     if (post.authorId !== userId) throw new ForbiddenException('Only the author can edit this post');
     const nextTaggedUserIds = this.taggedUserIds(dto);
     const taggedUserIds = nextTaggedUserIds ? await this.validateTaggedUsers(userId, nextTaggedUserIds) : undefined;
@@ -115,7 +117,7 @@ export class PostsService {
         ? undefined
         : [...new Set(this.extractHashtags(newText).map((tag) => tag.toLowerCase().replace(/^#/, '').trim()).filter(Boolean))];
       const updated = await tx.post.update({
-        where: { id },
+        where: { id, moderationStatus: 'active' },
         data: {
           text: newText,
           visibility: dto.visibility ?? dto.privacy,
@@ -168,7 +170,8 @@ export class PostsService {
     return this.prisma.postSave.upsert({ where: { postId_userId: { postId, userId } }, create: { postId, userId }, update: {} }).then(() => ({ saved: true }));
   }
 
-  unsave(userId: string, postId: string) {
+  async unsave(userId: string, postId: string) {
+    await this.ensureCanViewPost(userId, postId);
     return this.prisma.postSave.delete({ where: { postId_userId: { postId, userId } } }).catch(() => null).then(() => ({ saved: false }));
   }
 
@@ -198,6 +201,8 @@ export class PostsService {
   }
 
   async unlikeRepost(userId: string, repostId: string) {
+    const repost = await this.prisma.repost.findUniqueOrThrow({ where: { id: repostId }, select: { postId: true } });
+    await this.ensureCanViewPost(userId, repost.postId);
     await this.prisma.$transaction(async (tx) => {
       const deleted = await tx.repostLike.deleteMany({ where: { repostId, userId } });
       if (deleted.count) {
@@ -207,20 +212,23 @@ export class PostsService {
     return { liked: false };
   }
 
-  hide(userId: string, postId: string) {
+  async hide(userId: string, postId: string) {
+    await this.ensureCanViewPost(userId, postId);
     return this.prisma.hiddenPost.upsert({ where: { postId_userId: { postId, userId } }, create: { postId, userId }, update: {} }).then(() => ({ hidden: true }));
   }
 
   async pin(userId: string, id: string) {
-    const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true } });
+    const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true, moderationStatus: true } });
+    this.assertNotQuarantined(post);
     if (post.authorId !== userId) throw new ForbiddenException('Only the author can pin this post');
-    return this.prisma.post.update({ where: { id }, data: { pinnedAt: new Date() }, include: this.include(userId) }).then((post) => this.presentPost(post, userId));
+    return this.prisma.post.update({ where: { id, moderationStatus: 'active' }, data: { pinnedAt: new Date() }, include: this.include(userId) }).then((post) => this.presentPost(post, userId));
   }
 
   async unpin(userId: string, id: string) {
-    const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true } });
+    const post = await this.prisma.post.findUniqueOrThrow({ where: { id }, select: { authorId: true, moderationStatus: true } });
+    this.assertNotQuarantined(post);
     if (post.authorId !== userId) throw new ForbiddenException('Only the author can unpin this post');
-    return this.prisma.post.update({ where: { id }, data: { pinnedAt: null }, include: this.include(userId) }).then((post) => this.presentPost(post, userId));
+    return this.prisma.post.update({ where: { id, moderationStatus: 'active' }, data: { pinnedAt: null }, include: this.include(userId) }).then((post) => this.presentPost(post, userId));
   }
 
   async report(userId: string, postId: string, dto: ReportPostDto) {
@@ -250,6 +258,7 @@ export class PostsService {
   }
 
   async unlike(userId: string, postId: string) {
+    await this.ensureCanViewPost(userId, postId);
     await this.prisma.$transaction(async (tx) => {
       const deleted = await tx.postLike.deleteMany({ where: { postId, userId } });
       if (deleted.count) {
@@ -340,6 +349,7 @@ export class PostsService {
 
 
   async updateComment(userId: string, postId: string, commentId: string, dto: UpdateCommentDto) {
+    await this.ensureCanViewPost(userId, postId);
     const comment = await this.prisma.comment.findUniqueOrThrow({
       where: { id: commentId },
       select: { authorId: true, postId: true, body: true, images: { take: 1, select: { id: true } } },
@@ -375,6 +385,7 @@ export class PostsService {
   }
 
   async unlikeComment(userId: string, postId: string, commentId: string) {
+    await this.ensureCanViewPost(userId, postId);
     const comment = await this.prisma.comment.findUniqueOrThrow({ where: { id: commentId }, select: { postId: true } });
     if (comment.postId !== postId) throw new BadRequestException('Comment does not belong to this post');
     await this.prisma.$transaction(async (tx) => {
@@ -387,6 +398,7 @@ export class PostsService {
   }
 
   async removeComment(userId: string, postId: string, commentId: string) {
+    await this.ensureCanViewPost(userId, postId);
     const comment = await this.prisma.comment.findUniqueOrThrow({
       where: { id: commentId },
       select: { authorId: true, postId: true },
@@ -402,6 +414,12 @@ export class PostsService {
 
   private async ensureCanViewPost(userId: string, postId: string) {
     await assertCanViewPost(this.prisma, userId, postId);
+  }
+
+  private assertNotQuarantined(post: { moderationStatus?: string }) {
+    if (post.moderationStatus === 'quarantined') {
+      throw new ForbiddenException('Quarantined content can only be changed after an admin restores it');
+    }
   }
 
   private async ensureCanPostOnProfile(authorId: string, profileOwnerId: string) {

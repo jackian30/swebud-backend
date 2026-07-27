@@ -2,8 +2,19 @@ import { ForbiddenException, HttpException, HttpStatus, Injectable, NestMiddlewa
 import { ConfigService } from '@nestjs/config';
 import { Request, Response, NextFunction } from 'express';
 import { IncomingMessage } from 'http';
-import { accessTokenTtlSeconds, booleanConfig, refreshTokenTtlSeconds } from './config';
+import { isAbsolute, resolve } from 'path';
+import {
+  accessTokenTtlSeconds,
+  adminJwtAudience,
+  adminJwtIssuer,
+  booleanConfig,
+  emailVerificationResendCooldownSeconds,
+  emailVerificationTtlSeconds,
+  minimumAccountAge,
+  refreshTokenTtlSeconds,
+} from './config';
 import { isCanonicalSweBuddRenderService } from './render-identity';
+import { assertUploadPolicyConfig } from '../uploads/v2/upload-policy';
 
 const weakSecretValues = new Set([
   '',
@@ -87,8 +98,21 @@ export function assertProductionConfig(config: ConfigService) {
   const jwtSecret = requiredSecret(config, 'JWT_SECRET', '');
   const jwtRefreshSecret = requiredSecret(config, 'JWT_REFRESH_SECRET', '');
   if (jwtSecret === jwtRefreshSecret) throw new Error('JWT_SECRET and JWT_REFRESH_SECRET must be different in production.');
+  const adminJwtSecret = requiredSecret(config, 'ADMIN_JWT_SECRET', '');
+  if (adminJwtSecret === jwtSecret || adminJwtSecret === jwtRefreshSecret) {
+    throw new Error('ADMIN_JWT_SECRET must be different from user access and refresh JWT secrets in production.');
+  }
+  adminJwtIssuer(config);
+  adminJwtAudience(config);
   accessTokenTtlSeconds(config);
   refreshTokenTtlSeconds(config);
+  const configuredMinimumAge = minimumAccountAge(config);
+  if (configuredMinimumAge < 18) {
+    throw new Error('MINIMUM_ACCOUNT_AGE must be at least 18 in production; minor accounts are not supported.');
+  }
+  emailVerificationTtlSeconds(config);
+  emailVerificationResendCooldownSeconds(config);
+  assertUploadPolicyConfig(config);
 
   const requiredKeys = [
     'DATABASE_URL',
@@ -167,12 +191,75 @@ export function assertProductionConfig(config: ConfigService) {
     throw new Error('MAIL_FROM must use a verified non-localhost sender.');
   }
 
-  const mediaDriver = (config.get<string>('MEDIA_STORAGE_DRIVER') ?? 'local').trim();
+  const mediaDriver = (config.get<string>('MEDIA_STORAGE_DRIVER') ?? 'local').trim().toLowerCase();
   if (!['local', 's3'].includes(mediaDriver)) throw new Error('MEDIA_STORAGE_DRIVER must be "local" or "s3".');
-  if (mediaDriver === 's3') {
-    const s3Required = ['MEDIA_S3_BUCKET', 'MEDIA_PUBLIC_BASE_URL'];
-    const s3Missing = s3Required.filter((key) => !config.get<string>(key)?.trim());
-    if (s3Missing.length) throw new Error(`Missing required S3 media env: ${s3Missing.join(', ')}`);
+  if (mediaDriver !== 's3') throw new Error('MEDIA_STORAGE_DRIVER must be "s3" in production.');
+  const s3Required = [
+    'AWS_REGION',
+    'MEDIA_S3_BUCKET',
+    'MEDIA_PUBLIC_BASE_URL',
+    'MEDIA_QUARANTINE_S3_BUCKET',
+  ];
+  const s3Missing = s3Required.filter((key) => !config.get<string>(key)?.trim());
+  if (s3Missing.length) throw new Error(`Missing required S3 media env: ${s3Missing.join(', ')}`);
+  const publicBucket = config.get<string>('MEDIA_S3_BUCKET')!.trim();
+  const quarantineBucket = config.get<string>('MEDIA_QUARANTINE_S3_BUCKET')!.trim();
+  if (publicBucket === quarantineBucket) {
+    throw new Error('MEDIA_QUARANTINE_S3_BUCKET must be separate from MEDIA_S3_BUCKET.');
+  }
+  for (const [key, bucket] of [
+    ['MEDIA_S3_BUCKET', publicBucket],
+    ['MEDIA_QUARANTINE_S3_BUCKET', quarantineBucket],
+  ] as const) {
+    if (!/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) {
+      throw new Error(`${key} must be a valid S3 bucket name.`);
+    }
+  }
+  assertHttpsUrl(config.get<string>('MEDIA_PUBLIC_BASE_URL')!, 'MEDIA_PUBLIC_BASE_URL');
+  const s3Endpoint = config.get<string>('AWS_S3_ENDPOINT')?.trim();
+  if (s3Endpoint) assertHttpsUrl(s3Endpoint, 'AWS_S3_ENDPOINT');
+
+  if (booleanConfig(config, 'MEDIA_LEGACY_PROXY_UPLOADS_ENABLED', false)) {
+    throw new Error('MEDIA_LEGACY_PROXY_UPLOADS_ENABLED must be false in production.');
+  }
+  if (!booleanConfig(config, 'MEDIA_UPLOAD_WORKER_ENABLED', false)) {
+    throw new Error('MEDIA_UPLOAD_WORKER_ENABLED must be true in production.');
+  }
+  const scanner = config.get<string>('MEDIA_MALWARE_SCANNER')?.trim().toLowerCase();
+  if (!scanner || !['clamdscan', 'clamd-tcp'].includes(scanner)) {
+    throw new Error('MEDIA_MALWARE_SCANNER must be "clamdscan" or "clamd-tcp" in production.');
+  }
+  if (scanner === 'clamd-tcp') {
+    if (!booleanConfig(config, 'MEDIA_CLAMD_TRUSTED_NETWORK', false)) {
+      throw new Error('MEDIA_CLAMD_TRUSTED_NETWORK must be true for clamd TCP.');
+    }
+    if (!config.get<string>('MEDIA_CLAMD_TCP_HOST')?.trim()) {
+      throw new Error('MEDIA_CLAMD_TCP_HOST is required for clamd TCP.');
+    }
+    const clamdPort = numericEnv(config, 'MEDIA_CLAMD_TCP_PORT') ?? 3310;
+    if (clamdPort < 1 || clamdPort > 65_535) throw new Error('MEDIA_CLAMD_TCP_PORT must be between 1 and 65535.');
+  }
+  const processingTemp = config.get<string>('MEDIA_PROCESSING_TEMP_DIR')?.trim();
+  if (!processingTemp) throw new Error('Missing required production env: MEDIA_PROCESSING_TEMP_DIR');
+  if (!isAbsolute(processingTemp)) throw new Error('MEDIA_PROCESSING_TEMP_DIR must be an absolute path in production.');
+  const resolvedProcessingTemp = resolve(processingTemp);
+  const publicUploads = resolve(process.cwd(), 'uploads');
+  if (
+    resolvedProcessingTemp === '/tmp' ||
+    resolvedProcessingTemp.startsWith('/tmp/') ||
+    resolvedProcessingTemp === publicUploads ||
+    resolvedProcessingTemp.startsWith(`${publicUploads}/`)
+  ) {
+    throw new Error('MEDIA_PROCESSING_TEMP_DIR must use a dedicated disk-backed path outside /tmp and public uploads.');
+  }
+}
+
+function assertHttpsUrl(value: string, key: string) {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error();
+  } catch {
+    throw new Error(`${key} must be an HTTPS URL without credentials, query, or fragment.`);
   }
 }
 

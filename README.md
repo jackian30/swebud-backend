@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.2.51-beta**
+Current release: **0.4.0**
 
 ## Stack
 
@@ -17,7 +17,7 @@ Current release: **0.2.51-beta**
 
 ## Main features
 
-- Auth: register, login, verified Google-subject login, Cloudflare Turnstile checks, refresh, logout, forgot/reset password
+- Auth: register, login, hashed single-use email verification, verified Google-subject login, Cloudflare Turnstile checks, refresh, logout, forgot/reset password
 - Sessions: 15-minute access tokens and 7-day refresh/login sessions by default, both configurable with bounded production validation
 - Posts: text/images/video, edit/delete owner-only, save, hide, report, repost, default privacy
 - ActSnaps: 24-hour disappearing image/video moments with privacy, views, reactions, replies, and chat reference previews
@@ -32,18 +32,15 @@ Current release: **0.2.51-beta**
 - Notifications: login, salute, comment, reply, mention, follow, message request
 - Uploads: MediaLibrary-style collections with local storage by default and S3-ready driver config
 
-## Current beta notes
+## Current release notes
 
-0.2.51-beta repairs Android authentication for dashboard-managed Render services that did not inherit the Blueprint's native-origin values:
+0.4.0 delivers the production security and operations foundation for verified accounts, moderation, and media processing:
 
-- The exact production Render service pins `NATIVE_AUTH_ENABLED=true`, `NATIVE_APP_ORIGIN=https://localhost`, and `ALLOW_LOCAL_ORIGINS=false` before Nest reads dashboard-managed configuration.
-- Native auth can be shut down deliberately with the separate `SWEBUDD_NATIVE_AUTH_EMERGENCY_DISABLED=true` emergency switch; stale or malformed generic native values can no longer silently break every installed Android client.
-- The native-origin repair recognizes the canonical Render web service by its exact name or the documented production repository/branch/non-preview identity. The older compatibility flag cannot enable native transport on self-hosted, preview, worker, feature-branch, or development services.
-- The Docker Render Blueprint pins the public Cloudflare Pages origin to `https://swebudd.com`; its temporary `ADMIN_ORIGIN=https://localhost` value can support a deliberately redeployed v0.2.43 compatibility target, and current startup clears that exact alias before validation.
-- The backend's first bootstrap import migrates the exact historical Render dashboard value `FRONTEND_ORIGIN=https://localhost` only for the SweBudd Render service. The Docker entrypoint still runs migration preparation and `prisma migrate deploy` when the dashboard overrides the image command with `node dist/src/main.js`.
-- Published migration files remain immutable. Startup records the two premature contract migrations as logically applied when necessary, then a forward repair retains the v0.2.43 column and removes its incompatible unique index during the rollback window.
-- Already-running pre-cookie web bundles and Android releases through v0.2.68 remain functional through bounded compatibility windows ending October 1, 2026.
-- Production startup errors identify the exact browser-origin variable that is invalid without weakening the HTTPS/local-network rejection.
+- Password and Google accounts use verification-aware flows, anti-enumeration controls, short-lived tokens, and server-enforced adults-only policy.
+- Scoped, MFA-backed moderation APIs support report workflows, reversible quarantine, session revocation, idempotency, audit records, and outbox events.
+- Resumable multipart uploads enter private quarantine, pass malware and media validation, and complete through bounded asynchronous processing.
+- Database roles, encrypted and signed backups, restore drills, migration safeguards, rollback tooling, and deployment audits are documented and automated.
+- Generated OpenAPI, CI security gates, dependency audits, and fresh-database migration validation cover the release contract.
 
 - Google sign-in binds only by the verified Google subject; a matching local email is never auto-linked.
 - Public post/profile presentation removes precise coordinates, raw provider activity payloads, hidden recap fields, and anonymous author identifiers.
@@ -115,6 +112,9 @@ Important variables:
 - `JWT_REFRESH_SECRET`
 - `JWT_ACCESS_TTL_SECONDS` — access-token lifetime; defaults to `900` (15 minutes), production range 60-3600 seconds
 - `REFRESH_TOKEN_TTL_SECONDS` — refresh-token and login-session lifetime; defaults to `604800` (7 days), production range 3600-2592000 seconds
+- `MINIMUM_ACCOUNT_AGE` — server-enforced minimum age returned by `GET /auth/policy`; defaults to `18`, range 13-120
+- `EMAIL_VERIFICATION_TTL_SECONDS` — lifetime of a single-use email verification token; defaults to `86400` (24 hours), range 300-604800 seconds
+- `EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS` — per-account resend cooldown enforced atomically in PostgreSQL; defaults to `60`, range 30-86400 seconds
 - `FRONTEND_ORIGIN`
 - `ALLOW_LOCAL_ORIGINS` — set to `true` only for local/LAN deployments that need `localhost` or private IP browser origins in addition to `FRONTEND_ORIGIN`
 - `NATIVE_AUTH_ENABLED`, `NATIVE_APP_ORIGIN` — enables the native refresh-token body transport only for the exact Capacitor origin; browser sessions always use the host-only HttpOnly refresh cookie
@@ -175,6 +175,10 @@ npm run openapi:check
 ```
 
 Guarded operations declare the `bearer` security requirement. Register, login, Google login, refresh, password recovery, and health operations are explicitly public.
+
+Email-verification and age-policy behavior, rollout semantics, and endpoint contracts are documented in:
+
+- [`docs/email-verification-and-age-policy.md`](docs/email-verification-and-age-policy.md)
 
 ## Docker/local deployment
 
@@ -535,8 +539,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.2.51-beta -m "v0.2.51-beta"
-git push origin v0.2.51-beta
+git tag -a v0.4.0 -m "SweBudd backend v0.4.0"
+git push origin v0.4.0
 ```
 
 ## Beta caveats

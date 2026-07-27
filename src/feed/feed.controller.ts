@@ -1,10 +1,11 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt.guard';
+import { VerifiedAccountGuard } from '../auth/verified-account.guard';
 import { CurrentUser, AuthUser } from '../common/current-user.decorator';
 import { FeedHashtagQueryDto, FeedQueryDto, FeedViewedDto } from './dto';
 import { FeedService } from './feed.service';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, VerifiedAccountGuard)
 @Controller('feed')
 export class FeedController {
   constructor(private feedService: FeedService) {}

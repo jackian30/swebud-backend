@@ -17,3 +17,6 @@ npm-debug.log*
 *.db
 *.dump
 *.sql.gz
+deployment/backups/
+deployment/.secrets/
+deployment/.deployment-state/

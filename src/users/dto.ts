@@ -28,7 +28,7 @@ export class UpdateMeDto {
   @IsOptionalOrNull() @IsString() profileImageUrl?: string | null;
   @IsOptionalOrNull() @IsString() coverImageUrl?: string | null;
   @IsOptionalOrNull() @IsEnum(UserGender) gender?: UserGender | null;
-  @IsOptionalOrNull() @Type(() => Date) @IsDate() dateOfBirth?: Date | null;
+  @IsOptionalNonNull() @Type(() => Date) @IsDate() dateOfBirth?: Date;
   @IsOptionalOrNull() @IsEnum(ActivityPersona) activityPersona?: ActivityPersona | null;
   @IsOptionalNonNull() @IsArray() @IsEnum(ActivityPersona, { each: true }) activityPersonas?: ActivityPersona[];
   @IsOptionalNonNull() @IsEnum(ProfileVisibility) profileVisibility?: ProfileVisibility;

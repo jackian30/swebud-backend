@@ -4,8 +4,9 @@ import { AuthUser, CurrentUser } from '../common/current-user.decorator';
 import { UuidParam } from '../common/uuid-param.decorator';
 import { BuddyService } from './buddy.service';
 import { BuddyInviteCandidatesQueryDto, BuddyRoomQueryDto, BuddySessionMessageReactionDto, BuddySessionMessageReactionQueryDto, BuddySessionRecapQueryDto, CreateBuddyRoomDto, DiscoverableBuddyQueryDto, InviteBuddyRoomDto, JoinBuddyRoomDto, KickBuddyRoomParticipantDto, NearbyBuddyQueryDto, PinBuddyRoomLocationDto, PinBuddyRoomPersonalLocationDto, SendBuddySessionMessageDto, ShareBuddySessionRecapDto, UpdateBuddyRoomDto, UpdateBuddyRoomParticipantRoleDto, UpdateBuddySessionRecapDto, UpsertBuddySessionDto } from './dto';
+import { VerifiedAccountGuard } from '../auth/verified-account.guard';
 
-@UseGuards(JwtAuthGuard)
+@UseGuards(JwtAuthGuard, VerifiedAccountGuard)
 @Controller('buddy')
 export class BuddyController {
   constructor(private buddy: BuddyService) {}
@@ -23,18 +24,18 @@ export class BuddyController {
   @Patch('recaps/:id') updateRecap(@CurrentUser() user: AuthUser, @UuidParam('id') id: string, @Body() dto: UpdateBuddySessionRecapDto) {
     return this.buddy.updateRecap(user.id, id, dto);
   }
-  @Post('recaps/:id/share') shareRecap(@CurrentUser() user: AuthUser, @UuidParam('id') id: string, @Body() dto: ShareBuddySessionRecapDto) {
+  @Post('recaps/:id/share') @UseGuards(VerifiedAccountGuard) shareRecap(@CurrentUser() user: AuthUser, @UuidParam('id') id: string, @Body() dto: ShareBuddySessionRecapDto) {
     return this.buddy.shareRecap(user.id, id, dto);
   }
 
   @Get('rooms') rooms(@CurrentUser() user: AuthUser, @Query() query: BuddyRoomQueryDto) { return this.buddy.rooms(user.id, query); }
   @Get('rooms/:id') room(@CurrentUser() user: AuthUser, @UuidParam('id') id: string) { return this.buddy.room(user.id, id); }
   @Post('rooms/:id/recap') roomRecap(@CurrentUser() user: AuthUser, @UuidParam('id') id: string) { return this.buddy.roomRecap(user.id, id); }
-  @Post('rooms') createRoom(@CurrentUser() user: AuthUser, @Body() dto: CreateBuddyRoomDto) { return this.buddy.createRoom(user.id, dto); }
+  @Post('rooms') @UseGuards(VerifiedAccountGuard) createRoom(@CurrentUser() user: AuthUser, @Body() dto: CreateBuddyRoomDto) { return this.buddy.createRoom(user.id, dto); }
   @Patch('rooms/:id') updateRoom(@CurrentUser() user: AuthUser, @UuidParam('id') id: string, @Body() dto: UpdateBuddyRoomDto) {
     return this.buddy.updateRoom(user.id, id, dto);
   }
-  @Post('rooms/join') joinRoom(@CurrentUser() user: AuthUser, @Body() dto: JoinBuddyRoomDto) { return this.buddy.joinRoom(user.id, dto); }
+  @Post('rooms/join') @UseGuards(VerifiedAccountGuard) joinRoom(@CurrentUser() user: AuthUser, @Body() dto: JoinBuddyRoomDto) { return this.buddy.joinRoom(user.id, dto); }
   @Get('rooms/:id/invite-candidates') inviteCandidates(@CurrentUser() user: AuthUser, @UuidParam('id') id: string, @Query() query: BuddyInviteCandidatesQueryDto) {
     return this.buddy.inviteCandidates(user.id, id, query.q);
   }
@@ -57,7 +58,7 @@ export class BuddyController {
   @Get('rooms/:id/messages') roomMessages(@CurrentUser() user: AuthUser, @UuidParam('id') id: string) {
     return this.buddy.roomMessages(user.id, id);
   }
-  @Post('rooms/:id/messages') sendRoomMessage(@CurrentUser() user: AuthUser, @UuidParam('id') id: string, @Body() dto: SendBuddySessionMessageDto) {
+  @Post('rooms/:id/messages') @UseGuards(VerifiedAccountGuard) sendRoomMessage(@CurrentUser() user: AuthUser, @UuidParam('id') id: string, @Body() dto: SendBuddySessionMessageDto) {
     return this.buddy.sendRoomMessage(user.id, id, dto);
   }
   @Post('rooms/:id/messages/:messageId/reactions') reactToRoomMessage(@CurrentUser() user: AuthUser, @UuidParam('id') id: string, @UuidParam('messageId') messageId: string, @Body() dto: BuddySessionMessageReactionDto) {

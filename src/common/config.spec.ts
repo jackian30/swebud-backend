@@ -1,5 +1,20 @@
 import { ConfigService } from '@nestjs/config';
-import { accessTokenTtlSeconds, booleanConfig, DEFAULT_ACCESS_TOKEN_TTL_SECONDS, DEFAULT_REFRESH_TOKEN_TTL_SECONDS, refreshTokenTtlSeconds } from './config';
+import {
+  accessTokenTtlSeconds,
+  adminJwtAudience,
+  adminJwtIssuer,
+  ADMIN_JWT_MAX_TTL_SECONDS,
+  booleanConfig,
+  DEFAULT_ACCESS_TOKEN_TTL_SECONDS,
+  DEFAULT_EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS,
+  DEFAULT_EMAIL_VERIFICATION_TTL_SECONDS,
+  DEFAULT_MINIMUM_ACCOUNT_AGE,
+  DEFAULT_REFRESH_TOKEN_TTL_SECONDS,
+  emailVerificationResendCooldownSeconds,
+  emailVerificationTtlSeconds,
+  minimumAccountAge,
+  refreshTokenTtlSeconds,
+} from './config';
 
 function config(values: Record<string, string | undefined>) {
   return {
@@ -40,5 +55,37 @@ describe('config helpers', () => {
   it('rejects refresh-token lifetimes longer than thirty days', () => {
     expect(() => refreshTokenTtlSeconds(config({ REFRESH_TOKEN_TTL_SECONDS: '2592001' })))
       .toThrow('between 3600 and 2592000');
+  });
+
+  it('defaults the public account policy to adults and accepts bounded overrides', () => {
+    expect(minimumAccountAge(config({}))).toBe(DEFAULT_MINIMUM_ACCOUNT_AGE);
+    expect(minimumAccountAge(config({ MINIMUM_ACCOUNT_AGE: '21' }))).toBe(21);
+    expect(() => minimumAccountAge(config({ MINIMUM_ACCOUNT_AGE: '12' })))
+      .toThrow('between 13 and 120');
+  });
+
+  it('bounds email-verification expiry and resend cooldown settings', () => {
+    expect(emailVerificationTtlSeconds(config({}))).toBe(DEFAULT_EMAIL_VERIFICATION_TTL_SECONDS);
+    expect(emailVerificationResendCooldownSeconds(config({})))
+      .toBe(DEFAULT_EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS);
+    expect(emailVerificationTtlSeconds(config({ EMAIL_VERIFICATION_TTL_SECONDS: '3600' }))).toBe(3600);
+    expect(emailVerificationResendCooldownSeconds(config({
+      EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: '120',
+    }))).toBe(120);
+    expect(() => emailVerificationTtlSeconds(config({ EMAIL_VERIFICATION_TTL_SECONDS: '60' })))
+      .toThrow('between 300 and 604800');
+    expect(() => emailVerificationResendCooldownSeconds(config({
+      EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: '10',
+    }))).toThrow('between 30 and 86400');
+  });
+
+  it('uses strict admin JWT identifiers and caps token lifetime at five minutes', () => {
+    expect(ADMIN_JWT_MAX_TTL_SECONDS).toBe(300);
+    expect(adminJwtIssuer(config({}))).toBe('swebudd-admin');
+    expect(adminJwtAudience(config({}))).toBe('swebudd-admin-moderation');
+    expect(adminJwtIssuer(config({ ADMIN_JWT_ISSUER: 'https://identity.example.com/admin' })))
+      .toBe('https://identity.example.com/admin');
+    expect(() => adminJwtAudience(config({ ADMIN_JWT_AUDIENCE: 'bad audience' })))
+      .toThrow('URI-safe identifier');
   });
 });

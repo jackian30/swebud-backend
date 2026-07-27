@@ -4,6 +4,15 @@ import { PrismaService } from '../prisma/prisma.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { AddBuddyGroupParticipantsDto, ChatHistoryQueryDto, ChatMuteDto, ChatPinDto, CreateBuddyGroupChatDto, MessageReactionDto, RegisterChatKeyDto, ReportMessageDto, SendBuddyGroupMessageDto, SendDirectMessageDto, UpdateChatProfileDto } from './dto';
 
+type AccessibleMessage = {
+  senderId: string;
+  recipientId: string | null;
+  groupId: string | null;
+  channelId: string | null;
+  buddyGroupChatId: string | null;
+  moderationStatus: 'active' | 'quarantined';
+};
+
 @Injectable()
 export class ChatService {
   constructor(private prisma: PrismaService, private notifications: NotificationsService) {}
@@ -50,17 +59,36 @@ export class ChatService {
 
   async send(senderId: string, dto: SendDirectMessageDto, trustedReference = false) {
     await this.assertDirectMessagingAllowed(senderId, dto.recipientId);
-    const referenceData = await this.directReferenceData(senderId, dto.recipientId, dto, trustedReference);
     const encryptedPayload = this.directEncryptedPayload(dto);
-    const message = await this.prisma.message.create({
-      data: {
+    const create = async (client: PrismaService | Prisma.TransactionClient) => {
+      if (
+        !trustedReference
+        && dto.referenceType === 'message'
+        && dto.referenceId
+        && !(await this.lockActiveMessage(client, dto.referenceId))
+      ) {
+        throw new BadRequestException('Reply target is no longer available.');
+      }
+      const referenceData = await this.directReferenceData(
         senderId,
-        recipientId: dto.recipientId,
-        ...encryptedPayload,
-        ...referenceData,
-      },
-      include: this.messageInclude(),
-    });
+        dto.recipientId,
+        dto,
+        trustedReference,
+        client,
+      );
+      return client.message.create({
+        data: {
+          senderId,
+          recipientId: dto.recipientId,
+          ...encryptedPayload,
+          ...referenceData,
+        },
+        include: this.messageInclude(),
+      });
+    };
+    const message = !trustedReference && dto.referenceType === 'message' && dto.referenceId
+      ? await this.prisma.$transaction(create)
+      : await create(this.prisma);
     return this.presentMessage(message);
   }
 
@@ -151,6 +179,7 @@ export class ChatService {
     const messages = await this.prisma.message.findMany({
       where: {
         groupId: null,
+        moderationStatus: 'active',
         hiddenBy: { none: { userId } },
         OR: [{ senderId: userId, recipientId: peerId }, { senderId: peerId, recipientId: userId }],
       },
@@ -192,6 +221,7 @@ export class ChatService {
         by: ['senderId'],
         where: {
           groupId: null,
+          moderationStatus: 'active',
           senderId: { in: peerIds },
           recipientId: userId,
           readAt: null,
@@ -277,6 +307,7 @@ export class ChatService {
     const messages = await this.prisma.message.findMany({
       where: {
         buddyGroupChatId: id,
+        moderationStatus: 'active',
         hiddenBy: { none: { userId } },
         ...(blockedPeerIds.length ? { senderId: { notIn: blockedPeerIds } } : {}),
       },
@@ -292,11 +323,23 @@ export class ChatService {
     await this.ensureBuddyGroupMember(userId, id);
     const body = dto.body.trim();
     if (!body) throw new BadRequestException('Message cannot be empty');
-    const referenceData = await this.buddyGroupReferenceData(id, dto);
-    const message = await this.prisma.message.create({
-      data: { senderId: userId, buddyGroupChatId: id, body, ...referenceData },
-      include: this.messageInclude(),
-    });
+    const create = async (client: PrismaService | Prisma.TransactionClient) => {
+      if (
+        dto.referenceType === 'message'
+        && dto.referenceId
+        && !(await this.lockActiveMessage(client, dto.referenceId))
+      ) {
+        throw new BadRequestException('Reply target is no longer available.');
+      }
+      const referenceData = await this.buddyGroupReferenceData(id, dto, client);
+      return client.message.create({
+        data: { senderId: userId, buddyGroupChatId: id, body, ...referenceData },
+        include: this.messageInclude(),
+      });
+    };
+    const message = dto.referenceType === 'message' && dto.referenceId
+      ? await this.prisma.$transaction(create)
+      : await create(this.prisma);
     await this.prisma.buddyGroupChat.update({ where: { id }, data: { updatedAt: new Date() } });
     return this.presentMessage(message);
   }
@@ -307,6 +350,7 @@ export class ChatService {
       this.prisma.message.count({
         where: {
           recipientId: userId,
+          moderationStatus: 'active',
           readAt: null,
           hiddenBy: { none: { userId } },
           ...(mutedPeerIds.size ? { senderId: { notIn: [...mutedPeerIds] } } : {}),
@@ -379,17 +423,22 @@ export class ChatService {
   }
 
   async setMessagePin(userId: string, messageId: string, dto: ChatPinDto) {
-    await this.ensureCanAccessMessage(userId, messageId);
-    if (dto.pinned) {
-      await this.prisma.pinnedMessage.upsert({ where: { userId_messageId: { userId, messageId } }, create: { userId, messageId }, update: {} });
-    } else {
-      await this.prisma.pinnedMessage.deleteMany({ where: { userId, messageId } });
-    }
+    await this.withActiveMessageMutation(userId, messageId, async (tx) => {
+      if (dto.pinned) {
+        await tx.pinnedMessage.upsert({
+          where: { userId_messageId: { userId, messageId } },
+          create: { userId, messageId },
+          update: {},
+        });
+      } else {
+        await tx.pinnedMessage.deleteMany({ where: { userId, messageId } });
+      }
+    });
     return { messageId, pinned: dto.pinned };
   }
 
   async reportMessage(userId: string, messageId: string, dto: ReportMessageDto) {
-    const target = await this.ensureCanAccessMessage(userId, messageId);
+    const target = await this.ensureCanAccessMessage(userId, messageId, { allowQuarantined: true });
     if (target.senderId === userId) throw new BadRequestException('Cannot report your own message');
     return this.prisma.messageReport.upsert({
       where: { messageId_userId: { messageId, userId } },
@@ -401,7 +450,7 @@ export class ChatService {
   async messageInfo(userId: string, messageId: string) {
     await this.ensureCanAccessMessage(userId, messageId);
     const full = await this.prisma.message.findUniqueOrThrow({
-      where: { id: messageId },
+      where: { id: messageId, moderationStatus: 'active' },
       include: { ...this.messageInclude(), pinnedBy: { where: { userId }, select: { userId: true, createdAt: true } } },
     });
     const readBy = full.groupId && full.channelId
@@ -437,6 +486,7 @@ export class ChatService {
       this.prisma.message.findMany({
         where: {
           body: whereText,
+          moderationStatus: 'active',
           groupId: null,
           buddyGroupChatId: null,
           hiddenBy: { none: { userId } },
@@ -450,6 +500,7 @@ export class ChatService {
       this.prisma.message.findMany({
         where: {
           body: whereText,
+          moderationStatus: 'active',
           buddyGroupChat: { members: { some: { userId } } },
           hiddenBy: { none: { userId } },
           ...(blockedPeerIds.length ? { senderId: { notIn: blockedPeerIds } } : {}),
@@ -461,7 +512,8 @@ export class ChatService {
       this.prisma.message.findMany({
         where: {
           body: whereText,
-          group: { members: { some: { userId } } },
+          moderationStatus: 'active',
+          group: { moderationStatus: 'active', members: { some: { userId } } },
           hiddenBy: { none: { userId } },
           ...(blockedPeerIds.length ? { senderId: { notIn: blockedPeerIds } } : {}),
           OR: [
@@ -489,7 +541,10 @@ export class ChatService {
     if (userId === peerId) throw new BadRequestException('Cannot mark your own conversation read');
     await this.ensureNotBlocked(userId, peerId);
     const readAt = new Date();
-    const result = await this.prisma.message.updateMany({ where: { senderId: peerId, recipientId: userId, readAt: null }, data: { readAt } });
+    const result = await this.prisma.message.updateMany({
+      where: { senderId: peerId, recipientId: userId, moderationStatus: 'active', readAt: null },
+      data: { readAt },
+    });
     return { ...(await this.unreadCount(userId)), readAt, readCount: result.count };
   }
 
@@ -501,11 +556,19 @@ export class ChatService {
 
   async react(userId: string, messageId: string, dto: MessageReactionDto) {
     const emoji = this.allowedReaction(dto.emoji);
-    const target = await this.ensureCanAccessMessage(userId, messageId);
-    await this.prisma.$transaction([
-      this.prisma.messageReaction.deleteMany({ where: { messageId, userId } }),
-      this.prisma.messageReaction.create({ data: { messageId, userId, emoji } }),
-    ]);
+    const { target, message } = await this.withActiveMessageMutation(
+      userId,
+      messageId,
+      async (tx, target) => {
+        await tx.messageReaction.deleteMany({ where: { messageId, userId } });
+        await tx.messageReaction.create({ data: { messageId, userId, emoji } });
+        const message = await tx.message.findUniqueOrThrow({
+          where: { id: messageId, moderationStatus: 'active' },
+          include: this.messageInclude(),
+        });
+        return { target, message };
+      },
+    );
     if (target.senderId !== userId) {
       void this.notifications.create({
         userId: target.senderId,
@@ -515,53 +578,58 @@ export class ChatService {
         message: 'reacted to your message',
       });
     }
-    return this.message(messageId);
+    return this.presentMessage(message);
   }
 
   async unreact(userId: string, messageId: string, emoji: string) {
     const normalizedEmoji = this.allowedReaction(emoji);
-    await this.ensureCanAccessMessage(userId, messageId);
-    await this.prisma.messageReaction.deleteMany({ where: { messageId, userId, emoji: normalizedEmoji } });
-    return this.message(messageId);
+    const message = await this.withActiveMessageMutation(userId, messageId, async (tx) => {
+      await tx.messageReaction.deleteMany({ where: { messageId, userId, emoji: normalizedEmoji } });
+      return tx.message.findUniqueOrThrow({
+        where: { id: messageId, moderationStatus: 'active' },
+        include: this.messageInclude(),
+      });
+    });
+    return this.presentMessage(message);
   }
 
   async deleteForMe(userId: string, messageId: string) {
-    await this.ensureCanAccessMessage(userId, messageId);
-    await this.prisma.hiddenMessage.upsert({
-      where: { messageId_userId: { messageId, userId } },
-      create: { messageId, userId },
-      update: {},
-    });
+    await this.withActiveMessageMutation(
+      userId,
+      messageId,
+      (tx) => tx.hiddenMessage.upsert({
+        where: { messageId_userId: { messageId, userId } },
+        create: { messageId, userId },
+        update: {},
+      }),
+    );
     return { ok: true };
   }
 
   async unsendMessage(userId: string, messageId: string) {
-    const message = await this.ensureCanAccessMessage(userId, messageId);
-    if (message.senderId !== userId) throw new ForbiddenException('Only the sender can delete this message');
-    const deletedAt = new Date();
-    await this.prisma.messageReaction.deleteMany({ where: { messageId } });
-    const updated = await this.prisma.message.update({
-      where: { id: messageId },
-      data: {
-        body: '',
-        referenceType: null,
-        referenceId: null,
-        referenceMediaUrl: null,
-        referenceText: null,
-        referenceAuthorName: null,
-        ciphertext: null,
-        nonce: null,
-        encrypted: false,
-        deletedAt,
-        deletedById: userId,
-      },
-      include: this.messageInclude(),
+    return this.withActiveMessageMutation(userId, messageId, async (tx, message) => {
+      if (message.senderId !== userId) throw new ForbiddenException('Only the sender can delete this message');
+      const deletedAt = new Date();
+      await tx.messageReaction.deleteMany({ where: { messageId } });
+      const updated = await tx.message.update({
+        where: { id: messageId, moderationStatus: 'active' },
+        data: {
+          body: '',
+          referenceType: null,
+          referenceId: null,
+          referenceMediaUrl: null,
+          referenceText: null,
+          referenceAuthorName: null,
+          ciphertext: null,
+          nonce: null,
+          encrypted: false,
+          deletedAt,
+          deletedById: userId,
+        },
+        include: this.messageInclude(),
+      });
+      return this.presentMessage(updated);
     });
-    return this.presentMessage(updated);
-  }
-
-  private async message(messageId: string) {
-    return this.presentMessage(await this.prisma.message.findUniqueOrThrow({ where: { id: messageId }, include: this.messageInclude() }));
   }
 
   private allowedReaction(emoji: string) {
@@ -578,20 +646,48 @@ export class ChatService {
     return value;
   }
 
-  private async ensureCanAccessMessage(userId: string, messageId: string) {
-    const message = await this.prisma.message.findUniqueOrThrow({ where: { id: messageId }, select: { senderId: true, recipientId: true, groupId: true, channelId: true, buddyGroupChatId: true } });
+  private async ensureCanAccessMessage(
+    userId: string,
+    messageId: string,
+    options: {
+      allowQuarantined?: boolean;
+      client?: PrismaService | Prisma.TransactionClient;
+    } = {},
+  ) {
+    const client = options.client ?? this.prisma;
+    const message = await client.message.findUniqueOrThrow({
+      where: {
+        id: messageId,
+        ...(!options.allowQuarantined ? { moderationStatus: 'active' as const } : {}),
+      },
+      select: {
+        senderId: true,
+        recipientId: true,
+        groupId: true,
+        channelId: true,
+        buddyGroupChatId: true,
+        moderationStatus: true,
+      },
+    });
     if (message.buddyGroupChatId) {
-      await this.ensureBuddyGroupMember(userId, message.buddyGroupChatId);
+      const member = await client.buddyGroupChatMember.findUnique({
+        where: { buddyGroupChatId_userId: { buddyGroupChatId: message.buddyGroupChatId, userId } },
+        select: { userId: true },
+      });
+      if (!member) throw new ForbiddenException('You are not in this group buddies chat.');
       return message;
     }
     if (!message.groupId) {
       if (message.senderId !== userId && message.recipientId !== userId) throw new ForbiddenException();
       return message;
     }
-    const member = await this.prisma.groupMember.findUnique({ where: { groupId_userId: { groupId: message.groupId, userId } }, select: { role: true } });
+    const member = await client.groupMember.findFirst({
+      where: { groupId: message.groupId, userId, group: { moderationStatus: 'active' } },
+      select: { role: true },
+    });
     if (!member) throw new ForbiddenException();
     if (message.channelId) {
-      const channel = await this.prisma.groupChatChannel.findUniqueOrThrow({
+      const channel = await client.groupChatChannel.findUniqueOrThrow({
         where: { id: message.channelId },
         select: { groupId: true, visibility: true, allowedUsers: { where: { userId }, select: { userId: true } } },
       });
@@ -603,8 +699,42 @@ export class ChatService {
     return message;
   }
 
+  private async withActiveMessageMutation<T>(
+    userId: string,
+    messageId: string,
+    work: (
+      tx: Prisma.TransactionClient,
+      message: AccessibleMessage,
+    ) => Promise<T>,
+  ) {
+    return this.prisma.$transaction(async (tx) => {
+      if (!(await this.lockActiveMessage(tx, messageId))) {
+        throw new ForbiddenException('Quarantined messages can only be changed by an authorized administrator');
+      }
+      const message = await this.ensureCanAccessMessage(userId, messageId, { client: tx });
+      return work(tx, message);
+    });
+  }
+
+  private async lockActiveMessage(
+    client: Pick<Prisma.TransactionClient, '$queryRaw'>,
+    messageId: string,
+  ) {
+    const rows = await client.$queryRaw<{ id: string }[]>(Prisma.sql`
+      SELECT "id"
+      FROM "messages"
+      WHERE "id" = ${messageId}
+        AND "moderation_status" = 'active'::content_moderation_status
+      FOR UPDATE
+    `);
+    return rows.length > 0;
+  }
+
   private async ensureCanAccessDirectMessage(userId: string, messageId: string) {
-    const message = await this.prisma.message.findUniqueOrThrow({ where: { id: messageId }, select: { senderId: true, recipientId: true, groupId: true, buddyGroupChatId: true } });
+    const message = await this.prisma.message.findUniqueOrThrow({
+      where: { id: messageId, moderationStatus: 'active' },
+      select: { senderId: true, recipientId: true, groupId: true, buddyGroupChatId: true },
+    });
     if (message.groupId || message.buddyGroupChatId || !message.recipientId) throw new ForbiddenException('Direct message only');
     if (message.senderId !== userId && message.recipientId !== userId) throw new ForbiddenException();
     return message;
@@ -723,6 +853,7 @@ export class ChatService {
         WHERE message."group_id" IS NULL
           AND message."buddy_group_chat_id" IS NULL
           AND message."recipient_id" IS NOT NULL
+          AND message."moderation_status" = 'active'::content_moderation_status
           AND (message."sender_id" = ${userId} OR message."recipient_id" = ${userId})
           AND NOT EXISTS (
             SELECT 1 FROM "hidden_messages" AS hidden
@@ -738,7 +869,7 @@ export class ChatService {
     const messageIds = ids.map((row) => row.id).filter(Boolean);
     if (!messageIds.length) return [];
     return this.prisma.message.findMany({
-      where: { id: { in: messageIds } },
+      where: { id: { in: messageIds }, moderationStatus: 'active' },
       include: this.messageInclude(),
     });
   }
@@ -811,6 +942,7 @@ export class ChatService {
         ON channel_mute."user_id" = ${userId}
         AND channel_mute."channel_id" = message."channel_id"
       WHERE message."group_id" IS NOT NULL
+        AND message."moderation_status" = 'active'::content_moderation_status
         AND (group_mute."user_id" IS NULL OR group_mute."muted_until" <= NOW())
         AND (channel_mute."user_id" IS NULL OR channel_mute."muted_until" <= NOW())
         AND message."sender_id" <> ${userId}
@@ -844,6 +976,7 @@ export class ChatService {
         ON mute."user_id" = ${userId}
         AND mute."buddy_group_chat_id" = message."buddy_group_chat_id"
       WHERE message."buddy_group_chat_id" IS NOT NULL
+        AND message."moderation_status" = 'active'::content_moderation_status
         AND (mute."user_id" IS NULL OR mute."muted_until" <= NOW())
         AND message."sender_id" <> ${userId}
         AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
@@ -875,6 +1008,7 @@ export class ChatService {
         ON mute."user_id" = ${userId}
         AND mute."buddy_group_chat_id" = message."buddy_group_chat_id"
       WHERE message."buddy_group_chat_id" IS NOT NULL
+        AND message."moderation_status" = 'active'::content_moderation_status
         AND (mute."user_id" IS NULL OR mute."muted_until" <= NOW())
         AND message."sender_id" <> ${userId}
         AND message."created_at" > COALESCE(read_state."last_read_at", member."joined_at")
@@ -932,6 +1066,10 @@ export class ChatService {
   private presentMessage(message: any) {
     const presented = { ...message };
     delete presented.pinnedBy;
+    delete presented.moderationStatus;
+    delete presented.quarantinedAt;
+    delete presented.quarantinedById;
+    delete presented.quarantineReason;
     return {
       ...presented,
       reactions: (message.reactions ?? []).map((reaction: any) => ({
@@ -943,6 +1081,7 @@ export class ChatService {
 
   private buddyGroupInclude(userId?: string) {
     const visibleMessageWhere = userId ? {
+      moderationStatus: 'active' as const,
       hiddenBy: { none: { userId } },
       sender: {
         blocksSent: { none: { blockedId: userId } },
@@ -967,11 +1106,17 @@ export class ChatService {
   private messageInclude() { return { sender: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, recipient: { select: { id: true, displayName: true, username: true, profileImageUrl: true } }, reactions: true } as const; }
   private chatPeerSelect() { return { id: true, displayName: true, username: true, profileImageUrl: true, chatPublicKey: true } as const; }
   private requestInclude() { return { sender: { select: { id: true, displayName: true, username: true, bio: true, profileImageUrl: true, chatPublicKey: true } }, recipient: { select: { id: true, displayName: true, username: true, profileImageUrl: true, chatPublicKey: true } } } as const; }
-  private async directReferenceData(senderId: string, recipientId: string, dto: SendDirectMessageDto, trustedReference = false) {
+  private async directReferenceData(
+    senderId: string,
+    recipientId: string,
+    dto: SendDirectMessageDto,
+    trustedReference = false,
+    client: Pick<Prisma.TransactionClient, 'message'> = this.prisma,
+  ) {
     if (trustedReference) return this.referenceData(dto, true);
     if (dto.referenceType !== 'message' || !dto.referenceId) return {};
-    const target = await this.prisma.message.findUniqueOrThrow({
-      where: { id: dto.referenceId },
+    const target = await client.message.findUniqueOrThrow({
+      where: { id: dto.referenceId, moderationStatus: 'active' },
       select: {
         id: true,
         senderId: true,
@@ -987,14 +1132,20 @@ export class ChatService {
     if (target.groupId || target.buddyGroupChatId || !target.recipientId || !participants.has(target.senderId) || !participants.has(target.recipientId)) {
       throw new BadRequestException('Reply target is not in this conversation.');
     }
-    if (target.deletedAt) throw new BadRequestException('Reply target is no longer available.');
+    if (target.deletedAt) {
+      throw new BadRequestException('Reply target is no longer available.');
+    }
     return this.serverMessageReference(target);
   }
 
-  private async buddyGroupReferenceData(buddyGroupChatId: string, dto: SendBuddyGroupMessageDto) {
+  private async buddyGroupReferenceData(
+    buddyGroupChatId: string,
+    dto: SendBuddyGroupMessageDto,
+    client: Pick<Prisma.TransactionClient, 'message'> = this.prisma,
+  ) {
     if (dto.referenceType !== 'message' || !dto.referenceId) return {};
-    const target = await this.prisma.message.findUniqueOrThrow({
-      where: { id: dto.referenceId },
+    const target = await client.message.findUniqueOrThrow({
+      where: { id: dto.referenceId, moderationStatus: 'active' },
       select: {
         id: true,
         buddyGroupChatId: true,
@@ -1004,7 +1155,9 @@ export class ChatService {
       },
     });
     if (target.buddyGroupChatId !== buddyGroupChatId) throw new BadRequestException('Reply target is not in this group buddies chat.');
-    if (target.deletedAt) throw new BadRequestException('Reply target is no longer available.');
+    if (target.deletedAt) {
+      throw new BadRequestException('Reply target is no longer available.');
+    }
     return this.serverMessageReference(target);
   }
 
