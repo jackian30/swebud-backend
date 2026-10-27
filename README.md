@@ -2,7 +2,7 @@
 
 NestJS + Prisma + PostgreSQL backend for **SweBudd** — a fitness-first social app for posts, salutes, comments, profiles, follows, groups, chat, notifications, hashtags, and local-first beta testing.
 
-Current release: **0.5.0**
+Current release: **0.4.0**
 
 ## Stack
 
@@ -34,13 +34,13 @@ Current release: **0.5.0**
 
 ## Current release notes
 
-0.5.0 keeps the production security and operations foundation for verified accounts and moderation while simplifying media processing:
+0.4.0 delivers the production security and operations foundation for verified accounts, moderation, and media processing:
 
 - Password and Google accounts use verification-aware flows, anti-enumeration controls, short-lived tokens, and server-enforced adults-only policy.
 - Scoped, MFA-backed moderation APIs support report workflows, reversible quarantine, session revocation, idempotency, audit records, and outbox events.
-- The dormant resumable/quarantine upload pipeline is removed; authenticated uploads use bounded temporary disk storage, media validation, canonical re-encoding, and the existing public bucket.
-- Backups now capture that single media store and its replayable metadata; restore drills retain compatibility with signed legacy dual-store archives.
-- Database roles, encrypted and signed backups, migration safeguards, rollback tooling, deployment audits, generated OpenAPI, and CI security gates remain enforced.
+- Authenticated uploads stream through bounded temporary disk storage, media validation, and canonical re-encoding before processed output reaches the existing public bucket.
+- Database roles, encrypted and signed backups, restore drills, migration safeguards, rollback tooling, and deployment audits are documented and automated.
+- Generated OpenAPI, CI security gates, dependency audits, and fresh-database migration validation cover the release contract.
 
 - Google sign-in binds only by the verified Google subject; a matching local email is never auto-linked.
 - Public post/profile presentation removes precise coordinates, raw provider activity payloads, hidden recap fields, and anonymous author identifiers.
@@ -251,7 +251,7 @@ NODE_ENV=production
 MEDIA_STORAGE_DRIVER=s3
 ```
 
-For `v0.5.0`, every new production security/storage dependency must be
+For `v0.4.0`, every new production security/storage dependency must be
 provisioned before redeploying an existing dashboard-managed service. In
 particular:
 
@@ -555,8 +555,8 @@ Then run the full Docker stack and API smokes from the workspace if available.
 Create the release tag only after committing the matching version bump and release changes:
 
 ```bash
-git tag -a v0.5.0 -m "SweBudd backend v0.5.0"
-git push origin v0.5.0
+git tag -a v0.4.0 -m "SweBudd backend v0.4.0"
+git push origin v0.4.0
 ```
 
 ## Beta caveats

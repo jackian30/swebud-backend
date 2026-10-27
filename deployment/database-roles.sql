@@ -114,10 +114,10 @@ BEGIN
 
     SELECT
       protected.rolname,
-      'collation ' || quote_ident(namespace.nspname) || '.' || quote_ident(database_collation.collname)
-    FROM pg_collation AS database_collation
-    JOIN pg_namespace AS namespace ON namespace.oid = database_collation.collnamespace
-    JOIN protected_roles AS protected ON protected.oid = database_collation.collowner
+      'collation ' || quote_ident(namespace.nspname) || '.' || quote_ident(collation.collname)
+    FROM pg_collation AS collation
+    JOIN pg_namespace AS namespace ON namespace.oid = collation.collnamespace
+    JOIN protected_roles AS protected ON protected.oid = collation.collowner
 
     UNION ALL
 
