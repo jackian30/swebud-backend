@@ -24,9 +24,22 @@ function run(command, args, env) {
   });
 }
 
+function boundedInteger(env, key, fallback, minimum, maximum) {
+  const rawValue = env[key];
+  if (rawValue === undefined || rawValue === '') return fallback;
+  if (!/^(0|[1-9]\d*)$/.test(rawValue)) {
+    throw new Error(`${key} must be an integer from ${minimum} to ${maximum}`);
+  }
+  const value = Number(rawValue);
+  if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
+    throw new Error(`${key} must be an integer from ${minimum} to ${maximum}`);
+  }
+  return value;
+}
+
 async function deployMigrations(env) {
-  const attempts = Number.parseInt(env.PRISMA_MIGRATE_ATTEMPTS || '3', 10);
-  const retrySeconds = Number.parseInt(env.PRISMA_MIGRATE_RETRY_SECONDS || '20', 10);
+  const attempts = boundedInteger(env, 'PRISMA_MIGRATE_ATTEMPTS', 3, 1, 10);
+  const retrySeconds = boundedInteger(env, 'PRISMA_MIGRATE_RETRY_SECONDS', 20, 0, 300);
 
   const prepareCode = await run(process.execPath, [prepareCompatibleMigrations], env);
   if (prepareCode !== 0) process.exit(prepareCode);
@@ -82,4 +95,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { deployMigrations, withMaxSearchParam };
+module.exports = { boundedInteger, deployMigrations, withMaxSearchParam };
